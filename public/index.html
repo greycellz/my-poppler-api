@@ -2,13 +2,145 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Upload PDF</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF to PNG Converter API</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      line-height: 1.6;
+      color: #333;
+    }
+    .container {
+      background: #f8f9fa;
+      padding: 30px;
+      border-radius: 8px;
+      border: 1px solid #e9ecef;
+    }
+    h1 {
+      color: #2c3e50;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #6c757d;
+      margin-bottom: 30px;
+    }
+    .upload-section {
+      background: white;
+      padding: 20px;
+      border-radius: 6px;
+      margin-bottom: 30px;
+      border: 1px solid #dee2e6;
+    }
+    input[type="file"] {
+      margin-bottom: 15px;
+      padding: 8px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      width: 100%;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .api-section {
+      background: white;
+      padding: 20px;
+      border-radius: 6px;
+      border: 1px solid #dee2e6;
+    }
+    .endpoint {
+      background: #f8f9fa;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      margin: 5px 0;
+      border-left: 4px solid #007bff;
+    }
+    .method {
+      color: #28a745;
+      font-weight: bold;
+    }
+    .method.delete {
+      color: #dc3545;
+    }
+    .method.get {
+      color: #ffc107;
+    }
+  </style>
 </head>
 <body>
-  <h1>Upload a PDF form</h1>
-  <form action="/upload" method="post" enctype="multipart/form-data">
-    <input type="file" name="pdf" accept="application/pdf" required />
-    <button type="submit">Upload & Convert</button>
-  </form>
+  <div class="container">
+    <h1>PDF to PNG Converter API</h1>
+    <p class="subtitle">Convert PDF documents to PNG images for form analysis</p>
+    
+    <div class="upload-section">
+      <h2>Test Upload</h2>
+      <form action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="pdf" accept=".pdf" required />
+        <button type="submit">Upload & Convert PDF</button>
+      </form>
+      <p><small>Maximum file size: 10MB</small></p>
+    </div>
+
+    <div class="api-section">
+      <h2>API Endpoints</h2>
+      
+      <div class="endpoint">
+        <span class="method">POST</span> /upload
+        <br><small>Convert PDF to PNG images. Returns JSON with image URLs and metadata.</small>
+      </div>
+      
+      <div class="endpoint">
+        <span class="method delete">DELETE</span> /cleanup/:uuid
+        <br><small>Clean up files for a specific UUID after analysis is complete.</small>
+      </div>
+      
+      <div class="endpoint">
+        <span class="method get">GET</span> /cleanup
+        <br><small>Clean up all files older than 1 hour (scheduled cleanup).</small>
+      </div>
+      
+      <div class="endpoint">
+        <span class="method get">GET</span> /health
+        <br><small>Health check endpoint for monitoring service status.</small>
+      </div>
+
+      <h3>Response Format</h3>
+      <pre style="background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 14px;">
+{
+  "success": true,
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "totalPages": 3,
+  "images": [
+    {
+      "page": 1,
+      "filename": "page-1.png",
+      "url": "https://my-poppler-api-production.up.railway.app/output/uuid/page-1.png",
+      "size": 245760
+    }
+  ],
+  "message": "Successfully converted 3 page(s)"
+}</pre>
+
+      <h3>Usage Notes</h3>
+      <ul>
+        <li>Files are automatically cleaned up after 1 hour</li>
+        <li>Each upload gets a unique UUID to prevent conflicts</li>
+        <li>Images are served at 150 DPI for optimal text recognition</li>
+        <li>Supports concurrent uploads from multiple users</li>
+      </ul>
+    </div>
+  </div>
 </body>
 </html>
