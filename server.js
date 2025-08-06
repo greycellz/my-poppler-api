@@ -8,7 +8,21 @@ const { Poppler } = require('node-poppler');
 const app = express();
 const poppler = new Poppler();
 const PORT = process.env.PORT || 3003;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+
+// Environment-aware base URL construction
+const getBaseUrl = () => {
+  // Railway provides RAILWAY_PUBLIC_DOMAIN automatically
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  }
+  
+  // Fallback to localhost for local development
+  return `http://localhost:${PORT}`;
+};
+
+const BASE_URL = getBaseUrl();
+
+console.log(`🌐 Base URL: ${BASE_URL}`);
 
 // Create folders if not exist
 ['uploads', 'output'].forEach(dir => {
@@ -77,6 +91,7 @@ app.post('/upload', upload.single('pdf'), async (req, res) => {
         return numA - numB;
       });
 
+    // Build full URLs using environment-aware base URL
     const imageUrls = outputFiles.map((file, index) => ({
       page: index + 1,
       filename: file,
@@ -85,12 +100,14 @@ app.post('/upload', upload.single('pdf'), async (req, res) => {
     }));
 
     console.log(`✅ PDF converted. UUID: ${uuid}, Pages: ${outputFiles.length}`);
+    console.log(`🔗 Sample URL: ${imageUrls[0]?.url}`);
 
     res.json({
       success: true,
       uuid: uuid,
       totalPages: outputFiles.length,
       images: imageUrls,
+      baseUrl: BASE_URL, // Include base URL for reference
       message: `Successfully converted ${outputFiles.length} page(s)`
     });
 
@@ -202,12 +219,18 @@ app.get('/cleanup', (req, res) => {
   }
 });
 
-// Health check
+// Health check with environment info
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    baseUrl: BASE_URL,
+    environment: {
+      isRailway: !!process.env.RAILWAY_PUBLIC_DOMAIN,
+      railwayDomain: process.env.RAILWAY_PUBLIC_DOMAIN || null,
+      port: PORT
+    }
   });
 });
 
@@ -217,6 +240,13 @@ app.listen(PORT, () => {
   console.log(`🚀 Poppler PDF Converter running at ${BASE_URL}`);
   console.log(`📁 Upload endpoint: POST ${BASE_URL}/upload`);
   console.log(`🗑️ Cleanup endpoint: GET ${BASE_URL}/cleanup`);
+  console.log(`🏥 Health check: GET ${BASE_URL}/health`);
+  
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    console.log(`🚄 Running on Railway: ${process.env.RAILWAY_PUBLIC_DOMAIN}`);
+  } else {
+    console.log(`💻 Running locally on port ${PORT}`);
+  }
 });
 
 // Graceful shutdown
