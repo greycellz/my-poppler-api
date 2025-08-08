@@ -9,7 +9,7 @@ const puppeteer = require('puppeteer');
 
 const app = express();
 const poppler = new Poppler();
-const PORT = process.env.PORT || 3003;
+const PORT = process.env.PORT || 3000; // Keep 3000 to match existing Dockerfile
 
 // Environment-aware base URL construction
 const getBaseUrl = () => {
@@ -120,8 +120,9 @@ async function captureFormScreenshot(url, urlHash, options = {}) {
   const startTime = Date.now();
 
   try {
-    // Launch browser with Railway-optimized settings
-    browser = await puppeteer.launch({
+    // Detect environment and set browser options
+    const isRailway = !!process.env.RAILWAY_PUBLIC_DOMAIN;
+    const browserOptions = {
       headless: true,
       args: [
         '--no-sandbox',
@@ -138,9 +139,22 @@ async function captureFormScreenshot(url, urlHash, options = {}) {
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
         '--memory-pressure-off',
-        '--max_old_space_size=1024'
+        '--max_old_space_size=1024',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor'
       ]
-    });
+    };
+
+    // Use system Chrome on Railway (via Dockerfile)
+    if (isRailway && process.env.PUPPETEER_EXECUTABLE_PATH) {
+      browserOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+      console.log(`🐳 Using system Chrome: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
+    } else {
+      console.log('💻 Using bundled Chromium');
+    }
+
+    // Launch browser with environment-specific settings
+    browser = await puppeteer.launch(browserOptions);
 
     const page = await browser.newPage();
     

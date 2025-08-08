@@ -1,24 +1,31 @@
 {
-    "name": "pdf-poppler-api",
-    "version": "1.0.0",
-    "description": "PDF → PNG page converter using node-poppler and Express",
+    "name": "poppler-puppeteer-api",
+    "version": "1.1.0",
+    "description": "PDF to PNG conversion and URL screenshot service",
     "main": "server.js",
     "scripts": {
-        "start": "node server.js"
+      "start": "node server.js",
+      "dev": "nodemon server.js",
+      "postinstall": "echo 'Skipping Chromium download - using system Chrome'"
     },
     "dependencies": {
-        "express": "^4.18.2",
-        "multer": "^2.0.2",
-        "node-poppler": "^8.0.4",
-        "puppeteer": "^24.16.0",
-        "uuid": "^11.1.0"
+      "express": "^4.18.2",
+      "multer": "^2.0.2",
+      "node-poppler": "^8.0.4",
+      "puppeteer": "^24.16.0",
+      "uuid": "^11.1.0"
+    },
+    "devDependencies": {
+      "@types/uuid": "^10.0.0",
+      "nodemon": "^3.0.2"
     },
     "engines": {
-        "node": ">=18.x"
+      "node": ">=18.0.0"
     },
-    "author": "",
+    "keywords": ["pdf", "png", "conversion", "screenshot", "puppeteer", "forms"],
+    "author": "ChatterForms",
     "license": "MIT",
-    "devDependencies": {
-        "@types/uuid": "^10.0.0"
+    "puppeteer": {
+      "skipDownload": true
     }
-}
+  }
