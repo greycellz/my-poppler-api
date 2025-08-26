@@ -696,6 +696,47 @@ app.post('/submit-form', async (req, res) => {
   }
 });
 
+// ============== FORM RETRIEVAL ENDPOINT ==============
+
+// Get form structure from GCP
+app.get('/form/:formId', async (req, res) => {
+  try {
+    const { formId } = req.params;
+
+    console.log(`📋 Fetching form: ${formId}`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Get form data from Firestore
+    const formData = await gcpClient.getFormStructure(formId);
+
+    if (!formData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    res.json({
+      success: true,
+      form: formData,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Form fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch form',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== ANALYTICS ENDPOINT ==============
 
 // Get form analytics from GCP

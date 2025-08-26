@@ -26,7 +26,13 @@ class GCPClient {
       
       if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
         // Use environment variable (Railway)
-        credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+        try {
+          credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+          console.log('✅ GCP credentials loaded from environment variable');
+        } catch (error) {
+          console.error('❌ Error parsing GCP credentials JSON:', error.message);
+          throw new Error('Invalid GCP credentials JSON format');
+        }
       } else {
         // Use key file (local development)
         const keyPath = path.join(__dirname, 'chatterforms-app-key.json');
@@ -95,6 +101,30 @@ class GCPClient {
       return { success: true, formId };
     } catch (error) {
       console.error('❌ Error storing form structure:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get form structure from Firestore
+   */
+  async getFormStructure(formId) {
+    try {
+      console.log(`📋 Retrieving form structure: ${formId}`);
+      
+      const docRef = this.firestore.collection('forms').doc(formId);
+      const doc = await docRef.get();
+      
+      if (!doc.exists) {
+        console.log(`❌ Form not found: ${formId}`);
+        return null;
+      }
+      
+      const data = doc.data();
+      console.log(`✅ Form structure retrieved: ${formId}`);
+      return data;
+    } catch (error) {
+      console.error(`❌ Failed to retrieve form structure: ${formId}`, error);
       throw error;
     }
   }
