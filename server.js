@@ -562,6 +562,181 @@ app.get('/debug-env', (req, res) => {
   });
 });
 
+// ============== FORM STORAGE ENDPOINT ==============
+
+// Store form structure in GCP
+app.post('/store-form', async (req, res) => {
+  try {
+    const { formData, userId, metadata } = req.body;
+
+    if (!formData) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form data is required'
+      });
+    }
+
+    console.log('📝 Storing form structure in GCP...');
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Generate form ID if not provided
+    const formId = formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Store form structure
+    const result = await gcpClient.storeFormStructure(
+      formId,
+      formData,
+      userId || 'anonymous',
+      {
+        ...metadata,
+        source: 'railway-backend',
+        isHipaa: metadata?.isHipaa || false,
+        isPublished: metadata?.isPublished || false
+      }
+    );
+
+    console.log(`✅ Form structure stored: ${formId}`);
+
+    res.json({
+      success: true,
+      formId,
+      message: 'Form structure stored successfully',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Form storage error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Form storage failed',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== FORM SUBMISSION ENDPOINT ==============
+
+// Submit form data with GCP integration
+app.post('/submit-form', async (req, res) => {
+  try {
+    const { formId, formData, userId, isHipaa, metadata } = req.body;
+
+    if (!formId || !formData) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID and form data are required'
+      });
+    }
+
+    console.log(`📤 Processing form submission: ${formId}`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Generate submission ID
+    const submissionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Get client metadata
+    const clientMetadata = {
+      ipAddress: req.ip || req.connection.remoteAddress,
+      userAgent: req.get('User-Agent'),
+      timestamp: new Date().toISOString(),
+      ...metadata
+    };
+
+    let result;
+
+    if (isHipaa) {
+      // Process as HIPAA-compliant submission
+      result = await gcpClient.processHipaaSubmission(
+        submissionId,
+        formId,
+        formData,
+        userId || 'anonymous',
+        clientMetadata
+      );
+    } else {
+      // Process as regular submission
+      result = await gcpClient.storeFormSubmission(
+        submissionId,
+        formId,
+        formData,
+        userId || 'anonymous',
+        clientMetadata
+      );
+
+      // Also update analytics
+      await gcpClient.updateFormAnalytics(formId, userId || 'anonymous');
+    }
+
+    console.log(`✅ Form submission processed: ${submissionId}`);
+
+    res.json({
+      success: true,
+      submissionId,
+      formId,
+      message: 'Form submitted successfully',
+      isHipaa,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Form submission error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Form submission failed',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== ANALYTICS ENDPOINT ==============
+
+// Get form analytics from GCP
+app.get('/analytics/:formId', async (req, res) => {
+  try {
+    const { formId } = req.params;
+
+    console.log(`📊 Fetching analytics for form: ${formId}`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Get analytics data (this would need to be implemented in GCP client)
+    // For now, return basic analytics
+    const analytics = {
+      formId,
+      submissionsCount: 0, // This would come from BigQuery
+      lastSubmission: null,
+      createdAt: new Date().toISOString(),
+      isHipaa: false,
+      isPublished: true
+    };
+
+    res.json({
+      success: true,
+      analytics,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Analytics fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch analytics',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== GCP INTEGRATION TEST ==============
 
 // Test GCP integration (only in development/testing)
