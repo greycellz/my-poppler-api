@@ -544,6 +544,24 @@ app.get('/cleanup', (req, res) => {
   }
 });
 
+// ============== DEBUG ENDPOINT ==============
+
+// Debug environment variables (remove in production)
+app.get('/debug-env', (req, res) => {
+  res.json({
+    timestamp: new Date().toISOString(),
+    environment: {
+      NODE_ENV: process.env.NODE_ENV,
+      GOOGLE_CLOUD_PROJECT: process.env.GOOGLE_CLOUD_PROJECT,
+      GOOGLE_APPLICATION_CREDENTIALS_JSON: process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ? 'SET' : 'NOT_SET',
+      ENABLE_GCP_TEST: process.env.ENABLE_GCP_TEST,
+      RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN,
+    },
+    hasCredentials: !!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON,
+    credentialsLength: process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ? process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON.length : 0
+  });
+});
+
 // ============== GCP INTEGRATION TEST ==============
 
 // Test GCP integration (only in development/testing)
