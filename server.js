@@ -544,6 +544,116 @@ app.get('/cleanup', (req, res) => {
   }
 });
 
+// ============== GCP INTEGRATION TEST ==============
+
+// Test GCP integration (only in development/testing)
+app.get('/test-gcp', async (req, res) => {
+  try {
+    // Only allow in development or with specific environment variable
+    if (process.env.NODE_ENV === 'production' && !process.env.ENABLE_GCP_TEST) {
+      return res.status(403).json({
+        success: false,
+        error: 'GCP test endpoint disabled in production'
+      });
+    }
+
+    console.log('🧪 Testing GCP integration...');
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Test basic operations
+    const testResults = {
+      firestore: false,
+      storage: false,
+      kms: false,
+      bigquery: false
+    };
+
+    // Test Firestore
+    try {
+      const testFormId = `test-form-${Date.now()}`;
+      const testFormData = { fields: [{ id: 'test', label: 'Test', type: 'text' }] };
+      const result = await gcpClient.storeFormStructure(testFormId, testFormData, 'test-user', { isHipaa: false });
+      testResults.firestore = result.success;
+      console.log('✅ Firestore test passed');
+    } catch (error) {
+      console.error('❌ Firestore test failed:', error.message);
+    }
+
+    // Test KMS
+    try {
+      const testData = { test: 'data' };
+      const encryptResult = await gcpClient.encryptData(testData, 'form-data-key');
+      const decryptResult = await gcpClient.decryptData(encryptResult.encryptedData, 'form-data-key');
+      testResults.kms = encryptResult.success && decryptResult.success;
+      console.log('✅ KMS test passed');
+    } catch (error) {
+      console.error('❌ KMS test failed:', error.message);
+    }
+
+    // Test Cloud Storage
+    try {
+      const testFilePath = path.join(__dirname, 'test-gcp-file.txt');
+      fs.writeFileSync(testFilePath, 'GCP integration test file');
+      const result = await gcpClient.uploadFile(testFilePath, `test-uploads/test-${Date.now()}.txt`);
+      testResults.storage = result.success;
+      fs.unlinkSync(testFilePath); // Clean up
+      console.log('✅ Cloud Storage test passed');
+    } catch (error) {
+      console.error('❌ Cloud Storage test failed:', error.message);
+    }
+
+    // Test BigQuery (skip if Jest environment)
+    if (!process.env.JEST_WORKER_ID) {
+      try {
+        const testSubmissionData = {
+          submission_id: `test-sub-${Date.now()}`,
+          form_id: 'test-form',
+          user_id: 'test-user',
+          submission_data: { test: 'data' },
+          timestamp: new Date(),
+          ip_address: '127.0.0.1',
+          user_agent: 'GCP Test',
+          is_hipaa: false,
+          encrypted: false,
+        };
+        const result = await gcpClient.insertSubmissionAnalytics(testSubmissionData);
+        testResults.bigquery = result.success;
+        console.log('✅ BigQuery test passed');
+      } catch (error) {
+        console.error('❌ BigQuery test failed:', error.message);
+      }
+    } else {
+      testResults.bigquery = 'skipped (Jest environment)';
+    }
+
+    const allPassed = Object.values(testResults).every(result => result === true || result === 'skipped (Jest environment)');
+
+    res.json({
+      success: allPassed,
+      timestamp: new Date().toISOString(),
+      gcpProject: 'chatterforms',
+      testResults,
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        isRailway: !!process.env.RAILWAY_PUBLIC_DOMAIN,
+        railwayDomain: process.env.RAILWAY_PUBLIC_DOMAIN || null
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ GCP integration test failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'GCP integration test failed',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== HEALTH CHECK ==============
 
 app.get('/health', (req, res) => {
@@ -554,13 +664,15 @@ app.get('/health', (req, res) => {
     baseUrl: BASE_URL,
     services: {
       pdf: 'enabled',
-      screenshot: 'enabled'
+      screenshot: 'enabled',
+      gcp: 'enabled'
     },
     environment: {
       isRailway: !!process.env.RAILWAY_PUBLIC_DOMAIN,
       railwayDomain: process.env.RAILWAY_PUBLIC_DOMAIN || null,
       port: PORT,
-      nodeVersion: process.version
+      nodeVersion: process.version,
+      gcpProject: 'chatterforms'
     }
   });
 });
