@@ -8,6 +8,7 @@ const { Storage } = require('@google-cloud/storage');
 const { BigQuery } = require('@google-cloud/bigquery');
 const { KeyManagementServiceClient } = require('@google-cloud/kms');
 const path = require('path');
+const fs = require('fs');
 
 class GCPClient {
   constructor() {
