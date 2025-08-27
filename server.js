@@ -582,8 +582,8 @@ app.post('/store-form', async (req, res) => {
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
 
-    // Generate form ID if not provided
-    const formId = formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // Use the form ID from the form data, or generate a new one
+    const formId = formData.id || formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // Store form structure
     console.log(`📝 Attempting to store form in Firestore: ${formId}`);
