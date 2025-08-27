@@ -586,6 +586,9 @@ app.post('/store-form', async (req, res) => {
     const formId = formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // Store form structure
+    console.log(`📝 Attempting to store form in Firestore: ${formId}`);
+    console.log(`📝 Form data:`, JSON.stringify(formData, null, 2));
+    
     const result = await gcpClient.storeFormStructure(
       formId,
       formData,
@@ -599,6 +602,7 @@ app.post('/store-form', async (req, res) => {
     );
 
     console.log(`✅ Form structure stored: ${formId}`);
+    console.log(`✅ Storage result:`, JSON.stringify(result, null, 2));
 
     res.json({
       success: true,
@@ -710,7 +714,14 @@ app.get('/form/:formId', async (req, res) => {
     const gcpClient = new GCPClient();
 
     // Get form data from Firestore
+    console.log(`📋 Attempting to retrieve form from Firestore: ${formId}`);
+    
     const formData = await gcpClient.getFormStructure(formId);
+
+    console.log(`📋 Form retrieval result:`, formData ? 'Found' : 'Not found');
+    if (formData) {
+      console.log(`📋 Form data keys:`, Object.keys(formData));
+    }
 
     if (!formData) {
       return res.status(404).json({
