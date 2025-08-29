@@ -337,30 +337,52 @@ class GCPClient {
   }
 
   /**
-   * Update form analytics
+   * Update form analytics using BigQuery MERGE statement
    */
   async updateFormAnalytics(formId, userId, submissionCount = 1) {
     try {
-      const dataset = this.bigquery.dataset('form_submissions');
-      const table = dataset.table('form_analytics');
+      const currentTime = new Date();
+      const formName = `Form ${formId}`;
 
+      // Use BigQuery MERGE statement (equivalent to INSERT ... ON DUPLICATE KEY UPDATE)
       const query = `
-        INSERT INTO \`${this.projectId}.form_submissions.form_analytics\`
-        (form_id, form_name, created_at, submissions_count, last_submission, is_hipaa, is_published, user_id)
-        VALUES (@formId, @formName, @createdAt, @submissionsCount, @lastSubmission, @isHipaa, @isPublished, @userId)
-        ON DUPLICATE KEY UPDATE
-        submissions_count = submissions_count + @submissionsCount,
-        last_submission = @lastSubmission
+        MERGE \`${this.projectId}.form_submissions.form_analytics\` AS target
+        USING (
+          SELECT 
+            @formId as form_id,
+            @formName as form_name,
+            @createdAt as created_at,
+            @submissionsCount as submissions_count,
+            @lastSubmission as last_submission,
+            @isHipaa as is_hipaa,
+            @isPublished as is_published,
+            @userId as user_id
+        ) AS source
+        ON target.form_id = source.form_id
+        WHEN MATCHED THEN
+          UPDATE SET
+            submissions_count = target.submissions_count + source.submissions_count,
+            last_submission = source.last_submission,
+            updated_at = CURRENT_TIMESTAMP()
+        WHEN NOT MATCHED THEN
+          INSERT (
+            form_id, form_name, created_at, submissions_count, 
+            last_submission, is_hipaa, is_published, user_id, updated_at
+          )
+          VALUES (
+            source.form_id, source.form_name, source.created_at, source.submissions_count,
+            source.last_submission, source.is_hipaa, source.is_published, source.user_id, CURRENT_TIMESTAMP()
+          )
       `;
 
       const options = {
         query,
         params: {
           formId,
-          formName: `Form ${formId}`,
-          createdAt: new Date(),
+          formName,
+          createdAt: currentTime,
           submissionsCount: submissionCount,
-          lastSubmission: new Date(),
+          lastSubmission: currentTime,
           isHipaa: false,
           isPublished: true,
           userId,
@@ -372,6 +394,49 @@ class GCPClient {
       return { success: true };
     } catch (error) {
       console.error('❌ Error updating form analytics:', error);
+      // Don't throw error - analytics failure shouldn't break form submission
+      console.warn(`⚠️ Analytics update failed for form ${formId}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get form analytics from BigQuery
+   */
+  async getFormAnalytics(formId) {
+    try {
+      const query = `
+        SELECT 
+          form_id,
+          form_name,
+          created_at,
+          submissions_count,
+          last_submission,
+          is_hipaa,
+          is_published,
+          user_id,
+          updated_at
+        FROM \`${this.projectId}.form_submissions.form_analytics\`
+        WHERE form_id = @formId
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `;
+
+      const options = {
+        query,
+        params: { formId },
+      };
+
+      const [rows] = await this.bigquery.query(options);
+      
+      if (rows.length === 0) {
+        return null;
+      }
+
+      console.log(`✅ Form analytics retrieved: ${formId}`);
+      return rows[0];
+    } catch (error) {
+      console.error('❌ Error getting form analytics:', error);
       throw error;
     }
   }

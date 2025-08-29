@@ -678,15 +678,18 @@ app.post('/submit-form', async (req, res) => {
         clientMetadata
       );
 
-      // Analytics update temporarily disabled due to BigQuery permissions
-      // TODO: Re-enable once BigQuery permissions are fixed
-      // try {
-      //   await gcpClient.updateFormAnalytics(formId, userId || 'anonymous');
-      //   console.log(`✅ Analytics updated for form: ${formId}`);
-      // } catch (analyticsError) {
-      //   console.warn(`⚠️ Analytics update failed for form ${formId}:`, analyticsError.message);
-      //   // Don't fail the form submission if analytics fails
-      // }
+      // Update form analytics
+      try {
+        const analyticsResult = await gcpClient.updateFormAnalytics(formId, userId || 'anonymous');
+        if (analyticsResult.success) {
+          console.log(`✅ Analytics updated for form: ${formId}`);
+        } else {
+          console.warn(`⚠️ Analytics update failed for form ${formId}:`, analyticsResult.error);
+        }
+      } catch (analyticsError) {
+        console.warn(`⚠️ Analytics update failed for form ${formId}:`, analyticsError.message);
+        // Don't fail the form submission if analytics fails
+      }
     }
 
     console.log(`✅ Form submission processed: ${submissionId}`);
@@ -772,16 +775,16 @@ app.get('/analytics/:formId', async (req, res) => {
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
 
-    // Get analytics data (this would need to be implemented in GCP client)
-    // For now, return basic analytics
-    const analytics = {
-      formId,
-      submissionsCount: 0, // This would come from BigQuery
-      lastSubmission: null,
-      createdAt: new Date().toISOString(),
-      isHipaa: false,
-      isPublished: true
-    };
+    // Get analytics data from BigQuery
+    const analytics = await gcpClient.getFormAnalytics(formId);
+
+    if (!analytics) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analytics not found for this form',
+        timestamp: new Date().toISOString()
+      });
+    }
 
     res.json({
       success: true,
@@ -1069,6 +1072,7 @@ app.listen(PORT, () => {
   console.log(`📎 File Upload: POST ${BASE_URL}/upload-file`);
   console.log(`📋 Form Submissions: GET ${BASE_URL}/form/:formId/submissions`);
   console.log(`📄 Single Submission: GET ${BASE_URL}/submission/:submissionId`);
+  console.log(`📊 Form Analytics: GET ${BASE_URL}/analytics/:formId`);
   console.log(`🗑️ Cleanup: GET ${BASE_URL}/cleanup`);
   console.log(`🏥 Health: GET ${BASE_URL}/health`);
   
