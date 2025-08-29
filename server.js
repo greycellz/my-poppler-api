@@ -11,6 +11,10 @@ const app = express();
 const poppler = new Poppler();
 const PORT = process.env.PORT || 3000; // Keep 3000 to match existing Dockerfile
 
+// Initialize GCP Client
+const GCPClient = require('./gcp-client');
+const gcpClient = new GCPClient();
+
 // Environment-aware base URL construction
 const getBaseUrl = () => {
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
