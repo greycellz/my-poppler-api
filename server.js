@@ -906,6 +906,68 @@ app.get('/test-gcp', async (req, res) => {
   }
 });
 
+// ============== FILE UPLOAD ENDPOINT ==============
+
+app.post('/upload-file', upload.single('file'), async (req, res) => {
+  try {
+    const { formId, fieldId } = req.body
+    const file = req.file
+    
+    if (!file || !formId || !fieldId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: file, formId, or fieldId'
+      })
+    }
+
+    console.log(`📁 File upload request: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)}MB) for form: ${formId}, field: ${fieldId}`)
+
+    // Generate unique filename with form and field context
+    const timestamp = Date.now()
+    const fileExtension = path.extname(file.originalname)
+    const fileName = `${formId}/${fieldId}/${timestamp}${fileExtension}`
+    
+    // Upload to GCP Cloud Storage
+    const uploadResult = await gcpClient.uploadFile(
+      file.path, 
+      `form-uploads/${fileName}`,
+      'chatterforms-uploads-us-central1'
+    )
+
+    // Clean up local file
+    if (fs.existsSync(file.path)) {
+      fs.unlinkSync(file.path)
+      console.log(`🧹 Cleaned up local file: ${file.path}`)
+    }
+
+    console.log(`✅ File uploaded successfully: ${fileName}`)
+    console.log(`🔗 GCP URL: ${uploadResult.publicUrl}`)
+
+    res.json({
+      success: true,
+      fileUrl: uploadResult.publicUrl,
+      fileName: file.originalname,
+      fileSize: file.size,
+      fileType: file.mimetype
+    })
+
+  } catch (error) {
+    console.error('❌ File upload error:', error)
+    
+    // Clean up local file if it exists
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path)
+      console.log(`🧹 Cleaned up local file after error: ${req.file.path}`)
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'File upload failed',
+      details: error.message
+    })
+  }
+})
+
 // ============== HEALTH CHECK ==============
 
 app.get('/health', (req, res) => {
@@ -917,7 +979,8 @@ app.get('/health', (req, res) => {
     services: {
       pdf: 'enabled',
       screenshot: 'enabled',
-      gcp: 'enabled'
+      gcp: 'enabled',
+      fileUpload: 'enabled'
     },
     environment: {
       isRailway: !!process.env.RAILWAY_PUBLIC_DOMAIN,
@@ -935,6 +998,7 @@ app.listen(PORT, () => {
   console.log(`🚀 PDF & Screenshot Service running at ${BASE_URL}`);
   console.log(`📁 PDF Upload: POST ${BASE_URL}/upload`);
   console.log(`📸 Screenshot: POST ${BASE_URL}/screenshot`);
+  console.log(`📎 File Upload: POST ${BASE_URL}/upload-file`);
   console.log(`🗑️ Cleanup: GET ${BASE_URL}/cleanup`);
   console.log(`🏥 Health: GET ${BASE_URL}/health`);
   
