@@ -29,6 +29,49 @@ railway up
 
 Set these in your Railway project dashboard:
 
+## 📊 BigQuery Setup for Analytics
+
+### **1. Create BigQuery Dataset**
+```bash
+# Create the dataset
+bq mk --dataset chatterforms:form_submissions
+```
+
+### **2. Create Analytics Table**
+```sql
+-- Run this in BigQuery Console or bq CLI
+CREATE TABLE `chatterforms.form_submissions.form_analytics` (
+  form_id STRING NOT NULL,
+  form_name STRING,
+  created_at TIMESTAMP,
+  submissions_count INT64 DEFAULT 0,
+  last_submission TIMESTAMP,
+  is_hipaa BOOL DEFAULT FALSE,
+  is_published BOOL DEFAULT TRUE,
+  user_id STRING
+);
+```
+
+### **3. Set Up Service Account Permissions**
+```bash
+# Replace SERVICE_ACCOUNT_EMAIL with your actual service account email
+gcloud projects add-iam-policy-binding chatterforms \
+    --member="serviceAccount:SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/bigquery.jobUser"
+
+gcloud projects add-iam-policy-binding chatterforms \
+    --member="serviceAccount:SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/bigquery.dataEditor"
+```
+
+### **4. Verify BigQuery Access**
+```bash
+# Test BigQuery access
+curl https://your-railway-domain.railway.app/test-gcp
+```
+
+Expected response should include `"bigquery": true`
+
 ### **GCP Configuration**
 ```env
 GOOGLE_CLOUD_PROJECT=chatterforms
@@ -61,7 +104,7 @@ ENABLE_GCP_TEST=true  # Only if you want to test GCP integration
 ### **✅ GCP Setup Complete**
 - [ ] Service accounts created with proper permissions
 - [ ] Firestore database created
-- [ ] BigQuery tables created
+- [ ] BigQuery dataset and tables created
 - [ ] Cloud Storage buckets created
 - [ ] KMS keys created
 
@@ -141,6 +184,28 @@ Error: chatterforms-app@chatterforms.iam.gserviceaccount.com does not have permi
 ```bash
 gcloud projects get-iam-policy chatterforms
 ```
+
+#### **3. BigQuery Analytics Errors**
+```
+Error: Access Denied: Project chatterforms: User does not have bigquery.jobs.create permission
+```
+
+**Solution**: Add BigQuery roles to your service account:
+```bash
+# Replace SERVICE_ACCOUNT_EMAIL with your actual service account email
+gcloud projects add-iam-policy-binding chatterforms \
+    --member="serviceAccount:SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/bigquery.jobUser"
+
+gcloud projects add-iam-policy-binding chatterforms \
+    --member="serviceAccount:SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/bigquery.dataEditor"
+```
+
+**Required BigQuery Roles:**
+- `bigquery.jobUser` - Required for running queries
+- `bigquery.dataEditor` - Required for inserting/updating data
+- `bigquery.user` - Required for reading data
 
 #### **3. Service Not Starting**
 ```bash

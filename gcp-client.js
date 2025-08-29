@@ -29,6 +29,7 @@ class GCPClient {
         try {
           credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
           console.log('✅ GCP credentials loaded from environment variable');
+          console.log('🔑 Service Account Email:', credentials.client_email);
         } catch (error) {
           console.error('❌ Error parsing GCP credentials JSON:', error.message);
           throw new Error('Invalid GCP credentials JSON format');
@@ -362,16 +363,15 @@ class GCPClient {
         WHEN MATCHED THEN
           UPDATE SET
             submissions_count = target.submissions_count + source.submissions_count,
-            last_submission = source.last_submission,
-            updated_at = CURRENT_TIMESTAMP()
+            last_submission = source.last_submission
         WHEN NOT MATCHED THEN
           INSERT (
             form_id, form_name, created_at, submissions_count, 
-            last_submission, is_hipaa, is_published, user_id, updated_at
+            last_submission, is_hipaa, is_published, user_id
           )
           VALUES (
             source.form_id, source.form_name, source.created_at, source.submissions_count,
-            source.last_submission, source.is_hipaa, source.is_published, source.user_id, CURRENT_TIMESTAMP()
+            source.last_submission, source.is_hipaa, source.is_published, source.user_id
           )
       `;
 
@@ -414,11 +414,10 @@ class GCPClient {
           last_submission,
           is_hipaa,
           is_published,
-          user_id,
-          updated_at
+          user_id
         FROM \`${this.projectId}.form_submissions.form_analytics\`
         WHERE form_id = @formId
-        ORDER BY updated_at DESC
+        ORDER BY last_submission DESC
         LIMIT 1
       `;
 
