@@ -130,15 +130,96 @@ class GCPClient {
   }
 
   /**
+   * Get submission with file associations from Firestore
+   */
+  async getSubmissionWithFiles(submissionId) {
+    try {
+      console.log(`📋 Retrieving submission with files: ${submissionId}`);
+      
+      const docRef = this.firestore.collection('submissions').doc(submissionId);
+      const doc = await docRef.get();
+      
+      if (!doc.exists) {
+        console.log(`❌ Submission not found: ${submissionId}`);
+        return null;
+      }
+      
+      const data = doc.data();
+      console.log(`✅ Submission retrieved: ${submissionId}`);
+      return {
+        ...data,
+        fileAssociations: data.file_associations || []
+      };
+    } catch (error) {
+      console.error(`❌ Failed to retrieve submission: ${submissionId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all submissions for a form with file associations
+   */
+  async getFormSubmissionsWithFiles(formId) {
+    try {
+      console.log(`📋 Retrieving submissions for form: ${formId}`);
+      
+      const snapshot = await this.firestore
+        .collection('submissions')
+        .where('form_id', '==', formId)
+        .orderBy('timestamp', 'desc')
+        .get();
+
+      const submissions = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        submissions.push({
+          ...data,
+          fileAssociations: data.file_associations || []
+        });
+      });
+
+      console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
+      return submissions;
+    } catch (error) {
+      console.error(`❌ Failed to retrieve form submissions: ${formId}`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Store form submission in Firestore
    */
   async storeFormSubmission(submissionId, formId, formData, userId, metadata = {}) {
     try {
+      // Extract file information from form data for easier retrieval
+      const fileAssociations = [];
+      const processedFormData = { ...formData };
+      
+      // Look for file fields in the form data
+      Object.keys(formData).forEach(fieldId => {
+        const fieldData = formData[fieldId];
+        if (fieldData && typeof fieldData === 'object' && fieldData.gcpUrl) {
+          // This is a file field with GCP URL
+          fileAssociations.push({
+            fieldId,
+            fileName: fieldData.fileName,
+            fileSize: fieldData.fileSize,
+            fileType: fieldData.fileType,
+            gcpUrl: fieldData.gcpUrl,
+            uploadedAt: fieldData.uploadedAt
+          });
+          
+          // Keep the file data in submission_data for backward compatibility
+          // but also store it in a dedicated field for easy access
+        }
+      });
+
       const submissionDoc = {
         submission_id: submissionId,
         form_id: formId,
         user_id: userId,
-        submission_data: formData,
+        submission_data: processedFormData,
+        file_associations: fileAssociations, // Dedicated field for file associations
         timestamp: new Date(),
         ip_address: metadata.ipAddress,
         user_agent: metadata.userAgent,
@@ -152,6 +233,9 @@ class GCPClient {
         .set(submissionDoc);
 
       console.log(`✅ Form submission stored: ${submissionId}`);
+      if (fileAssociations.length > 0) {
+        console.log(`📎 File associations: ${fileAssociations.length} files linked to submission`);
+      }
       return { success: true, submissionId };
     } catch (error) {
       console.error('❌ Error storing form submission:', error);

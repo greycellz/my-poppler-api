@@ -910,6 +910,70 @@ app.get('/test-gcp', async (req, res) => {
   }
 });
 
+// ============== SUBMISSION RETRIEVAL ENDPOINTS ==============
+
+// Get submission with file associations
+app.get('/submission/:submissionId', async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+
+    console.log(`📋 Fetching submission: ${submissionId}`);
+    
+    const submission = await gcpClient.getSubmissionWithFiles(submissionId);
+
+    if (!submission) {
+      return res.status(404).json({
+        success: false,
+        error: 'Submission not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    res.json({
+      success: true,
+      submission,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Submission retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve submission',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Get all submissions for a form with file associations
+app.get('/form/:formId/submissions', async (req, res) => {
+  try {
+    const { formId } = req.params;
+
+    console.log(`📋 Fetching submissions for form: ${formId}`);
+    
+    const submissions = await gcpClient.getFormSubmissionsWithFiles(formId);
+
+    res.json({
+      success: true,
+      formId,
+      submissions,
+      count: submissions.length,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Form submissions retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve form submissions',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== FILE UPLOAD ENDPOINT ==============
 
 app.post('/upload-file', upload.single('file'), async (req, res) => {
@@ -1003,6 +1067,8 @@ app.listen(PORT, () => {
   console.log(`📁 PDF Upload: POST ${BASE_URL}/upload`);
   console.log(`📸 Screenshot: POST ${BASE_URL}/screenshot`);
   console.log(`📎 File Upload: POST ${BASE_URL}/upload-file`);
+  console.log(`📋 Form Submissions: GET ${BASE_URL}/form/:formId/submissions`);
+  console.log(`📄 Single Submission: GET ${BASE_URL}/submission/:submissionId`);
   console.log(`🗑️ Cleanup: GET ${BASE_URL}/cleanup`);
   console.log(`🏥 Health: GET ${BASE_URL}/health`);
   
