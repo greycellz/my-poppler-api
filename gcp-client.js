@@ -440,6 +440,76 @@ class GCPClient {
     }
   }
 
+  /**
+   * Get all analytics for a specific user
+   */
+  async getUserAnalytics(userId) {
+    try {
+      const query = `
+        SELECT 
+          form_id,
+          form_name,
+          created_at,
+          submissions_count,
+          last_submission,
+          is_hipaa,
+          is_published,
+          user_id
+        FROM \`${this.projectId}.form_submissions.form_analytics\`
+        WHERE user_id = @userId
+        ORDER BY last_submission DESC
+      `;
+
+      const options = {
+        query,
+        params: { userId },
+      };
+
+      const [rows] = await this.bigquery.query(options);
+      
+      console.log(`✅ User analytics retrieved for: ${userId} (${rows.length} forms)`);
+      return rows;
+    } catch (error) {
+      console.error('❌ Error getting user analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all analytics data (for admin purposes)
+   */
+  async getAllAnalytics(limit = 100) {
+    try {
+      const query = `
+        SELECT 
+          form_id,
+          form_name,
+          created_at,
+          submissions_count,
+          last_submission,
+          is_hipaa,
+          is_published,
+          user_id
+        FROM \`${this.projectId}.form_submissions.form_analytics\`
+        ORDER BY last_submission DESC
+        LIMIT @limit
+      `;
+
+      const options = {
+        query,
+        params: { limit },
+      };
+
+      const [rows] = await this.bigquery.query(options);
+      
+      console.log(`✅ All analytics retrieved (${rows.length} forms)`);
+      return rows;
+    } catch (error) {
+      console.error('❌ Error getting all analytics:', error);
+      throw error;
+    }
+  }
+
   // ============== KMS OPERATIONS ==============
 
   /**

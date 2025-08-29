@@ -803,6 +803,66 @@ app.get('/analytics/:formId', async (req, res) => {
   }
 });
 
+// ============== USER ANALYTICS ENDPOINT ==============
+
+// Get all analytics for a specific user
+app.get('/analytics/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    console.log(`📊 Fetching analytics for user: ${userId}`);
+    
+    const analytics = await gcpClient.getUserAnalytics(userId);
+
+    res.json({
+      success: true,
+      userId,
+      analytics,
+      count: analytics.length,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ User analytics fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user analytics',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== ALL ANALYTICS ENDPOINT ==============
+
+// Get all analytics data (admin endpoint)
+app.get('/analytics', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+
+    console.log(`📊 Fetching all analytics (limit: ${limit})`);
+    
+    const analytics = await gcpClient.getAllAnalytics(limit);
+
+    res.json({
+      success: true,
+      analytics,
+      count: analytics.length,
+      limit,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ All analytics fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch all analytics',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== GCP INTEGRATION TEST ==============
 
 // Test GCP integration (only in development/testing)
@@ -1073,6 +1133,8 @@ app.listen(PORT, () => {
   console.log(`📋 Form Submissions: GET ${BASE_URL}/form/:formId/submissions`);
   console.log(`📄 Single Submission: GET ${BASE_URL}/submission/:submissionId`);
   console.log(`📊 Form Analytics: GET ${BASE_URL}/analytics/:formId`);
+  console.log(`👤 User Analytics: GET ${BASE_URL}/analytics/user/:userId`);
+  console.log(`📈 All Analytics: GET ${BASE_URL}/analytics?limit=100`);
   console.log(`🗑️ Cleanup: GET ${BASE_URL}/cleanup`);
   console.log(`🏥 Health: GET ${BASE_URL}/health`);
   
