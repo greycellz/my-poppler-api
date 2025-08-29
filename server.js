@@ -674,14 +674,15 @@ app.post('/submit-form', async (req, res) => {
         clientMetadata
       );
 
-      // Also update analytics (optional - don't fail if this doesn't work)
-      try {
-        await gcpClient.updateFormAnalytics(formId, userId || 'anonymous');
-        console.log(`✅ Analytics updated for form: ${formId}`);
-      } catch (analyticsError) {
-        console.warn(`⚠️ Analytics update failed for form ${formId}:`, analyticsError.message);
-        // Don't fail the form submission if analytics fails
-      }
+      // Analytics update temporarily disabled due to BigQuery permissions
+      // TODO: Re-enable once BigQuery permissions are fixed
+      // try {
+      //   await gcpClient.updateFormAnalytics(formId, userId || 'anonymous');
+      //   console.log(`✅ Analytics updated for form: ${formId}`);
+      // } catch (analyticsError) {
+      //   console.warn(`⚠️ Analytics update failed for form ${formId}:`, analyticsError.message);
+      //   // Don't fail the form submission if analytics fails
+      // }
     }
 
     console.log(`✅ Form submission processed: ${submissionId}`);
