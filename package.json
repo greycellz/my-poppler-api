@@ -1,7 +1,7 @@
 {
-    "name": "poppler-puppeteer-api",
+    "name": "chatterforms-api",
     "version": "1.1.0",
-    "description": "PDF to PNG conversion and URL screenshot service",
+    "description": "ChatterForms backend API",
     "main": "server.js",
     "scripts": {
         "start": "node server.js",
