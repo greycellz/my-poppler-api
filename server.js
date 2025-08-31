@@ -11,6 +11,9 @@ const app = express();
 const poppler = new Poppler();
 const PORT = process.env.PORT || 3000; // Keep 3000 to match existing Dockerfile
 
+// Trust proxy for Railway deployment (fixes rate limiter warnings)
+app.set('trust proxy', 1);
+
 // Initialize GCP Client
 const GCPClient = require('./gcp-client');
 const gcpClient = new GCPClient();
