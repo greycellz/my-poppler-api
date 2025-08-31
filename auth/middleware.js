@@ -77,7 +77,7 @@ const authRateLimiter = createRateLimiter(
 
 const signupRateLimiter = createRateLimiter(
   60 * 60 * 1000, // 1 hour
-  3, // 3 signup attempts
+  5, // 5 signup attempts
   'Too many signup attempts, please try again in 1 hour'
 )
 
