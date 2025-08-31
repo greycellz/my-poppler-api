@@ -37,7 +37,10 @@ const comparePassword = async (password, hash) => {
  */
 const generateToken = (userId, email) => {
   try {
-    return jwt.sign(
+    console.log('🔑 Generating token for user:', userId, email)
+    console.log('🔑 JWT_SECRET length:', JWT_SECRET ? JWT_SECRET.length : 'undefined')
+    
+    const token = jwt.sign(
       { 
         userId, 
         email,
@@ -47,8 +50,11 @@ const generateToken = (userId, email) => {
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     )
+    
+    console.log('✅ Token generated successfully, length:', token.length)
+    return token
   } catch (error) {
-    console.error('Token generation error:', error)
+    console.error('❌ Token generation error:', error)
     throw new Error('Failed to generate token')
   }
 }
