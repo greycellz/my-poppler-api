@@ -22,17 +22,21 @@ router.post('/signup',
       .withMessage('Password must be at least 8 characters long')
       .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
       .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
-    body('name')
+    body('firstName')
       .trim()
-      .isLength({ min: 2, max: 50 })
-      .withMessage('Name must be between 2 and 50 characters')
+      .isLength({ min: 1, max: 30 })
+      .withMessage('First name must be between 1 and 30 characters'),
+    body('lastName')
+      .trim()
+      .isLength({ min: 1, max: 30 })
+      .withMessage('Last name must be between 1 and 30 characters')
   ],
   validateRequest,
   async (req, res) => {
     try {
-      const { email, password, name } = req.body
+      const { email, password, firstName, lastName } = req.body
 
-      const result = await userManager.createUser(email, password, name)
+      const result = await userManager.createUser(email, password, firstName, lastName)
 
       res.status(201).json({
         success: true,
@@ -40,6 +44,8 @@ router.post('/signup',
         data: {
           userId: result.userId,
           email: result.email,
+          firstName: result.firstName,
+          lastName: result.lastName,
           name: result.name
         }
       })

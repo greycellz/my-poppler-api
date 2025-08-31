@@ -14,7 +14,7 @@ const gcpClient = new GCPClient()
 /**
  * Create a new user
  */
-const createUser = async (email, password, name) => {
+const createUser = async (email, password, firstName, lastName) => {
   try {
     // Validate input
     if (!isValidEmail(email)) {
@@ -39,7 +39,9 @@ const createUser = async (email, password, name) => {
     const userData = {
       email: email.toLowerCase(),
       passwordHash,
-      name,
+      firstName,
+      lastName,
+      name: `${firstName} ${lastName}`, // Keep name for backward compatibility
       emailVerified: false,
       createdAt: new Date(),
       lastLoginAt: null,
@@ -59,7 +61,9 @@ const createUser = async (email, password, name) => {
       success: true,
       userId,
       email,
-      name,
+      firstName,
+      lastName,
+      name: `${firstName} ${lastName}`,
       verificationToken
     }
   } catch (error) {
@@ -101,6 +105,8 @@ const authenticateUser = async (email, password) => {
       user: {
         id: user.id,
         email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
         name: user.name,
         emailVerified: user.emailVerified,
         plan: user.plan,
