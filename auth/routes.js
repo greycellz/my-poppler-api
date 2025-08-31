@@ -1,6 +1,6 @@
 const express = require('express')
 const { body } = require('express-validator')
-const { authRateLimiter, signupRateLimiter, passwordResetRateLimiter } = require('./middleware')
+const { authenticateToken, authRateLimiter, signupRateLimiter, passwordResetRateLimiter } = require('./middleware')
 const { validateRequest } = require('./utils')
 const userManager = require('./userManager')
 
@@ -247,7 +247,7 @@ router.post('/migrate-forms',
  * GET /auth/session
  * Get current user session
  */
-router.get('/session', async (req, res) => {
+router.get('/session', authenticateToken, async (req, res) => {
   try {
     const userId = req.user?.userId
 
