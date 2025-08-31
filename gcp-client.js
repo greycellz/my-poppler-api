@@ -604,6 +604,305 @@ class GCPClient {
       throw error;
     }
   }
+
+  // ============== USER MANAGEMENT ==============
+
+  /**
+   * Create a new user
+   */
+  async createUser(userData) {
+    try {
+      const userRef = this.firestore.collection('users').doc();
+      const userId = userRef.id;
+      
+      await userRef.set({
+        id: userId,
+        ...userData,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+
+      console.log(`✅ User created: ${userId}`);
+      return userId;
+    } catch (error) {
+      console.error('❌ Error creating user:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user by email
+   */
+  async getUserByEmail(email) {
+    try {
+      const snapshot = await this.firestore
+        .collection('users')
+        .where('email', '==', email.toLowerCase())
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) {
+        return null;
+      }
+
+      const doc = snapshot.docs[0];
+      return { id: doc.id, ...doc.data() };
+    } catch (error) {
+      console.error('❌ Error getting user by email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user by ID
+   */
+  async getUserById(userId) {
+    try {
+      const doc = await this.firestore
+        .collection('users')
+        .doc(userId)
+        .get();
+
+      if (!doc.exists) {
+        return null;
+      }
+
+      return { id: doc.id, ...doc.data() };
+    } catch (error) {
+      console.error('❌ Error getting user by ID:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update user last login
+   */
+  async updateUserLastLogin(userId) {
+    try {
+      await this.firestore
+        .collection('users')
+        .doc(userId)
+        .update({
+          lastLoginAt: new Date(),
+          updatedAt: new Date()
+        });
+
+      console.log(`✅ User last login updated: ${userId}`);
+    } catch (error) {
+      console.error('❌ Error updating user last login:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update user email verification status
+   */
+  async updateUserEmailVerification(userId, isVerified) {
+    try {
+      await this.firestore
+        .collection('users')
+        .doc(userId)
+        .update({
+          emailVerified: isVerified,
+          status: isVerified ? 'active' : 'pending',
+          updatedAt: new Date()
+        });
+
+      console.log(`✅ User email verification updated: ${userId}`);
+    } catch (error) {
+      console.error('❌ Error updating user email verification:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update user password
+   */
+  async updateUserPassword(userId, passwordHash) {
+    try {
+      await this.firestore
+        .collection('users')
+        .doc(userId)
+        .update({
+          passwordHash,
+          updatedAt: new Date()
+        });
+
+      console.log(`✅ User password updated: ${userId}`);
+    } catch (error) {
+      console.error('❌ Error updating user password:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Store email verification token
+   */
+  async storeEmailVerificationToken(userId, email, token) {
+    try {
+      await this.firestore
+        .collection('emailVerificationTokens')
+        .doc(token)
+        .set({
+          userId,
+          email,
+          token,
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+        });
+
+      console.log(`✅ Email verification token stored: ${token}`);
+    } catch (error) {
+      console.error('❌ Error storing email verification token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get email verification by token
+   */
+  async getEmailVerificationByToken(token) {
+    try {
+      const doc = await this.firestore
+        .collection('emailVerificationTokens')
+        .doc(token)
+        .get();
+
+      if (!doc.exists) {
+        return null;
+      }
+
+      return doc.data();
+    } catch (error) {
+      console.error('❌ Error getting email verification token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete email verification token
+   */
+  async deleteEmailVerificationToken(token) {
+    try {
+      await this.firestore
+        .collection('emailVerificationTokens')
+        .doc(token)
+        .delete();
+
+      console.log(`✅ Email verification token deleted: ${token}`);
+    } catch (error) {
+      console.error('❌ Error deleting email verification token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Store password reset token
+   */
+  async storePasswordResetToken(userId, email, token) {
+    try {
+      await this.firestore
+        .collection('passwordResetTokens')
+        .doc(token)
+        .set({
+          userId,
+          email,
+          token,
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+        });
+
+      console.log(`✅ Password reset token stored: ${token}`);
+    } catch (error) {
+      console.error('❌ Error storing password reset token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get password reset by token
+   */
+  async getPasswordResetByToken(token) {
+    try {
+      const doc = await this.firestore
+        .collection('passwordResetTokens')
+        .doc(token)
+        .get();
+
+      if (!doc.exists) {
+        return null;
+      }
+
+      return doc.data();
+    } catch (error) {
+      console.error('❌ Error getting password reset token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete password reset token
+   */
+  async deletePasswordResetToken(token) {
+    try {
+      await this.firestore
+        .collection('passwordResetTokens')
+        .doc(token)
+        .delete();
+
+      console.log(`✅ Password reset token deleted: ${token}`);
+    } catch (error) {
+      console.error('❌ Error deleting password reset token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Migrate anonymous forms to user account
+   */
+  async migrateAnonymousForms(userId, anonymousSessionId) {
+    try {
+      // Get anonymous forms
+      const snapshot = await this.firestore
+        .collection('forms')
+        .where('anonymousSessionId', '==', anonymousSessionId)
+        .get();
+
+      let migratedForms = 0;
+      const batch = this.firestore.batch();
+
+      snapshot.docs.forEach(doc => {
+        batch.update(doc.ref, {
+          userId,
+          isAnonymous: false,
+          anonymousSessionId: null,
+          migratedAt: new Date(),
+          updatedAt: new Date()
+        });
+        migratedForms++;
+      });
+
+      await batch.commit();
+
+      // Update user record
+      await this.firestore
+        .collection('users')
+        .doc(userId)
+        .update({
+          anonymousFormsMigrated: true,
+          updatedAt: new Date()
+        });
+
+      console.log(`✅ Migrated ${migratedForms} forms for user: ${userId}`);
+      return {
+        migratedForms,
+        totalForms: snapshot.size
+      };
+    } catch (error) {
+      console.error('❌ Error migrating anonymous forms:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = GCPClient;

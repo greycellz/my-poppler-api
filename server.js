@@ -1099,6 +1099,14 @@ app.post('/upload-file', upload.single('file'), async (req, res) => {
   }
 })
 
+// ============== AUTHENTICATION ROUTES ==============
+
+// Import authentication routes
+const authRoutes = require('./auth/routes');
+
+// Mount authentication routes
+app.use('/auth', authRoutes);
+
 // ============== HEALTH CHECK ==============
 
 app.get('/health', (req, res) => {
@@ -1126,7 +1134,7 @@ app.get('/health', (req, res) => {
 // ============== SERVER STARTUP ==============
 
 app.listen(PORT, () => {
-  console.log(`🚀 PDF & Screenshot Service running at ${BASE_URL}`);
+  console.log(`🚀 ChatterForms API running at ${BASE_URL}`);
   console.log(`📁 PDF Upload: POST ${BASE_URL}/upload`);
   console.log(`📸 Screenshot: POST ${BASE_URL}/screenshot`);
   console.log(`📎 File Upload: POST ${BASE_URL}/upload-file`);
@@ -1136,6 +1144,13 @@ app.listen(PORT, () => {
   console.log(`👤 User Analytics: GET ${BASE_URL}/analytics/user/:userId`);
   console.log(`📈 All Analytics: GET ${BASE_URL}/analytics?limit=100`);
   console.log(`🗑️ Cleanup: GET ${BASE_URL}/cleanup`);
+  console.log(`🔐 Auth Signup: POST ${BASE_URL}/auth/signup`);
+  console.log(`🔑 Auth Login: POST ${BASE_URL}/auth/login`);
+  console.log(`✅ Email Verify: POST ${BASE_URL}/auth/verify-email`);
+  console.log(`🔄 Password Reset: POST ${BASE_URL}/auth/request-reset`);
+  console.log(`🔒 Reset Password: POST ${BASE_URL}/auth/reset-password`);
+  console.log(`📦 Form Migration: POST ${BASE_URL}/auth/migrate-forms`);
+  console.log(`👤 Session Check: GET ${BASE_URL}/auth/session`);
   console.log(`🏥 Health: GET ${BASE_URL}/health`);
   
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
