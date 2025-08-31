@@ -7,6 +7,12 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-i
 const JWT_EXPIRES_IN = '7d'
 const SALT_ROUNDS = 12
 
+// Debug JWT_SECRET on startup
+console.log('🔧 JWT_SECRET environment variable check:')
+console.log('🔧 JWT_SECRET exists:', !!process.env.JWT_SECRET)
+console.log('🔧 JWT_SECRET length:', process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 'undefined')
+console.log('🔧 Using fallback:', !process.env.JWT_SECRET)
+
 /**
  * Hash a password using bcrypt
  */
@@ -43,9 +49,7 @@ const generateToken = (userId, email) => {
     const token = jwt.sign(
       { 
         userId, 
-        email,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
+        email
       },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
