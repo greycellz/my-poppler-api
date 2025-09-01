@@ -57,6 +57,9 @@ const createUser = async (email, password, firstName, lastName) => {
     const verificationToken = generateRandomToken(32)
     await gcpClient.storeEmailVerificationToken(userId, email, verificationToken)
 
+    // Generate JWT token for immediate login (needed for form migration)
+    const token = generateToken(userId, email)
+
     return {
       success: true,
       userId,
@@ -64,7 +67,8 @@ const createUser = async (email, password, firstName, lastName) => {
       firstName,
       lastName,
       name: `${firstName} ${lastName}`,
-      verificationToken
+      verificationToken,
+      token
     }
   } catch (error) {
     console.error('User creation error:', error)

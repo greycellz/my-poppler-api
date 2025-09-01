@@ -42,11 +42,17 @@ router.post('/signup',
         success: true,
         message: 'Account created successfully. Please check your email to verify your account.',
         data: {
-          userId: result.userId,
-          email: result.email,
-          firstName: result.firstName,
-          lastName: result.lastName,
-          name: result.name
+          user: {
+            id: result.userId,
+            email: result.email,
+            firstName: result.firstName,
+            lastName: result.lastName,
+            name: result.name,
+            emailVerified: false,
+            plan: 'free',
+            status: 'pending'
+          },
+          token: result.token
         }
       })
     } catch (error) {
