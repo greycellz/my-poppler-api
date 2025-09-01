@@ -930,11 +930,13 @@ class GCPClient {
    */
   async addFormToAnonymousSession(sessionId, formId) {
     try {
+      const { FieldValue } = require('@google-cloud/firestore');
+      
       await this.firestore
         .collection('anonymousSessions')
         .doc(sessionId)
         .update({
-          forms: this.firestore.FieldValue.arrayUnion(formId),
+          forms: FieldValue.arrayUnion(formId),
           lastActivity: new Date()
         });
 
