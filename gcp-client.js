@@ -858,6 +858,66 @@ class GCPClient {
   }
 
   /**
+   * Get all forms for a user
+   */
+  async getFormsByUserId(userId) {
+    try {
+      console.log(`📋 Retrieving forms for user: ${userId}`);
+      
+      const snapshot = await this.firestore
+        .collection('forms')
+        .where('user_id', '==', userId)
+        .orderBy('metadata.updated_at', 'desc')
+        .get();
+
+      const forms = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.metadata?.title || 'Untitled Form',
+          status: data.is_published ? 'published' : 'draft',
+          lastEdited: data.metadata?.updated_at || data.metadata?.created_at,
+          submissionCount: data.submission_count || 0,
+          isHIPAA: data.is_hipaa || false,
+          thumbnail: data.metadata?.thumbnail,
+          ...data
+        };
+      });
+
+      console.log(`✅ Retrieved ${forms.length} forms for user: ${userId}`);
+      return forms;
+    } catch (error) {
+      console.error(`❌ Failed to retrieve forms for user: ${userId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update form metadata
+   */
+  async updateFormMetadata(formId, metadata) {
+    try {
+      console.log(`📝 Updating form metadata: ${formId}`);
+      
+      await this.firestore
+        .collection('forms')
+        .doc(formId)
+        .update({
+          metadata: {
+            ...metadata,
+            updated_at: new Date()
+          }
+        });
+
+      console.log(`✅ Form metadata updated: ${formId}`);
+      return { success: true };
+    } catch (error) {
+      console.error(`❌ Failed to update form metadata: ${formId}`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Migrate anonymous forms to user account
    */
   async migrateAnonymousForms(userId, anonymousSessionId) {

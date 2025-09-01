@@ -1102,6 +1102,42 @@ app.post('/upload-file', upload.single('file'), async (req, res) => {
   }
 })
 
+// ============== USER FORMS ENDPOINT ==============
+
+app.get('/api/forms/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    console.log(`📋 Fetching forms for user: ${userId}`);
+    
+    const forms = await gcpClient.getFormsByUserId(userId);
+
+    res.json({
+      success: true,
+      userId,
+      forms,
+      count: forms.length,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ User forms retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve user forms',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== AUTHENTICATION ROUTES ==============
 
 // Import authentication routes
