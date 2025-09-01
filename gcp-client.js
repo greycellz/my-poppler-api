@@ -80,9 +80,28 @@ class GCPClient {
    */
   async storeFormStructure(formId, formData, userId, metadata = {}) {
     try {
+      // Handle anonymous users by generating temporary user ID
+      let finalUserId = userId;
+      let isAnonymous = false;
+      let anonymousSessionId = null;
+
+      if (!userId || userId === 'anonymous') {
+        // Generate a new temporary user ID for anonymous users
+        finalUserId = this.generateTemporaryUserId();
+        isAnonymous = true;
+        anonymousSessionId = finalUserId.replace('temp_', '');
+        
+        // Create or update anonymous session
+        await this.createAnonymousSession(
+          anonymousSessionId,
+          metadata.userAgent || 'unknown',
+          metadata.ipAddress || 'unknown'
+        );
+      }
+
       const formDoc = {
         form_id: formId,
-        user_id: userId,
+        user_id: finalUserId,
         structure: formData,
         metadata: {
           ...metadata,
@@ -91,6 +110,8 @@ class GCPClient {
         },
         is_hipaa: metadata.isHipaa || false,
         is_published: metadata.isPublished || false,
+        isAnonymous,
+        anonymousSessionId
       };
 
       await this.firestore
@@ -98,8 +119,19 @@ class GCPClient {
         .doc(formId)
         .set(formDoc);
 
-      console.log(`✅ Form structure stored: ${formId}`);
-      return { success: true, formId };
+      // If this is an anonymous form, add it to the session
+      if (isAnonymous && anonymousSessionId) {
+        await this.addFormToAnonymousSession(anonymousSessionId, formId);
+      }
+
+      console.log(`✅ Form structure stored: ${formId} for user: ${finalUserId} (anonymous: ${isAnonymous})`);
+      return { 
+        success: true, 
+        formId,
+        userId: finalUserId,
+        isAnonymous,
+        anonymousSessionId
+      };
     } catch (error) {
       console.error('❌ Error storing form structure:', error);
       throw error;
@@ -858,7 +890,169 @@ class GCPClient {
   }
 
   /**
-   * Get all forms for a user
+   * Generate a temporary user ID for anonymous users
+   */
+  generateTemporaryUserId() {
+    const { v4: uuidv4 } = require('uuid');
+    return `temp_${uuidv4()}`;
+  }
+
+  /**
+   * Create or update anonymous session
+   */
+  async createAnonymousSession(sessionId, userAgent, ipAddress) {
+    try {
+      const sessionDoc = {
+        id: sessionId,
+        forms: [],
+        createdAt: new Date(),
+        lastActivity: new Date(),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        userAgent,
+        ipAddress
+      };
+
+      await this.firestore
+        .collection('anonymousSessions')
+        .doc(sessionId)
+        .set(sessionDoc);
+
+      console.log(`✅ Anonymous session created: ${sessionId}`);
+      return { success: true, sessionId };
+    } catch (error) {
+      console.error(`❌ Error creating anonymous session: ${sessionId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Add form to anonymous session
+   */
+  async addFormToAnonymousSession(sessionId, formId) {
+    try {
+      await this.firestore
+        .collection('anonymousSessions')
+        .doc(sessionId)
+        .update({
+          forms: this.firestore.FieldValue.arrayUnion(formId),
+          lastActivity: new Date()
+        });
+
+      console.log(`✅ Form ${formId} added to anonymous session: ${sessionId}`);
+      return { success: true };
+    } catch (error) {
+      console.error(`❌ Error adding form to anonymous session: ${sessionId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Migrate anonymous forms to real user account
+   */
+  async migrateAnonymousFormsToUser(tempUserId, realUserId) {
+    try {
+      console.log(`🔄 Migrating forms from ${tempUserId} to ${realUserId}`);
+      
+      // Get all forms with the temporary user ID
+      const snapshot = await this.firestore
+        .collection('forms')
+        .where('user_id', '==', tempUserId)
+        .get();
+
+      if (snapshot.empty) {
+        console.log(`ℹ️ No forms found for temporary user: ${tempUserId}`);
+        return { success: true, migratedForms: 0 };
+      }
+
+      const batch = this.firestore.batch();
+      let migratedForms = 0;
+
+      snapshot.docs.forEach(doc => {
+        batch.update(doc.ref, {
+          user_id: realUserId,
+          isAnonymous: false,
+          migratedAt: new Date(),
+          updated_at: new Date()
+        });
+        migratedForms++;
+      });
+
+      await batch.commit();
+
+      // Update the anonymous session to mark as migrated
+      await this.firestore
+        .collection('anonymousSessions')
+        .doc(tempUserId.replace('temp_', ''))
+        .update({
+          migratedTo: realUserId,
+          migratedAt: new Date()
+        });
+
+      console.log(`✅ Successfully migrated ${migratedForms} forms from ${tempUserId} to ${realUserId}`);
+      return { success: true, migratedForms };
+    } catch (error) {
+      console.error(`❌ Error migrating forms from ${tempUserId} to ${realUserId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up expired anonymous sessions and their forms
+   */
+  async cleanupExpiredAnonymousSessions() {
+    try {
+      console.log('🧹 Cleaning up expired anonymous sessions...');
+      
+      const now = new Date();
+      const snapshot = await this.firestore
+        .collection('anonymousSessions')
+        .where('expiresAt', '<', now)
+        .get();
+
+      if (snapshot.empty) {
+        console.log('ℹ️ No expired sessions found');
+        return { success: true, cleanedSessions: 0, cleanedForms: 0 };
+      }
+
+      let cleanedSessions = 0;
+      let cleanedForms = 0;
+      const batch = this.firestore.batch();
+
+      for (const doc of snapshot.docs) {
+        const sessionData = doc.data();
+        
+        // Delete all forms associated with this session
+        if (sessionData.forms && sessionData.forms.length > 0) {
+          for (const formId of sessionData.forms) {
+            try {
+              const formDoc = await this.firestore.collection('forms').doc(formId).get();
+              if (formDoc.exists) {
+                batch.delete(formDoc.ref);
+                cleanedForms++;
+              }
+            } catch (error) {
+              console.warn(`⚠️ Could not delete form ${formId}:`, error.message);
+            }
+          }
+        }
+
+        // Delete the session
+        batch.delete(doc.ref);
+        cleanedSessions++;
+      }
+
+      await batch.commit();
+
+      console.log(`✅ Cleaned up ${cleanedSessions} expired sessions and ${cleanedForms} forms`);
+      return { success: true, cleanedSessions, cleanedForms };
+    } catch (error) {
+      console.error('❌ Error cleaning up expired sessions:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get forms by user ID (handles both real and temporary user IDs)
    */
   async getFormsByUserId(userId) {
     try {
@@ -867,7 +1061,6 @@ class GCPClient {
       const snapshot = await this.firestore
         .collection('forms')
         .where('user_id', '==', userId)
-        
         .get();
 
       const forms = snapshot.docs.map(doc => {
@@ -880,6 +1073,8 @@ class GCPClient {
           submissionCount: data.submission_count || 0,
           isHIPAA: data.is_hipaa || false,
           thumbnail: data.metadata?.thumbnail,
+          isAnonymous: data.isAnonymous || false,
+          migratedAt: data.migratedAt,
           ...data
         };
       });

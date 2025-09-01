@@ -604,7 +604,9 @@ app.post('/store-form', async (req, res) => {
         ...metadata,
         source: 'railway-backend',
         isHipaa: metadata?.isHipaa || false,
-        isPublished: metadata?.isPublished || false
+        isPublished: metadata?.isPublished || false,
+        userAgent: req.get('User-Agent'),
+        ipAddress: req.ip || req.connection.remoteAddress
       }
     );
 
@@ -1138,6 +1140,69 @@ app.get('/api/forms/user/:userId', async (req, res) => {
   }
 });
 
+// ============== FORM MIGRATION ENDPOINT ==============
+
+app.post('/api/forms/migrate-anonymous', async (req, res) => {
+  try {
+    const { tempUserId, realUserId } = req.body;
+    
+    if (!tempUserId || !realUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both temporary user ID and real user ID are required'
+      });
+    }
+
+    console.log(`🔄 Migrating forms from ${tempUserId} to ${realUserId}`);
+    
+    const gcpClient = new GCPClient();
+    const result = await gcpClient.migrateAnonymousFormsToUser(tempUserId, realUserId);
+
+    res.json({
+      success: true,
+      message: 'Forms migrated successfully',
+      ...result,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Form migration error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Form migration failed',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== ANONYMOUS SESSION CLEANUP ENDPOINT ==============
+
+app.get('/api/cleanup/expired-sessions', async (req, res) => {
+  try {
+    console.log('🧹 Starting cleanup of expired anonymous sessions...');
+    
+    const gcpClient = new GCPClient();
+    const result = await gcpClient.cleanupExpiredAnonymousSessions();
+
+    res.json({
+      success: true,
+      message: 'Cleanup completed successfully',
+      ...result,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Cleanup error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Cleanup failed',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== AUTHENTICATION ROUTES ==============
 
 // Import authentication routes
@@ -1183,6 +1248,8 @@ app.listen(PORT, () => {
   console.log(`👤 User Analytics: GET ${BASE_URL}/analytics/user/:userId`);
   console.log(`📈 All Analytics: GET ${BASE_URL}/analytics?limit=100`);
   console.log(`🗑️ Cleanup: GET ${BASE_URL}/cleanup`);
+  console.log(`🔄 Form Migration: POST ${BASE_URL}/api/forms/migrate-anonymous`);
+  console.log(`🧹 Session Cleanup: GET ${BASE_URL}/api/cleanup/expired-sessions`);
   console.log(`🔐 Auth Signup: POST ${BASE_URL}/auth/signup`);
   console.log(`🔑 Auth Login: POST ${BASE_URL}/auth/login`);
   console.log(`✅ Email Verify: POST ${BASE_URL}/auth/verify-email`);
