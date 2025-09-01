@@ -867,7 +867,7 @@ class GCPClient {
       const snapshot = await this.firestore
         .collection('forms')
         .where('user_id', '==', userId)
-        .orderBy('metadata.updated_at', 'desc')
+        
         .get();
 
       const forms = snapshot.docs.map(doc => {
