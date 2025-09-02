@@ -530,6 +530,46 @@ class GCPClient {
   }
 
   /**
+   * Get form submissions from BigQuery
+   */
+  async getFormSubmissions(formId) {
+    try {
+      const query = `
+        SELECT 
+          submission_id,
+          form_id,
+          user_id,
+          submission_data,
+          timestamp,
+          ip_address,
+          user_agent,
+          is_hipaa,
+          encrypted
+        FROM \`${this.projectId}.form_submissions.submissions\`
+        WHERE form_id = @formId
+        ORDER BY timestamp DESC
+      `;
+
+      const options = {
+        query,
+        params: { formId },
+      };
+
+      const [rows] = await this.bigquery.query(options);
+      
+      if (rows.length === 0) {
+        return [];
+      }
+
+      console.log(`✅ Retrieved ${rows.length} submissions for form: ${formId}`);
+      return rows;
+    } catch (error) {
+      console.error(`❌ Error getting form submissions for ${formId}:`, error);
+      return [];
+    }
+  }
+
+  /**
    * Get all analytics data (for admin purposes)
    */
   async getAllAnalytics(limit = 100) {

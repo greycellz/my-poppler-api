@@ -1184,6 +1184,55 @@ app.get('/api/forms/:formId', async (req, res) => {
   }
 });
 
+// ============== GET FORM SUBMISSIONS ENDPOINT ==============
+app.get('/api/forms/:formId/submissions', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    if (!formId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID is required'
+      });
+    }
+    
+    console.log(`📋 Fetching submissions for form: ${formId}`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Get submissions from BigQuery
+    const submissions = await gcpClient.getFormSubmissions(formId);
+    
+    if (submissions) {
+      console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
+      res.json({
+        success: true,
+        formId,
+        submissions,
+        count: submissions.length,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.json({
+        success: true,
+        formId,
+        submissions: [],
+        count: 0,
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error fetching form submissions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch form submissions',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== DELETE FORM ENDPOINT ==============
 app.delete('/api/forms/:formId', async (req, res) => {
   try {
