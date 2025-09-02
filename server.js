@@ -1184,6 +1184,54 @@ app.get('/api/forms/:formId', async (req, res) => {
   }
 });
 
+// ============== DELETE FORM ENDPOINT ==============
+app.delete('/api/forms/:formId', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    if (!formId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID is required'
+      });
+    }
+    
+    console.log(`🗑️ Deleting form: ${formId}`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Delete form and all associated data (submissions, analytics)
+    const result = await gcpClient.deleteForm(formId);
+    
+    if (result.success) {
+      console.log(`✅ Form deleted successfully: ${formId}`);
+      res.json({ 
+        success: true, 
+        message: 'Form and all associated data deleted successfully',
+        formId,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      console.error(`❌ Failed to delete form: ${formId}`, result.error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to delete form', 
+        details: result.error,
+        timestamp: new Date().toISOString() 
+      });
+    }
+  } catch (error) {
+    console.error('❌ Form deletion error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to delete form', 
+      details: error.message, 
+      timestamp: new Date().toISOString() 
+    });
+  }
+});
+
 // ============== FORM MIGRATION ENDPOINT ==============
 
 app.post('/api/forms/migrate-anonymous', async (req, res) => {

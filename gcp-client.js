@@ -1160,6 +1160,101 @@ class GCPClient {
       throw error;
     }
   }
+
+  /**
+   * Delete form and all associated data (submissions, analytics)
+   */
+  async deleteForm(formId) {
+    try {
+      console.log(`🗑️ Deleting form and all associated data: ${formId}`);
+      
+      // Get form data to check what needs to be deleted
+      const formDoc = await this.firestore.collection('forms').doc(formId).get();
+      if (!formDoc.exists) {
+        return { success: false, error: 'Form not found' };
+      }
+
+      const formData = formDoc.data();
+      const batch = this.firestore.batch();
+
+      // 1. Delete form structure
+      batch.delete(formDoc.ref);
+      console.log(`🗑️ Form structure deleted: ${formId}`);
+
+      // 2. Delete form submissions (if any exist)
+      try {
+        const submissionsSnapshot = await this.firestore
+          .collection('formSubmissions')
+          .where('formId', '==', formId)
+          .get();
+        
+        submissionsSnapshot.docs.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        console.log(`🗑️ Deleted ${submissionsSnapshot.size} form submissions`);
+      } catch (error) {
+        console.warn(`⚠️ Could not delete submissions for form ${formId}:`, error.message);
+      }
+
+      // 3. Delete form analytics (if any exist)
+      try {
+        const analyticsSnapshot = await this.firestore
+          .collection('formAnalytics')
+          .where('formId', '==', formId)
+          .get();
+        
+        analyticsSnapshot.docs.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        console.log(`🗑️ Deleted ${analyticsSnapshot.size} analytics records`);
+      } catch (error) {
+        console.warn(`⚠️ Could not delete analytics for form ${formId}:`, error.message);
+      }
+
+      // 4. Remove form from user's forms list (if user exists)
+      if (formData.user_id) {
+        try {
+          const userDoc = await this.firestore.collection('users').doc(formData.user_id).get();
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            if (userData.forms && userData.forms.includes(formId)) {
+              const updatedForms = userData.forms.filter(id => id !== formId);
+              batch.update(userDoc.ref, { forms: updatedForms });
+              console.log(`🗑️ Removed form from user's forms list`);
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not update user forms list:`, error.message);
+        }
+      }
+
+      // 5. Remove form from anonymous session (if it was anonymous)
+      if (formData.anonymousSessionId) {
+        try {
+          const sessionDoc = await this.firestore.collection('anonymousSessions').doc(formData.anonymousSessionId).get();
+          if (sessionDoc.exists) {
+            const sessionData = sessionDoc.data();
+            if (sessionData.forms && sessionData.forms.includes(formId)) {
+              const updatedForms = sessionData.forms.filter(id => id !== formId);
+              batch.update(sessionDoc.ref, { forms: updatedForms });
+              console.log(`🗑️ Removed form from anonymous session`);
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not update anonymous session:`, error.message);
+        }
+      }
+
+      // Commit all deletions
+      await batch.commit();
+      
+      console.log(`✅ Form ${formId} and all associated data deleted successfully`);
+      return { success: true };
+    } catch (error) {
+      console.error(`❌ Error deleting form ${formId}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 module.exports = GCPClient;
