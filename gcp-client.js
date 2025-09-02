@@ -265,6 +265,28 @@ class GCPClient {
         .doc(submissionId)
         .set(submissionDoc);
 
+      // Update the form document with submission count and last submission date
+      try {
+        const formRef = this.firestore.collection('forms').doc(formId);
+        const formDoc = await formRef.get();
+        
+        if (formDoc.exists) {
+          const formData = formDoc.data();
+          const currentSubmissionCount = formData.submission_count || 0;
+          const newSubmissionCount = currentSubmissionCount + 1;
+          
+          await formRef.update({
+            submission_count: newSubmissionCount,
+            last_submission_date: new Date(),
+            updated_at: new Date()
+          });
+          
+          console.log(`📊 Form submission count updated: ${formId} (${newSubmissionCount} total)`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Could not update form submission count for ${formId}:`, error.message);
+      }
+
       console.log(`✅ Form submission stored: ${submissionId}`);
       if (fileAssociations.length > 0) {
         console.log(`📎 File associations: ${fileAssociations.length} files linked to submission`);
@@ -1073,6 +1095,7 @@ class GCPClient {
           status: data.is_published ? 'published' : 'draft',
           lastEdited: data.metadata?.updated_at || data.metadata?.created_at,
           submissionCount: data.submission_count || 0,
+          lastSubmissionDate: data.last_submission_date,
           isHIPAA: data.is_hipaa || false,
           thumbnail: data.metadata?.thumbnail,
           isAnonymous: data.isAnonymous || false,
