@@ -1219,20 +1219,37 @@ class GCPClient {
         console.warn(`⚠️ Could not delete submissions for form ${formId}:`, error.message);
       }
 
-      // 3. Delete form analytics (if any exist)
+      // 3. Delete form analytics from BigQuery (if any exist)
       try {
-        // Check if analytics collection exists and has data for this form
-        const analyticsSnapshot = await this.firestore
-          .collection('analytics')
-          .where('form_id', '==', formId)
-          .get();
+        // Delete analytics data from BigQuery
+        const deleteAnalyticsQuery = `
+          DELETE FROM \`${this.projectId}.form_submissions.form_analytics\`
+          WHERE form_id = @formId
+        `;
         
-        analyticsSnapshot.docs.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        console.log(`🗑️ Deleted ${analyticsSnapshot.size} analytics records`);
+        const deleteSubmissionsQuery = `
+          DELETE FROM \`${this.projectId}.form_submissions.submissions\`
+          WHERE form_id = @formId
+        `;
+        
+        const analyticsOptions = {
+          query: deleteAnalyticsQuery,
+          params: { formId },
+        };
+        
+        const submissionsOptions = {
+          query: deleteSubmissionsQuery,
+          params: { formId },
+        };
+        
+        // Execute both deletions
+        const [analyticsResult] = await this.bigquery.query(analyticsOptions);
+        const [submissionsResult] = await this.bigquery.query(submissionsOptions);
+        
+        console.log(`🗑️ Deleted analytics records from BigQuery for form: ${formId}`);
+        console.log(`🗑️ Deleted submission records from BigQuery for form: ${formId}`);
       } catch (error) {
-        console.warn(`⚠️ Could not delete analytics for form ${formId}:`, error.message);
+        console.warn(`⚠️ Could not delete analytics from BigQuery for form ${formId}:`, error.message);
       }
 
       // 4. Remove form from user's forms list (if user exists)
