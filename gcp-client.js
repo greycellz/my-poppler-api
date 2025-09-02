@@ -1207,8 +1207,8 @@ class GCPClient {
       // 2. Delete form submissions (if any exist)
       try {
         const submissionsSnapshot = await this.firestore
-          .collection('formSubmissions')
-          .where('formId', '==', formId)
+          .collection('submissions')
+          .where('form_id', '==', formId)
           .get();
         
         submissionsSnapshot.docs.forEach(doc => {
@@ -1221,9 +1221,10 @@ class GCPClient {
 
       // 3. Delete form analytics (if any exist)
       try {
+        // Check if analytics collection exists and has data for this form
         const analyticsSnapshot = await this.firestore
-          .collection('formAnalytics')
-          .where('formId', '==', formId)
+          .collection('analytics')
+          .where('form_id', '==', formId)
           .get();
         
         analyticsSnapshot.docs.forEach(doc => {
