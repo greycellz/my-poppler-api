@@ -1140,6 +1140,50 @@ app.get('/api/forms/user/:userId', async (req, res) => {
   }
 });
 
+// ============== SINGLE FORM ENDPOINT ==============
+
+app.get('/api/forms/:formId', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    
+    if (!formId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID is required'
+      });
+    }
+
+    console.log(`📋 Fetching form: ${formId}`);
+    
+    // Get the form data from GCP
+    const form = await gcpClient.getFormStructure(formId);
+
+    if (!form) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found',
+        formId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    res.json({
+      success: true,
+      form,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Form retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve form',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== FORM MIGRATION ENDPOINT ==============
 
 app.post('/api/forms/migrate-anonymous', async (req, res) => {
