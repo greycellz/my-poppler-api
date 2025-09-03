@@ -530,39 +530,39 @@ class GCPClient {
   }
 
   /**
-   * Get form submissions from BigQuery
+   * Get form submissions from Firestore
    */
   async getFormSubmissions(formId) {
     try {
-      const query = `
-        SELECT 
-          submission_id,
-          form_id,
-          user_id,
-          submission_data,
-          timestamp,
-          ip_address,
-          user_agent,
-          is_hipaa,
-          encrypted
-        FROM \`${this.projectId}.form_submissions.submissions\`
-        WHERE form_id = @formId
-        ORDER BY timestamp DESC
-      `;
+      const submissionsSnapshot = await this.firestore
+        .collection('submissions')
+        .where('form_id', '==', formId)
+        .orderBy('timestamp', 'desc')
+        .get();
 
-      const options = {
-        query,
-        params: { formId },
-      };
-
-      const [rows] = await this.bigquery.query(options);
-      
-      if (rows.length === 0) {
+      if (submissionsSnapshot.empty) {
+        console.log(`📝 No submissions found for form: ${formId}`);
         return [];
       }
 
-      console.log(`✅ Retrieved ${rows.length} submissions for form: ${formId}`);
-      return rows;
+      const submissions = submissionsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          submission_id: data.submission_id,
+          form_id: data.form_id,
+          user_id: data.user_id,
+          submission_data: data.submission_data,
+          timestamp: data.timestamp?.toDate?.() || data.timestamp,
+          ip_address: data.ip_address,
+          user_agent: data.user_agent,
+          is_hipaa: data.is_hipaa,
+          encrypted: data.encrypted,
+          file_associations: data.file_associations || []
+        };
+      });
+
+      console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
+      return submissions;
     } catch (error) {
       console.error(`❌ Error getting form submissions for ${formId}:`, error);
       return [];
