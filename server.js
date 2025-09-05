@@ -1352,6 +1352,58 @@ const authRoutes = require('./auth/routes');
 // Mount authentication routes
 app.use('/auth', authRoutes);
 
+// ============== AUTO-SAVE ENDPOINT ==============
+
+app.post('/api/auto-save-form', async (req, res) => {
+  try {
+    const { formId, formSchema } = req.body;
+    
+    console.log('🔄 Auto-save API received:', {
+      formId,
+      hasFormSchema: !!formSchema
+    });
+
+    if (!formId || !formSchema) {
+      return res.status(400).json({
+        error: 'Form ID and schema are required'
+      });
+    }
+
+    // Get the current form to preserve its published status
+    const currentForm = await gcpClient.getFormById(formId);
+    const currentPublishedStatus = currentForm?.is_published || false;
+
+    // Store the form structure with auto-save metadata
+    const result = await gcpClient.storeFormStructure(
+      formSchema,
+      currentForm?.user_id || 'anonymous',
+      {
+        source: 'auto-save',
+        isUpdate: true,
+        isPublished: currentPublishedStatus, // Preserve existing published status
+        updatedAt: new Date().toISOString()
+      }
+    );
+
+    if (result.success) {
+      console.log('✅ Auto-save successful for form:', formId);
+      return res.json({ 
+        success: true, 
+        formId,
+        message: 'Form auto-saved successfully' 
+      });
+    } else {
+      throw new Error('Failed to auto-save form');
+    }
+
+  } catch (error) {
+    console.error('❌ Auto-save error:', error);
+    return res.status(500).json({
+      error: 'Failed to auto-save form'
+    });
+  }
+});
+
 // ============== HEALTH CHECK ==============
 
 app.get('/health', (req, res) => {

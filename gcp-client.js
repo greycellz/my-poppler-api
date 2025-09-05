@@ -99,13 +99,24 @@ class GCPClient {
         );
       }
 
+      // Check if this is an update (form already exists)
+      const existingDoc = await this.firestore
+        .collection('forms')
+        .doc(formId)
+        .get();
+
+      const isUpdate = existingDoc.exists;
+      const existingData = existingDoc.data();
+
       const formDoc = {
         form_id: formId,
         user_id: finalUserId,
         structure: formData,
         metadata: {
           ...metadata,
-          created_at: new Date(),
+          created_at: isUpdate && existingData?.metadata?.created_at 
+            ? existingData.metadata.created_at 
+            : new Date(),
           updated_at: new Date(),
         },
         is_hipaa: metadata.isHipaa || false,
@@ -124,13 +135,14 @@ class GCPClient {
         await this.addFormToAnonymousSession(anonymousSessionId, formId);
       }
 
-      console.log(`✅ Form structure stored: ${formId} for user: ${finalUserId} (anonymous: ${isAnonymous})`);
+      console.log(`✅ Form structure ${isUpdate ? 'updated' : 'stored'}: ${formId} for user: ${finalUserId} (anonymous: ${isAnonymous})`);
       return { 
         success: true, 
         formId,
         userId: finalUserId,
         isAnonymous,
-        anonymousSessionId
+        anonymousSessionId,
+        isUpdate
       };
     } catch (error) {
       console.error('❌ Error storing form structure:', error);
@@ -1025,11 +1037,12 @@ class GCPClient {
 
       if (snapshot.empty) {
         console.log(`ℹ️ No forms found for temporary user: ${tempUserId}`);
-        return { success: true, migratedForms: 0 };
+        return { success: true, migratedForms: 0, migratedFormIds: [] };
       }
 
       const batch = this.firestore.batch();
       let migratedForms = 0;
+      const migratedFormIds = [];
 
       snapshot.docs.forEach(doc => {
         batch.update(doc.ref, {
@@ -1039,6 +1052,7 @@ class GCPClient {
           updated_at: new Date()
         });
         migratedForms++;
+        migratedFormIds.push(doc.id); // Collect the form IDs
       });
 
       await batch.commit();
@@ -1053,7 +1067,8 @@ class GCPClient {
         });
 
       console.log(`✅ Successfully migrated ${migratedForms} forms from ${tempUserId} to ${realUserId}`);
-      return { success: true, migratedForms };
+      console.log(`📋 Migrated form IDs: ${migratedFormIds.join(', ')}`);
+      return { success: true, migratedForms, migratedFormIds };
     } catch (error) {
       console.error(`❌ Error migrating forms from ${tempUserId} to ${realUserId}:`, error);
       throw error;
@@ -1334,6 +1349,32 @@ class GCPClient {
     } catch (error) {
       console.error(`❌ Error deleting form ${formId}:`, error);
       return { success: false, error: error.message };
+    }
+  }
+
+  async getFormById(formId) {
+    try {
+      console.log(`🔍 Fetching form by ID: ${formId}`);
+      
+      const doc = await this.firestore
+        .collection('forms')
+        .doc(formId)
+        .get();
+
+      if (!doc.exists) {
+        console.log(`❌ Form not found: ${formId}`);
+        return null;
+      }
+
+      const data = doc.data();
+      console.log(`✅ Found form: ${formId}`);
+      return {
+        id: doc.id,
+        ...data
+      };
+    } catch (error) {
+      console.error('❌ Error fetching form by ID:', error);
+      return null;
     }
   }
 }
