@@ -1360,6 +1360,8 @@ app.post('/api/auto-save-form', async (req, res) => {
     
     console.log('🔄 Auto-save API received:', {
       formId,
+      formIdType: typeof formId,
+      formIdLength: formId?.length,
       hasFormSchema: !!formSchema
     });
 
@@ -1375,6 +1377,7 @@ app.post('/api/auto-save-form', async (req, res) => {
 
     // Store the form structure with auto-save metadata
     const result = await gcpClient.storeFormStructure(
+      formId,
       formSchema,
       currentForm?.user_id || 'anonymous',
       {

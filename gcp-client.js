@@ -80,6 +80,18 @@ class GCPClient {
    */
   async storeFormStructure(formId, formData, userId, metadata = {}) {
     try {
+      console.log('🔍 storeFormStructure called with:', {
+        formId,
+        formIdType: typeof formId,
+        formIdLength: formId?.length,
+        userId,
+        hasFormData: !!formData
+      });
+
+      // Validate formId
+      if (!formId || typeof formId !== 'string' || formId.trim() === '') {
+        throw new Error(`Invalid formId: ${formId} (type: ${typeof formId})`);
+      }
       // Handle anonymous users by generating temporary user ID
       let finalUserId = userId;
       let isAnonymous = false;
@@ -100,6 +112,7 @@ class GCPClient {
       }
 
       // Check if this is an update (form already exists)
+      console.log('🔍 About to query Firestore with formId:', formId);
       const existingDoc = await this.firestore
         .collection('forms')
         .doc(formId)
@@ -125,6 +138,7 @@ class GCPClient {
         anonymousSessionId
       };
 
+      console.log('🔍 About to write to Firestore with formId:', formId);
       await this.firestore
         .collection('forms')
         .doc(formId)
@@ -167,6 +181,13 @@ class GCPClient {
       
       const data = doc.data();
       console.log(`✅ Form structure retrieved: ${formId}`);
+      console.log('🔍 Form data structure:', {
+        form_id: data.form_id,
+        formId: data.formId,
+        hasStructure: !!data.structure,
+        hasSchema: !!data.schema,
+        hasFields: !!data.fields
+      });
       return data;
     } catch (error) {
       console.error(`❌ Failed to retrieve form structure: ${formId}`, error);
