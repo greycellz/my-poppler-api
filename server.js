@@ -1360,8 +1360,6 @@ app.post('/api/auto-save-form', async (req, res) => {
     
     console.log('🔄 Auto-save API received:', {
       formId,
-      formIdType: typeof formId,
-      formIdLength: formId?.length,
       hasFormSchema: !!formSchema
     });
 
