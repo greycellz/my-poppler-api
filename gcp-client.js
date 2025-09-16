@@ -112,21 +112,28 @@ class GCPClient {
       const isUpdate = existingDoc.exists;
       const existingData = existingDoc.data();
 
+      // Decide where to write: auto-save writes to draft_structure only
+      const isAutoSave = (metadata?.source === 'auto-save');
+
       const formDoc = {
         form_id: formId,
         user_id: finalUserId,
-        structure: formData,
+        // Keep published structure intact on auto-save; otherwise update it
+        structure: isAutoSave ? (existingData?.structure || formData) : formData,
+        // Maintain a separate draft copy that auto-save updates
+        draft_structure: formData,
         metadata: {
+          ...existingData?.metadata,
           ...metadata,
           created_at: isUpdate && existingData?.metadata?.created_at 
             ? existingData.metadata.created_at 
             : new Date(),
           updated_at: new Date(),
         },
-        is_hipaa: metadata.isHipaa || false,
-        is_published: metadata.isPublished || false,
-        isAnonymous,
-        anonymousSessionId
+        is_hipaa: metadata.isHipaa || existingData?.is_hipaa || false,
+        is_published: metadata.isPublished ?? existingData?.is_published ?? false,
+        isAnonymous: existingData?.isAnonymous || isAnonymous,
+        anonymousSessionId: existingData?.anonymousSessionId || anonymousSessionId
       };
 
       await this.firestore
