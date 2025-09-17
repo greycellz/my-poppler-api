@@ -26,7 +26,7 @@ const PRICE_IDS = {
 router.post('/create-checkout-session', authenticateToken, async (req, res) => {
   try {
     const { planId, interval = 'monthly' } = req.body;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     
     console.log('🔍 Billing debug - req.user:', req.user);
     console.log('🔍 Billing debug - userId:', userId);
@@ -139,7 +139,7 @@ router.get('/checkout-session', authenticateToken, async (req, res) => {
 // Create customer portal session
 router.post('/create-portal-session', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const customerId = req.user.stripeCustomerId;
 
     if (!customerId) {
@@ -161,7 +161,7 @@ router.post('/create-portal-session', authenticateToken, async (req, res) => {
 // Get user subscription status
 router.get('/subscription', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const customerId = req.user.stripeCustomerId;
 
     if (!customerId) {
