@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Stripe = require('stripe');
-const { verifyToken } = require('../middleware/auth');
+const { authenticateToken } = require('../auth/middleware');
 
 // Initialize Stripe with secret key
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -23,7 +23,7 @@ const PRICE_IDS = {
 };
 
 // Create checkout session
-router.post('/create-checkout-session', verifyToken, async (req, res) => {
+router.post('/create-checkout-session', authenticateToken, async (req, res) => {
   try {
     const { planId, interval = 'monthly' } = req.body;
     const userId = req.user.id;
@@ -89,7 +89,7 @@ router.post('/create-checkout-session', verifyToken, async (req, res) => {
 });
 
 // Get checkout session details (for success page)
-router.get('/checkout-session', verifyToken, async (req, res) => {
+router.get('/checkout-session', authenticateToken, async (req, res) => {
   try {
     const { session_id } = req.query;
     
@@ -121,7 +121,7 @@ router.get('/checkout-session', verifyToken, async (req, res) => {
 });
 
 // Create customer portal session
-router.post('/create-portal-session', verifyToken, async (req, res) => {
+router.post('/create-portal-session', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
     const customerId = req.user.stripeCustomerId;
@@ -143,7 +143,7 @@ router.post('/create-portal-session', verifyToken, async (req, res) => {
 });
 
 // Get user subscription status
-router.get('/subscription', verifyToken, async (req, res) => {
+router.get('/subscription', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
     const customerId = req.user.stripeCustomerId;
