@@ -1352,11 +1352,17 @@ const authRoutes = require('./auth/routes');
 // Import billing routes
 const billingRoutes = require('./routes/billing');
 
+// Import webhook routes
+const webhookRoutes = require('./routes/webhooks');
+
 // Mount authentication routes
 app.use('/auth', authRoutes);
 
 // Mount billing routes
 app.use('/api/billing', billingRoutes);
+
+// Mount webhook routes
+app.use('/api/webhooks', webhookRoutes);
 
 // ============== AUTO-SAVE ENDPOINT ==============
 
@@ -1457,6 +1463,7 @@ app.listen(PORT, () => {
   console.log(`🔒 Reset Password: POST ${BASE_URL}/auth/reset-password`);
   console.log(`📦 Form Migration: POST ${BASE_URL}/auth/migrate-forms`);
   console.log(`👤 Session Check: GET ${BASE_URL}/auth/session`);
+  console.log(`💳 Stripe Webhooks: POST ${BASE_URL}/api/webhooks/stripe`);
   console.log(`🏥 Health: GET ${BASE_URL}/health`);
   
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
