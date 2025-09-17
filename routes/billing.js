@@ -48,8 +48,9 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
       customerId = customer.id;
       
       // Update user with Stripe customer ID
-      const { db } = require('../gcp-client');
-      await db.collection('users').doc(userId).update({
+      const GCPClient = require('../gcp-client');
+      const gcpClient = new GCPClient();
+      await gcpClient.firestore.collection('users').doc(userId).update({
         stripeCustomerId: customerId
       });
     }
