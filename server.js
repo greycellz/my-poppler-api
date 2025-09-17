@@ -111,14 +111,20 @@ async function handleSubscriptionCreated(subscription) {
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
     
-    await gcpClient.firestore.collection('users').doc(userId).update({
+    const updateData = {
       subscriptionId: subscription.id,
       subscriptionStatus: subscription.status,
       planId: planId,
       interval: interval,
-      currentPeriodEnd: subscription.current_period_end,
       updatedAt: new Date().toISOString()
-    });
+    };
+
+    // Only add currentPeriodEnd if it exists
+    if (subscription.current_period_end) {
+      updateData.currentPeriodEnd = subscription.current_period_end;
+    }
+
+    await gcpClient.firestore.collection('users').doc(userId).update(updateData);
 
     console.log(`✅ User ${userId} subscription created: ${planId} (${interval})`);
   } catch (error) {
@@ -144,14 +150,20 @@ async function handleSubscriptionUpdated(subscription) {
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
     
-    await gcpClient.firestore.collection('users').doc(userId).update({
+    const updateData = {
       subscriptionId: subscription.id,
       subscriptionStatus: subscription.status,
       planId: planId,
       interval: interval,
-      currentPeriodEnd: subscription.current_period_end,
       updatedAt: new Date().toISOString()
-    });
+    };
+
+    // Only add currentPeriodEnd if it exists
+    if (subscription.current_period_end) {
+      updateData.currentPeriodEnd = subscription.current_period_end;
+    }
+
+    await gcpClient.firestore.collection('users').doc(userId).update(updateData);
 
     console.log(`✅ User ${userId} subscription updated: ${planId} (${interval}) - Status: ${subscription.status}`);
   } catch (error) {
