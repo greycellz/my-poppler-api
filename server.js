@@ -1349,8 +1349,14 @@ app.get('/api/cleanup/expired-sessions', async (req, res) => {
 // Import authentication routes
 const authRoutes = require('./auth/routes');
 
+// Import billing routes
+const billingRoutes = require('./routes/billing');
+
 // Mount authentication routes
 app.use('/auth', authRoutes);
+
+// Mount billing routes
+app.use('/api/billing', billingRoutes);
 
 // ============== AUTO-SAVE ENDPOINT ==============
 
