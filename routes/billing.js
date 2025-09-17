@@ -150,7 +150,18 @@ router.get('/checkout-session', authenticateToken, async (req, res) => {
 router.post('/create-portal-session', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const customerId = req.user.stripeCustomerId;
+    
+    // Get user's Stripe customer ID from database (JWT token doesn't include it)
+    const GCPClient = require('../gcp-client');
+    const gcpClient = new GCPClient();
+    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const userData = userDoc.data();
+    const customerId = userData.stripeCustomerId;
 
     if (!customerId) {
       return res.status(400).json({ error: 'No subscription found' });
@@ -172,7 +183,18 @@ router.post('/create-portal-session', authenticateToken, async (req, res) => {
 router.get('/subscription', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const customerId = req.user.stripeCustomerId;
+    
+    // Get user's Stripe customer ID from database (JWT token doesn't include it)
+    const GCPClient = require('../gcp-client');
+    const gcpClient = new GCPClient();
+    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const userData = userDoc.data();
+    const customerId = userData.stripeCustomerId;
 
     if (!customerId) {
       return res.json({
