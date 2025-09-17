@@ -27,6 +27,11 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
   try {
     const { planId, interval = 'monthly' } = req.body;
     const userId = req.user.id;
+    
+    console.log('🔍 Billing debug - req.user:', req.user);
+    console.log('🔍 Billing debug - userId:', userId);
+    console.log('🔍 Billing debug - planId:', planId);
+    console.log('🔍 Billing debug - interval:', interval);
 
     // Validate plan and interval
     if (!PRICE_IDS[planId] || !PRICE_IDS[planId][interval]) {
@@ -37,7 +42,10 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
     
     // Get or create Stripe customer
     let customerId = req.user.stripeCustomerId;
+    console.log('🔍 Billing debug - existing customerId:', customerId);
+    
     if (!customerId) {
+      console.log('🔍 Billing debug - creating new Stripe customer...');
       const customer = await stripe.customers.create({
         email: req.user.email,
         name: req.user.name,
@@ -46,13 +54,20 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
         }
       });
       customerId = customer.id;
+      console.log('🔍 Billing debug - created customerId:', customerId);
       
       // Update user with Stripe customer ID
+      console.log('🔍 Billing debug - updating user document with userId:', userId);
+      if (!userId || userId.trim() === '') {
+        throw new Error('Invalid userId: ' + userId);
+      }
+      
       const GCPClient = require('../gcp-client');
       const gcpClient = new GCPClient();
       await gcpClient.firestore.collection('users').doc(userId).update({
         stripeCustomerId: customerId
       });
+      console.log('🔍 Billing debug - user document updated successfully');
     }
 
     // Create checkout session
