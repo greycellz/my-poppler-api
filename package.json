@@ -29,6 +29,7 @@
         "node-poppler": "^8.0.4",
         "nodemailer": "^7.0.6",
         "puppeteer": "^24.16.0",
+        "stripe": "^16.12.0",
         "uuid": "^11.1.0"
     },
     "devDependencies": {
