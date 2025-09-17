@@ -9,7 +9,12 @@ const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization']
     const token = authHeader && authHeader.split(' ')[1] // Bearer TOKEN
 
+    console.log('🔍 Auth middleware - authHeader:', authHeader ? `${authHeader.substring(0, 30)}...` : 'null')
+    console.log('🔍 Auth middleware - token:', token ? `${token.substring(0, 20)}...` : 'null')
+    console.log('🔍 Auth middleware - endpoint:', req.path)
+
     if (!token) {
+      console.log('❌ No token provided')
       return res.status(401).json({
         success: false,
         error: 'Access token required'
@@ -18,10 +23,11 @@ const authenticateToken = (req, res, next) => {
 
     // Verify token
     const decoded = verifyToken(token)
+    console.log('✅ Token verified successfully for user:', decoded.userId)
     req.user = decoded
     next()
   } catch (error) {
-    console.error('Authentication error:', error)
+    console.error('❌ Authentication error:', error)
     return res.status(403).json({
       success: false,
       error: 'Invalid or expired token'
