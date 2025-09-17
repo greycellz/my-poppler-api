@@ -115,7 +115,17 @@ router.get('/checkout-session', authenticateToken, async (req, res) => {
 
     const session = await stripe.checkout.sessions.retrieve(session_id);
     
-    if (session.customer !== req.user.stripeCustomerId) {
+    // Get user's Stripe customer ID from database (JWT token doesn't include it)
+    const GCPClient = require('../gcp-client');
+    const gcpClient = new GCPClient();
+    const userDoc = await gcpClient.firestore.collection('users').doc(req.user.userId).get();
+    
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const userData = userDoc.data();
+    if (session.customer !== userData.stripeCustomerId) {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
