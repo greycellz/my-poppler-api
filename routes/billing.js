@@ -276,12 +276,19 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       }
     }
 
+    // Determine the effective status
+    let effectiveStatus = subscription.status;
+    if (subscription.cancel_at_period_end) {
+      effectiveStatus = 'canceled_at_period_end';
+    }
+
     res.json({
       plan: effectivePlan, // Show current effective plan (what user has access to)
-      status: subscription.status,
+      status: effectiveStatus,
       interval: effectiveInterval,
       currentPeriodEnd: subscription.current_period_end,
       hipaaEnabled: effectivePlan === 'pro' || effectivePlan === 'enterprise',
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
       scheduledChange: hasScheduledChange ? {
         newPlan: scheduledPlanId,
         newInterval: scheduledInterval,
@@ -329,17 +336,18 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
 
     const subscription = subscriptions.data[0];
     
-    // Cancel the subscription immediately
+    // Cancel the subscription at the end of the current period
+    // This allows users to keep their features until the period ends
     const canceledSubscription = await stripe.subscriptions.update(subscription.id, {
-      cancel_at_period_end: false
+      cancel_at_period_end: true
     });
-    
-    await stripe.subscriptions.cancel(subscription.id);
 
     res.json({ 
       success: true, 
-      message: 'Subscription canceled successfully',
-      subscription: canceledSubscription
+      message: 'Subscription will be canceled at the end of your current billing period',
+      subscription: canceledSubscription,
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: subscription.current_period_end
     });
   } catch (error) {
     console.error('Cancel subscription error:', error);
