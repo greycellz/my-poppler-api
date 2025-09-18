@@ -223,6 +223,10 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
     
+    console.log('🔍 Subscription debug - metadata planId:', planId);
+    console.log('🔍 Subscription debug - metadata interval:', interval);
+    console.log('🔍 Subscription debug - current period end:', subscription.current_period_end);
+    
     // Check if there's a scheduled change (subscription items with different prices)
     let effectivePlan = planId;
     let effectiveInterval = interval;
@@ -232,22 +236,30 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       const currentItem = subscription.items.data[0];
       const currentPriceId = currentItem.price.id;
       
+      console.log('🔍 Subscription debug - current price ID:', currentPriceId);
+      
       // Check if the current price matches the metadata plan
       const expectedPriceId = PRICE_IDS[planId] && PRICE_IDS[planId][interval];
+      console.log('🔍 Subscription debug - expected price ID:', expectedPriceId);
+      
       if (expectedPriceId && currentPriceId !== expectedPriceId) {
-        // There's a scheduled change - find what the current price represents
+        // There's a scheduled change - the current price is what user has access to NOW
         hasScheduledChange = true;
+        console.log('🔍 Subscription debug - scheduled change detected');
         
-        // Find which plan/interval the current price belongs to
+        // Find which plan/interval the current price represents (this is the effective plan)
         for (const [plan, intervals] of Object.entries(PRICE_IDS)) {
           for (const [int, priceId] of Object.entries(intervals)) {
             if (priceId === currentPriceId) {
               effectivePlan = plan;
               effectiveInterval = int;
+              console.log('🔍 Subscription debug - effective plan:', effectivePlan, effectiveInterval);
               break;
             }
           }
         }
+      } else {
+        console.log('🔍 Subscription debug - no scheduled change, using metadata plan');
       }
     }
 
