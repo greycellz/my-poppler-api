@@ -436,7 +436,8 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       });
     } else {
       // Upgrade - immediate change with immediate proration charge
-      const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+      // If subscription is pending cancellation, cancel the cancellation first
+      const updateParams = {
         items: [{
           id: subscription.items.data[0].id,
           price: newPriceId,
@@ -447,11 +448,21 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
           planId: newPlanId,
           interval: interval
         }
-      });
+      };
+
+      // If subscription is pending cancellation, cancel the cancellation
+      if (subscription.cancel_at_period_end) {
+        updateParams.cancel_at_period_end = false;
+        console.log('🔍 Upgrade from pending cancellation - canceling the cancellation');
+      }
+
+      const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
 
       res.json({ 
         success: true, 
-        message: 'Plan upgraded successfully',
+        message: subscription.cancel_at_period_end ? 
+          'Plan upgraded successfully and cancellation canceled' : 
+          'Plan upgraded successfully',
         subscription: updatedSubscription,
         newPlan: newPlanId,
         interval: interval
@@ -518,7 +529,7 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
 
   // Monthly -> Annual (upgrade): charge immediately, start a new annual period today
   if (currentInterval === 'monthly' && newInterval === 'annual') {
-    const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+    const updateParams = {
       items: [{
         id: subscription.items.data[0].id,
         price: newPriceId,
@@ -530,11 +541,21 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
         planId: currentPlanId,
         interval: 'annual'
       }
-    })
+    };
+
+    // If subscription is pending cancellation, cancel the cancellation
+    if (subscription.cancel_at_period_end) {
+      updateParams.cancel_at_period_end = false;
+      console.log('🔍 Monthly->Annual upgrade from pending cancellation - canceling the cancellation');
+    }
+
+    const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
 
     return res.json({
       success: true,
-      message: 'Billing interval upgraded to annual immediately',
+      message: subscription.cancel_at_period_end ? 
+        'Billing interval upgraded to annual immediately and cancellation canceled' :
+        'Billing interval upgraded to annual immediately',
       subscription: updatedSubscription,
       newInterval: newInterval
     })
@@ -542,7 +563,7 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
 
   // Annual -> Monthly (downgrade): defer to end of current period, no proration
   if (currentInterval === 'annual' && newInterval === 'monthly') {
-    const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+    const updateParams = {
       items: [{
         id: subscription.items.data[0].id,
         price: newPriceId,
@@ -555,11 +576,21 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
         scheduledInterval: 'monthly',
         scheduledChangeDate: subscription.current_period_end
       }
-    })
+    };
+
+    // If subscription is pending cancellation, cancel the cancellation
+    if (subscription.cancel_at_period_end) {
+      updateParams.cancel_at_period_end = false;
+      console.log('🔍 Annual->Monthly downgrade from pending cancellation - canceling the cancellation');
+    }
+
+    const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
 
     return res.json({
       success: true,
-      message: 'Billing interval change to monthly scheduled for end of period',
+      message: subscription.cancel_at_period_end ? 
+        'Billing interval change to monthly scheduled for end of period and cancellation canceled' :
+        'Billing interval change to monthly scheduled for end of period',
       subscription: updatedSubscription,
       newInterval: newInterval,
       effectiveDate: subscription.current_period_end
