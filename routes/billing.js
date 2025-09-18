@@ -427,13 +427,13 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         effectiveDate: subscription.current_period_end
       });
     } else {
-      // Upgrade - immediate change with proration
+      // Upgrade - immediate change with immediate proration charge
       const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
         items: [{
           id: subscription.items.data[0].id,
           price: newPriceId,
         }],
-        proration_behavior: 'create_prorations', // Immediate upgrade with proration
+        proration_behavior: 'always_invoice', // Charge proration immediately, not on next invoice
         metadata: {
           userId: userId,
           planId: newPlanId,
