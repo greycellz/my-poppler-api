@@ -222,45 +222,27 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     const subscription = subscriptions.data[0];
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
+    const scheduledPlanId = subscription.metadata.scheduledPlanId;
+    const scheduledInterval = subscription.metadata.scheduledInterval;
     
     console.log('🔍 Subscription debug - metadata planId:', planId);
     console.log('🔍 Subscription debug - metadata interval:', interval);
+    console.log('🔍 Subscription debug - scheduledPlanId:', scheduledPlanId);
+    console.log('🔍 Subscription debug - scheduledInterval:', scheduledInterval);
     console.log('🔍 Subscription debug - current period end:', subscription.current_period_end);
     
-    // Check if there's a scheduled change (subscription items with different prices)
+    // Check if there's a scheduled change
     let effectivePlan = planId;
     let effectiveInterval = interval;
     let hasScheduledChange = false;
     
-    if (subscription.items.data.length > 0) {
-      const currentItem = subscription.items.data[0];
-      const currentPriceId = currentItem.price.id;
-      
-      console.log('🔍 Subscription debug - current price ID:', currentPriceId);
-      
-      // Check if the current price matches the metadata plan
-      const expectedPriceId = PRICE_IDS[planId] && PRICE_IDS[planId][interval];
-      console.log('🔍 Subscription debug - expected price ID:', expectedPriceId);
-      
-      if (expectedPriceId && currentPriceId !== expectedPriceId) {
-        // There's a scheduled change - the current price is what user has access to NOW
-        hasScheduledChange = true;
-        console.log('🔍 Subscription debug - scheduled change detected');
-        
-        // Find which plan/interval the current price represents (this is the effective plan)
-        for (const [plan, intervals] of Object.entries(PRICE_IDS)) {
-          for (const [int, priceId] of Object.entries(intervals)) {
-            if (priceId === currentPriceId) {
-              effectivePlan = plan;
-              effectiveInterval = int;
-              console.log('🔍 Subscription debug - effective plan:', effectivePlan, effectiveInterval);
-              break;
-            }
-          }
-        }
-      } else {
-        console.log('🔍 Subscription debug - no scheduled change, using metadata plan');
-      }
+    if (scheduledPlanId && scheduledPlanId !== planId) {
+      // There's a scheduled change - user keeps current plan until period ends
+      hasScheduledChange = true;
+      console.log('🔍 Subscription debug - scheduled change detected via metadata');
+      console.log('🔍 Subscription debug - effective plan:', effectivePlan, effectiveInterval);
+    } else {
+      console.log('🔍 Subscription debug - no scheduled change, using metadata plan');
     }
 
     res.json({
@@ -270,8 +252,8 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       currentPeriodEnd: subscription.current_period_end,
       hipaaEnabled: effectivePlan === 'pro' || effectivePlan === 'enterprise',
       scheduledChange: hasScheduledChange ? {
-        newPlan: planId,
-        newInterval: interval,
+        newPlan: scheduledPlanId,
+        newInterval: scheduledInterval,
         effectiveDate: subscription.current_period_end
       } : null
     });
@@ -375,27 +357,85 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     const subscription = subscriptions.data[0];
     const newPriceId = PRICE_IDS[newPlanId][interval];
     
-    // Update subscription with new plan - schedule change for end of period
-    const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
-      items: [{
-        id: subscription.items.data[0].id,
-        price: newPriceId,
-      }],
-      proration_behavior: 'none', // No proration - keep current plan until period ends
-      metadata: {
-        userId: userId,
-        planId: newPlanId,
-        interval: interval
-      }
-    });
+    // For downgrades, use subscription schedules to change at end of period
+    // For upgrades, use immediate change with proration
+    const isDowngrade = (planId === 'pro' && newPlanId === 'basic') || 
+                       (planId === 'enterprise' && (newPlanId === 'pro' || newPlanId === 'basic')) ||
+                       (planId === 'pro' && newPlanId === 'basic');
+    
+    if (isDowngrade) {
+      // Create a subscription schedule for end-of-period change
+      const schedule = await stripe.subscriptionSchedules.create({
+        from_subscription: subscription.id,
+        phases: [
+          {
+            // Current phase - keep existing plan until period ends
+            items: [{
+              price: subscription.items.data[0].price.id,
+              quantity: 1,
+            }],
+            end_date: subscription.current_period_end,
+          },
+          {
+            // Next phase - new plan starts after current period
+            items: [{
+              price: newPriceId,
+              quantity: 1,
+            }],
+            // No end_date means it continues indefinitely
+          }
+        ],
+        metadata: {
+          userId: userId,
+          planId: newPlanId,
+          interval: interval
+        }
+      });
+      
+      // Update the original subscription metadata to track the scheduled change
+      const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+        metadata: {
+          userId: userId,
+          planId: subscription.metadata.planId, // Keep current plan in metadata
+          interval: subscription.metadata.interval,
+          scheduledPlanId: newPlanId, // Track scheduled change
+          scheduledInterval: interval,
+          scheduleId: schedule.id
+        }
+      });
+      
+      res.json({ 
+        success: true, 
+        message: 'Plan change scheduled for end of current period',
+        subscription: updatedSubscription,
+        newPlan: newPlanId,
+        interval: interval,
+        effectiveDate: subscription.current_period_end
+      });
+    } else {
+      // Upgrade - immediate change with proration
+      const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+        items: [{
+          id: subscription.items.data[0].id,
+          price: newPriceId,
+        }],
+        proration_behavior: 'create_prorations', // Immediate upgrade with proration
+        metadata: {
+          userId: userId,
+          planId: newPlanId,
+          interval: interval
+        }
+      });
 
-    res.json({ 
-      success: true, 
-      message: 'Plan changed successfully',
-      subscription: updatedSubscription,
-      newPlan: newPlanId,
-      interval: interval
-    });
+      res.json({ 
+        success: true, 
+        message: 'Plan upgraded successfully',
+        subscription: updatedSubscription,
+        newPlan: newPlanId,
+        interval: interval
+      });
+    }
+
   } catch (error) {
     console.error('Change plan error:', error);
     res.status(500).json({ error: 'Failed to change plan' });
