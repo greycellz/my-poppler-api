@@ -355,13 +355,18 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     }
 
     const subscription = subscriptions.data[0];
+    const currentPlanId = subscription.metadata.planId;
     const newPriceId = PRICE_IDS[newPlanId][interval];
+    
+    console.log('🔍 Change plan debug - current plan:', currentPlanId);
+    console.log('🔍 Change plan debug - new plan:', newPlanId);
     
     // For downgrades, use subscription schedules to change at end of period
     // For upgrades, use immediate change with proration
-    const isDowngrade = (planId === 'pro' && newPlanId === 'basic') || 
-                       (planId === 'enterprise' && (newPlanId === 'pro' || newPlanId === 'basic')) ||
-                       (planId === 'pro' && newPlanId === 'basic');
+    const isDowngrade = (currentPlanId === 'pro' && newPlanId === 'basic') || 
+                       (currentPlanId === 'enterprise' && (newPlanId === 'pro' || newPlanId === 'basic'));
+    
+    console.log('🔍 Change plan debug - is downgrade:', isDowngrade);
     
     if (isDowngrade) {
       // Create a subscription schedule for end-of-period change
