@@ -222,13 +222,46 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     const subscription = subscriptions.data[0];
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
+    
+    // Check if there's a scheduled change (subscription items with different prices)
+    let effectivePlan = planId;
+    let effectiveInterval = interval;
+    let hasScheduledChange = false;
+    
+    if (subscription.items.data.length > 0) {
+      const currentItem = subscription.items.data[0];
+      const currentPriceId = currentItem.price.id;
+      
+      // Check if the current price matches the metadata plan
+      const expectedPriceId = PRICE_IDS[planId] && PRICE_IDS[planId][interval];
+      if (expectedPriceId && currentPriceId !== expectedPriceId) {
+        // There's a scheduled change - find what the current price represents
+        hasScheduledChange = true;
+        
+        // Find which plan/interval the current price belongs to
+        for (const [plan, intervals] of Object.entries(PRICE_IDS)) {
+          for (const [int, priceId] of Object.entries(intervals)) {
+            if (priceId === currentPriceId) {
+              effectivePlan = plan;
+              effectiveInterval = int;
+              break;
+            }
+          }
+        }
+      }
+    }
 
     res.json({
-      plan: planId,
+      plan: effectivePlan, // Show current effective plan (what user has access to)
       status: subscription.status,
-      interval: interval,
+      interval: effectiveInterval,
       currentPeriodEnd: subscription.current_period_end,
-      hipaaEnabled: planId === 'pro' || planId === 'enterprise'
+      hipaaEnabled: effectivePlan === 'pro' || effectivePlan === 'enterprise',
+      scheduledChange: hasScheduledChange ? {
+        newPlan: planId,
+        newInterval: interval,
+        effectiveDate: subscription.current_period_end
+      } : null
     });
   } catch (error) {
     console.error('Stripe subscription retrieval error:', error);
@@ -330,13 +363,13 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     const subscription = subscriptions.data[0];
     const newPriceId = PRICE_IDS[newPlanId][interval];
     
-    // Update subscription with new plan
+    // Update subscription with new plan - schedule change for end of period
     const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
       items: [{
         id: subscription.items.data[0].id,
         price: newPriceId,
       }],
-      proration_behavior: 'create_prorations',
+      proration_behavior: 'none', // No proration - keep current plan until period ends
       metadata: {
         userId: userId,
         planId: newPlanId,
@@ -403,13 +436,13 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     const subscription = subscriptions.data[0];
     const newPriceId = PRICE_IDS[currentPlanId][newInterval];
     
-    // Update subscription with new interval
+    // Update subscription with new interval - schedule change for end of period
     const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
       items: [{
         id: subscription.items.data[0].id,
         price: newPriceId,
       }],
-      proration_behavior: 'create_prorations',
+      proration_behavior: 'none', // No proration - keep current billing until period ends
       metadata: {
         userId: userId,
         planId: currentPlanId,
