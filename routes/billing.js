@@ -150,6 +150,7 @@ router.get('/checkout-session', authenticateToken, async (req, res) => {
 router.post('/create-portal-session', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
+    console.log('🔍 Portal session - userId:', userId);
     
     // Get user's Stripe customer ID from database (JWT token doesn't include it)
     const GCPClient = require('../gcp-client');
@@ -157,19 +158,45 @@ router.post('/create-portal-session', authenticateToken, async (req, res) => {
     const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
+      console.log('🔍 Portal session - user not found');
       return res.status(404).json({ error: 'User not found' });
     }
     
     const userData = userDoc.data();
     const customerId = userData.stripeCustomerId;
+    console.log('🔍 Portal session - customerId:', customerId);
 
     if (!customerId) {
+      console.log('🔍 Portal session - no customer ID found');
       return res.status(400).json({ error: 'No subscription found' });
     }
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: `${process.env.FRONTEND_URL}/billing`,
+      configuration: {
+        business_profile: {
+          headline: 'ChatterForms - AI-Powered Form Builder',
+        },
+        features: {
+          payment_method_update: {
+            enabled: true,
+          },
+          subscription_cancel: {
+            enabled: true,
+            mode: 'at_period_end',
+            proration_behavior: 'none',
+          },
+          subscription_pause: {
+            enabled: false,
+          },
+          subscription_update: {
+            enabled: true,
+            default_allowed_updates: ['price', 'promotion_code'],
+            proration_behavior: 'always_invoice',
+          },
+        },
+      },
     });
 
     res.json({ url: session.url });
