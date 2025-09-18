@@ -502,26 +502,64 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     const subscription = subscriptions.data[0];
     const newPriceId = PRICE_IDS[currentPlanId][newInterval];
     
-    // Update subscription with new interval - schedule change for end of period
+  // Determine current interval from subscription
+  const currentInterval = subscription.metadata?.interval || subscription.items.data[0]?.price?.recurring?.interval || 'monthly'
+
+  console.log('🔍 Change interval debug - current interval:', currentInterval)
+  console.log('🔍 Change interval debug - new interval:', newInterval)
+
+  // Monthly -> Annual (upgrade): charge immediately, start a new annual period today
+  if (currentInterval === 'monthly' && newInterval === 'annual') {
     const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
       items: [{
         id: subscription.items.data[0].id,
         price: newPriceId,
       }],
-      proration_behavior: 'none', // No proration - keep current billing until period ends
+      proration_behavior: 'always_invoice', // charge/prorate immediately
+      billing_cycle_anchor: 'now',          // reset period to start today
       metadata: {
         userId: userId,
         planId: currentPlanId,
-        interval: newInterval
+        interval: 'annual'
       }
-    });
+    })
 
-    res.json({ 
-      success: true, 
-      message: `Billing changed to ${newInterval} successfully`,
+    return res.json({
+      success: true,
+      message: 'Billing interval upgraded to annual immediately',
       subscription: updatedSubscription,
       newInterval: newInterval
-    });
+    })
+  }
+
+  // Annual -> Monthly (downgrade): defer to end of current period, no proration
+  if (currentInterval === 'annual' && newInterval === 'monthly') {
+    const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+      items: [{
+        id: subscription.items.data[0].id,
+        price: newPriceId,
+      }],
+      proration_behavior: 'none', // take effect next period
+      metadata: {
+        userId: userId,
+        planId: currentPlanId,
+        interval: currentInterval,
+        scheduledInterval: 'monthly',
+        scheduledChangeDate: subscription.current_period_end
+      }
+    })
+
+    return res.json({
+      success: true,
+      message: 'Billing interval change to monthly scheduled for end of period',
+      subscription: updatedSubscription,
+      newInterval: newInterval,
+      effectiveDate: subscription.current_period_end
+    })
+  }
+
+  // No-op or unsupported transition
+  return res.status(400).json({ error: `No interval change performed from ${currentInterval} to ${newInterval}` })
   } catch (error) {
     console.error('Change interval error:', error);
     res.status(500).json({ error: 'Failed to change billing interval' });
