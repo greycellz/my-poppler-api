@@ -242,7 +242,38 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       console.log('🔍 Subscription debug - scheduled change detected via metadata');
       console.log('🔍 Subscription debug - effective plan:', effectivePlan, effectiveInterval);
     } else {
-      console.log('🔍 Subscription debug - no scheduled change, using metadata plan');
+      // Check if there's a mismatch between current price and metadata plan
+      // This happens when proration_behavior: 'none' is used
+      if (subscription.items.data.length > 0) {
+        const currentItem = subscription.items.data[0];
+        const currentPriceId = currentItem.price.id;
+        const expectedPriceId = PRICE_IDS[planId] && PRICE_IDS[planId][interval];
+        
+        console.log('🔍 Subscription debug - current price ID:', currentPriceId);
+        console.log('🔍 Subscription debug - expected price ID:', expectedPriceId);
+        
+        if (expectedPriceId && currentPriceId !== expectedPriceId) {
+          // The subscription item has been changed but billing hasn't started yet
+          // User still has access to the original plan
+          hasScheduledChange = true;
+          console.log('🔍 Subscription debug - scheduled change detected via price mismatch');
+          console.log('🔍 Subscription debug - effective plan:', effectivePlan, effectiveInterval);
+          
+          // Find what the current price represents (this is what they'll be billed for next period)
+          for (const [plan, intervals] of Object.entries(PRICE_IDS)) {
+            for (const [int, priceId] of Object.entries(intervals)) {
+              if (priceId === currentPriceId) {
+                // Update the scheduled change info
+                scheduledPlanId = plan;
+                scheduledInterval = int;
+                break;
+              }
+            }
+          }
+        } else {
+          console.log('🔍 Subscription debug - no scheduled change, using metadata plan');
+        }
+      }
     }
 
     res.json({
@@ -369,43 +400,21 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     console.log('🔍 Change plan debug - is downgrade:', isDowngrade);
     
     if (isDowngrade) {
-      // Create a subscription schedule for end-of-period change
-      const schedule = await stripe.subscriptionSchedules.create({
-        from_subscription: subscription.id,
-        phases: [
-          {
-            // Current phase - keep existing plan until period ends
-            items: [{
-              price: subscription.items.data[0].price.id,
-              quantity: 1,
-            }],
-            end_date: subscription.current_period_end,
-          },
-          {
-            // Next phase - new plan starts after current period
-            items: [{
-              price: newPriceId,
-              quantity: 1,
-            }],
-            // No end_date means it continues indefinitely
-          }
-        ],
-        metadata: {
-          userId: userId,
-          planId: newPlanId,
-          interval: interval
-        }
-      });
-      
-      // Update the original subscription metadata to track the scheduled change
+      // For downgrades, use a simpler approach: update subscription with proration_behavior: 'none'
+      // and track the scheduled change in metadata
       const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+        items: [{
+          id: subscription.items.data[0].id,
+          price: newPriceId,
+        }],
+        proration_behavior: 'none', // No proration - keep current plan until period ends
         metadata: {
           userId: userId,
           planId: subscription.metadata.planId, // Keep current plan in metadata
           interval: subscription.metadata.interval,
           scheduledPlanId: newPlanId, // Track scheduled change
           scheduledInterval: interval,
-          scheduleId: schedule.id
+          scheduledChangeDate: subscription.current_period_end
         }
       });
       
