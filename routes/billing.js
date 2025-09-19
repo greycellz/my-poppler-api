@@ -450,7 +450,10 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         metadata: {
           userId: userId,
           planId: newPlanId,
-          interval: interval
+          interval: interval,
+          scheduledPlanId: null, // Clear any scheduled changes
+          scheduledInterval: null,
+          scheduledChangeDate: null
         }
       };
 
@@ -543,7 +546,10 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
       metadata: {
         userId: userId,
         planId: currentPlanId,
-        interval: 'annual'
+        interval: 'annual',
+        scheduledPlanId: null, // Clear any scheduled changes
+        scheduledInterval: null,
+        scheduledChangeDate: null
       }
     };
 
