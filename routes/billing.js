@@ -174,29 +174,6 @@ router.post('/create-portal-session', authenticateToken, async (req, res) => {
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: `${process.env.FRONTEND_URL}/billing`,
-      configuration: {
-        business_profile: {
-          headline: 'ChatterForms - AI-Powered Form Builder',
-        },
-        features: {
-          payment_method_update: {
-            enabled: true,
-          },
-          subscription_cancel: {
-            enabled: true,
-            mode: 'at_period_end',
-            proration_behavior: 'none',
-          },
-          subscription_pause: {
-            enabled: false,
-          },
-          subscription_update: {
-            enabled: true,
-            default_allowed_updates: ['price', 'promotion_code'],
-            proration_behavior: 'always_invoice',
-          },
-        },
-      },
     });
 
     res.json({ url: session.url });
