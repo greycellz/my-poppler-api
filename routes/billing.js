@@ -138,7 +138,8 @@ router.get('/checkout-session', authenticateToken, async (req, res) => {
       subscription,
       planId,
       interval,
-      customerEmail: session.customer_details.email
+      customerEmail: session.customer_details.email,
+      userName: userData.name || userData.email?.split('@')[0] || 'User'
     });
   } catch (error) {
     console.error('Stripe session retrieval error:', error);
