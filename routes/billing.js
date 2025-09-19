@@ -359,6 +359,62 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
   }
 });
 
+// Resume subscription (cancel the pending cancellation)
+router.post('/resume-subscription', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    // Get user's Stripe customer ID from database
+    const GCPClient = require('../gcp-client');
+    const gcpClient = new GCPClient();
+    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const userData = userDoc.data();
+    const customerId = userData.stripeCustomerId;
+
+    if (!customerId) {
+      return res.status(400).json({ error: 'No subscription found' });
+    }
+
+    // Get active subscription
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: 'active',
+      limit: 1
+    });
+
+    if (subscriptions.data.length === 0) {
+      return res.status(400).json({ error: 'No active subscription found' });
+    }
+
+    const subscription = subscriptions.data[0];
+
+    // Check if subscription is actually pending cancellation
+    if (!subscription.cancel_at_period_end) {
+      return res.status(400).json({ error: 'Subscription is not pending cancellation' });
+    }
+
+    // Resume the subscription by setting cancel_at_period_end to false
+    const resumedSubscription = await stripe.subscriptions.update(subscription.id, {
+      cancel_at_period_end: false
+    });
+
+    res.json({ 
+      success: true, 
+      message: 'Subscription resumed successfully',
+      subscription: resumedSubscription,
+      cancelAtPeriodEnd: false
+    });
+  } catch (error) {
+    console.error('Resume subscription error:', error);
+    res.status(500).json({ error: 'Failed to resume subscription' });
+  }
+});
+
 // Change subscription plan
 router.post('/change-plan', authenticateToken, async (req, res) => {
   try {
