@@ -164,12 +164,16 @@ class GCPClient {
   /**
    * Get form structure from Firestore
    */
-  async getFormStructure(formId) {
+  async getFormStructure(formId, forceFresh = false) {
     try {
-      console.log(`📋 Retrieving form structure: ${formId}`);
+      console.log(`📋 Retrieving form structure: ${formId}${forceFresh ? ' (force fresh)' : ''}`);
       
       const docRef = this.firestore.collection('forms').doc(formId);
-      const doc = await docRef.get();
+      
+      // Force fresh read from server if requested (to avoid cache issues after updates)
+      const doc = forceFresh 
+        ? await docRef.get({ source: 'server' })
+        : await docRef.get();
       
       if (!doc.exists) {
         console.log(`❌ Form not found: ${formId}`);

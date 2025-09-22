@@ -1393,8 +1393,8 @@ app.get('/api/forms/:formId', async (req, res) => {
 
     console.log(`📋 Fetching form: ${formId}`);
     
-    // Get the form data from GCP
-    const form = await gcpClient.getFormStructure(formId);
+    // Get the form data from GCP with fresh read to avoid cache issues after updates
+    const form = await gcpClient.getFormStructure(formId, true);
 
     if (!form) {
       return res.status(404).json({
