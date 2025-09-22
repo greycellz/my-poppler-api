@@ -114,6 +114,14 @@ class GCPClient {
 
       // Decide where to write: auto-save writes to draft_structure only
       const isAutoSave = (metadata?.source === 'auto-save');
+      
+      console.log(`🔍 storeFormStructure debug:`, {
+        formId,
+        source: metadata?.source,
+        isAutoSave,
+        isUpdate,
+        formDataTitle: formData?.title
+      });
 
       const formDoc = {
         form_id: formId,
@@ -135,6 +143,12 @@ class GCPClient {
         isAnonymous: existingData?.isAnonymous || isAnonymous,
         anonymousSessionId: existingData?.anonymousSessionId || anonymousSessionId
       };
+
+      console.log(`🔍 About to store formDoc:`, {
+        structureTitle: formDoc.structure?.title,
+        draftStructureTitle: formDoc.draft_structure?.title,
+        isAutoSave
+      });
 
       await this.firestore
         .collection('forms')
