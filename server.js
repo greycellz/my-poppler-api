@@ -970,10 +970,10 @@ app.get('/form/:formId', async (req, res) => {
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
 
-    // Get form data from Firestore
+    // Get form data from Firestore with fresh read to avoid cache issues after updates
     console.log(`📋 Attempting to retrieve form from Firestore: ${formId}`);
     
-    const formData = await gcpClient.getFormStructure(formId);
+    const formData = await gcpClient.getFormStructure(formId, true);
 
     console.log(`📋 Form retrieval result:`, formData ? 'Found' : 'Not found');
     if (formData) {
