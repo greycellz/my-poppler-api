@@ -973,6 +973,8 @@ app.get('/form/:formId', async (req, res) => {
     // Get form data from Firestore with fresh read to avoid cache issues after updates
     console.log(`📋 Attempting to retrieve form from Firestore: ${formId}`);
     
+    // Add small delay to allow Firestore to propagate changes
+    await new Promise(resolve => setTimeout(resolve, 1000));
     const formData = await gcpClient.getFormStructure(formId, true);
 
     console.log(`📋 Form retrieval result:`, formData ? 'Found' : 'Not found');
