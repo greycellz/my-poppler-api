@@ -990,6 +990,12 @@ app.get('/form/:formId', async (req, res) => {
       });
     }
 
+    // Prevent any intermediary/proxy/browser caching
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Surrogate-Control', 'no-store');
+
     res.json({
       success: true,
       form: formData,
@@ -1406,6 +1412,12 @@ app.get('/api/forms/:formId', async (req, res) => {
         timestamp: new Date().toISOString()
       });
     }
+
+    // Prevent any intermediary/proxy/browser caching
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Surrogate-Control', 'no-store');
 
     res.json({
       success: true,
