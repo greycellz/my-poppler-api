@@ -884,6 +884,7 @@ app.post('/submit-form', async (req, res) => {
     }
 
     console.log(`📤 Processing form submission: ${formId}`);
+    console.log(`🛡️ HIPAA flag received: ${isHipaa} (type: ${typeof isHipaa})`);
     
     // Initialize GCP client
     const GCPClient = require('./gcp-client');
@@ -902,8 +903,11 @@ app.post('/submit-form', async (req, res) => {
 
     let result;
 
+    console.log(`🛡️ HIPAA check: isHipaa=${isHipaa}, will use HIPAA pipeline: ${!!isHipaa}`);
+
     if (isHipaa) {
       // Process as HIPAA-compliant submission
+      console.log(`🛡️ Routing to HIPAA submission pipeline`);
       result = await gcpClient.processHipaaSubmission(
         submissionId,
         formId,
@@ -913,6 +917,7 @@ app.post('/submit-form', async (req, res) => {
       );
     } else {
       // Process as regular submission
+      console.log(`📝 Routing to regular submission pipeline`);
       result = await gcpClient.storeFormSubmission(
         submissionId,
         formId,

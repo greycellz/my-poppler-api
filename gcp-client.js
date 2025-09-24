@@ -244,13 +244,30 @@ class GCPClient {
         .get();
 
       const submissions = [];
-      snapshot.forEach(doc => {
+      for (const doc of snapshot.docs) {
         const data = doc.data();
+        
+        // Decrypt HIPAA data if needed
+        let submissionData = data.submission_data;
+        if (data.is_hipaa && data.encrypted) {
+          try {
+            console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id}`);
+            const decryptedData = await this.decryptData(data.submission_data, 'hipaa-data-key');
+            submissionData = decryptedData;
+            console.log(`✅ HIPAA submission decrypted: ${data.submission_id}`);
+          } catch (error) {
+            console.error(`❌ Failed to decrypt HIPAA submission ${data.submission_id}:`, error);
+            // Keep encrypted data if decryption fails
+            submissionData = data.submission_data;
+          }
+        }
+        
         submissions.push({
           ...data,
+          submission_data: submissionData,
           fileAssociations: data.file_associations || []
         });
-      });
+      }
 
       console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
       return submissions;
@@ -586,13 +603,29 @@ class GCPClient {
         return [];
       }
 
-      const submissions = submissionsSnapshot.docs.map(doc => {
+      const submissions = await Promise.all(submissionsSnapshot.docs.map(async (doc) => {
         const data = doc.data();
+        
+        // Decrypt HIPAA data if needed
+        let submissionData = data.submission_data;
+        if (data.is_hipaa && data.encrypted) {
+          try {
+            console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id}`);
+            const decryptedData = await this.decryptData(data.submission_data, 'hipaa-data-key');
+            submissionData = decryptedData;
+            console.log(`✅ HIPAA submission decrypted: ${data.submission_id}`);
+          } catch (error) {
+            console.error(`❌ Failed to decrypt HIPAA submission ${data.submission_id}:`, error);
+            // Keep encrypted data if decryption fails
+            submissionData = data.submission_data;
+          }
+        }
+        
         return {
           submission_id: data.submission_id,
           form_id: data.form_id,
           user_id: data.user_id,
-          submission_data: data.submission_data,
+          submission_data: submissionData,
           timestamp: data.timestamp?.toDate?.() || data.timestamp,
           ip_address: data.ip_address,
           user_agent: data.user_agent,
@@ -600,7 +633,7 @@ class GCPClient {
           encrypted: data.encrypted,
           file_associations: data.file_associations || []
         };
-      });
+      }));
 
       console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
       return submissions;
