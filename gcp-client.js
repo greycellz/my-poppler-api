@@ -606,6 +606,9 @@ class GCPClient {
       const submissions = await Promise.all(submissionsSnapshot.docs.map(async (doc) => {
         const data = doc.data();
         
+        // Debug logging for each submission
+        console.log(`🔍 Processing submission: ${data.submission_id}, is_hipaa: ${data.is_hipaa}, encrypted: ${data.encrypted}`);
+        
         // Decrypt HIPAA data if needed
         let submissionData = data.submission_data;
         if (data.is_hipaa && data.encrypted) {
@@ -619,9 +622,11 @@ class GCPClient {
             // Keep encrypted data if decryption fails
             submissionData = data.submission_data;
           }
+        } else {
+          console.log(`📝 Non-HIPAA submission, using data as-is: ${data.submission_id}`);
         }
         
-        return {
+        const result = {
           submission_id: data.submission_id,
           form_id: data.form_id,
           user_id: data.user_id,
@@ -633,6 +638,11 @@ class GCPClient {
           encrypted: data.encrypted,
           file_associations: data.file_associations || []
         };
+        
+        // Debug: Log sample of submission data
+        console.log(`📊 Submission ${data.submission_id} data sample:`, JSON.stringify(submissionData).substring(0, 200) + '...');
+        
+        return result;
       }));
 
       console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
