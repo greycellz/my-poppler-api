@@ -249,9 +249,15 @@ class GCPClient {
         
         // Decrypt HIPAA data if needed
         let submissionData = data.submission_data;
-        if (data.is_hipaa && data.encrypted) {
+        
+        // Check if this looks like encrypted data (numeric array pattern)
+        const isEncryptedData = typeof data.submission_data === 'object' && 
+                               !Array.isArray(data.submission_data) && 
+                               Object.keys(data.submission_data).every(key => !isNaN(key));
+        
+        if (data.is_hipaa && (data.encrypted || isEncryptedData)) {
           try {
-            console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id}`);
+            console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id} (encrypted: ${data.encrypted}, looks encrypted: ${isEncryptedData})`);
             const decryptedData = await this.decryptData(data.submission_data, 'hipaa-data-key');
             submissionData = decryptedData;
             console.log(`✅ HIPAA submission decrypted: ${data.submission_id}`);
@@ -611,9 +617,15 @@ class GCPClient {
         
         // Decrypt HIPAA data if needed
         let submissionData = data.submission_data;
-        if (data.is_hipaa && data.encrypted) {
+        
+        // Check if this looks like encrypted data (numeric array pattern)
+        const isEncryptedData = typeof data.submission_data === 'object' && 
+                               !Array.isArray(data.submission_data) && 
+                               Object.keys(data.submission_data).every(key => !isNaN(key));
+        
+        if (data.is_hipaa && (data.encrypted || isEncryptedData)) {
           try {
-            console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id}`);
+            console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id} (encrypted: ${data.encrypted}, looks encrypted: ${isEncryptedData})`);
             const decryptedData = await this.decryptData(data.submission_data, 'hipaa-data-key');
             submissionData = decryptedData;
             console.log(`✅ HIPAA submission decrypted: ${data.submission_id}`);
