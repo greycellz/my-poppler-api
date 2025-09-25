@@ -1452,6 +1452,9 @@ app.get('/api/forms/:formId/submissions', async (req, res) => {
       });
     }
     
+    console.log(`📋 BACKEND: /api/forms/${formId}/submissions endpoint called`);
+    console.log(`📋 BACKEND: Request timestamp: ${new Date().toISOString()}`);
+    console.log(`📋 BACKEND: Request headers:`, JSON.stringify(req.headers, null, 2));
     console.log(`📋 Fetching submissions for form: ${formId}`);
     
     // Initialize GCP client
@@ -1463,6 +1466,7 @@ app.get('/api/forms/:formId/submissions', async (req, res) => {
     
     if (submissions) {
       console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
+      console.log(`📤 BACKEND: Sending response for form: ${formId} with ${submissions.length} submissions`);
       res.json({
         success: true,
         formId,
@@ -1471,6 +1475,7 @@ app.get('/api/forms/:formId/submissions', async (req, res) => {
         timestamp: new Date().toISOString()
       });
     } else {
+      console.log(`📤 BACKEND: Sending empty response for form: ${formId}`);
       res.json({
         success: true,
         formId,
