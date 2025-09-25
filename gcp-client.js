@@ -259,16 +259,16 @@ class GCPClient {
           try {
             console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id} (encrypted: ${data.encrypted}, looks encrypted: ${isEncryptedData})`);
             console.log(`🔑 Attempting decryption with key: hipaa-data-key`);
-            const decryptedData = await this.decryptData(data.submission_data, 'hipaa-data-key');
-            submissionData = decryptedData;
+            const decryptedResult = await this.decryptData(data.submission_data, 'hipaa-data-key');
+            submissionData = decryptedResult.decryptedData;
             console.log(`✅ HIPAA submission decrypted: ${data.submission_id}`);
           } catch (error) {
             console.error(`❌ Failed to decrypt HIPAA submission ${data.submission_id} with hipaa-data-key:`, error.message);
             // Try with the default key as fallback
             try {
               console.log(`🔑 Attempting decryption with fallback key: form-data-key`);
-              const decryptedData = await this.decryptData(data.submission_data, 'form-data-key');
-              submissionData = decryptedData;
+              const decryptedResult = await this.decryptData(data.submission_data, 'form-data-key');
+              submissionData = decryptedResult.decryptedData;
               console.log(`✅ HIPAA submission decrypted with fallback key: ${data.submission_id}`);
             } catch (fallbackError) {
               console.error(`❌ Failed to decrypt HIPAA submission ${data.submission_id} with fallback key:`, fallbackError.message);
@@ -637,16 +637,16 @@ class GCPClient {
           try {
             console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id} (encrypted: ${data.encrypted}, looks encrypted: ${isEncryptedData})`);
             console.log(`🔑 Attempting decryption with key: hipaa-data-key`);
-            const decryptedData = await this.decryptData(data.submission_data, 'hipaa-data-key');
-            submissionData = decryptedData;
+            const decryptedResult = await this.decryptData(data.submission_data, 'hipaa-data-key');
+            submissionData = decryptedResult.decryptedData;
             console.log(`✅ HIPAA submission decrypted: ${data.submission_id}`);
           } catch (error) {
             console.error(`❌ Failed to decrypt HIPAA submission ${data.submission_id} with hipaa-data-key:`, error.message);
             // Try with the default key as fallback
             try {
               console.log(`🔑 Attempting decryption with fallback key: form-data-key`);
-              const decryptedData = await this.decryptData(data.submission_data, 'form-data-key');
-              submissionData = decryptedData;
+              const decryptedResult = await this.decryptData(data.submission_data, 'form-data-key');
+              submissionData = decryptedResult.decryptedData;
               console.log(`✅ HIPAA submission decrypted with fallback key: ${data.submission_id}`);
             } catch (fallbackError) {
               console.error(`❌ Failed to decrypt HIPAA submission ${data.submission_id} with fallback key:`, fallbackError.message);
