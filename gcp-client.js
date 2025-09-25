@@ -740,6 +740,10 @@ class GCPClient {
       });
 
       console.log(`✅ Data encrypted with key: ${keyName}`);
+      console.log(`🔍 Encryption debug - ciphertext type: ${typeof result.ciphertext}, isBuffer: ${Buffer.isBuffer(result.ciphertext)}`);
+      console.log(`🔍 Encryption debug - ciphertext length: ${result.ciphertext.length}`);
+      console.log(`🔍 Encryption debug - first 50 chars of base64: ${result.ciphertext.toString('base64').substring(0, 50)}`);
+      
       return {
         success: true,
         encryptedData: result.ciphertext.toString('base64'), // Convert Buffer to base64 string for Firestore storage
@@ -764,16 +768,25 @@ class GCPClient {
 
       // Handle both old format (numeric object) and new format (base64 string)
       let ciphertextBuffer;
+      console.log(`🔍 Decryption debug - encryptedData type: ${typeof encryptedData}`);
+      console.log(`🔍 Decryption debug - encryptedData isArray: ${Array.isArray(encryptedData)}`);
+      console.log(`🔍 Decryption debug - encryptedData keys: ${Object.keys(encryptedData).slice(0, 10).join(', ')}`);
+      
       if (typeof encryptedData === 'string') {
         // New format: base64 string
+        console.log(`🔍 Decryption debug - treating as base64 string, length: ${encryptedData.length}`);
         ciphertextBuffer = Buffer.from(encryptedData, 'base64');
       } else if (typeof encryptedData === 'object' && !Array.isArray(encryptedData)) {
         // Old format: numeric object (convert back to Buffer)
+        console.log(`🔍 Decryption debug - treating as numeric object, keys count: ${Object.keys(encryptedData).length}`);
         const numericArray = Object.values(encryptedData);
+        console.log(`🔍 Decryption debug - numeric array length: ${numericArray.length}, first 10 values: ${numericArray.slice(0, 10).join(', ')}`);
         ciphertextBuffer = Buffer.from(numericArray);
       } else {
         throw new Error('Invalid encrypted data format');
       }
+      
+      console.log(`🔍 Decryption debug - final ciphertextBuffer length: ${ciphertextBuffer.length}`);
 
       const [result] = await this.kmsClient.decrypt({
         name: keyPath,
