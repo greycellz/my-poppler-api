@@ -331,7 +331,7 @@ class GCPClient {
         ip_address: metadata.ipAddress,
         user_agent: metadata.userAgent,
         is_hipaa: metadata.isHipaa || false,
-        encrypted: false, // Will be encrypted by KMS
+        encrypted: metadata.encrypted || false, // Set based on metadata
       };
 
       await this.firestore
@@ -742,7 +742,7 @@ class GCPClient {
       console.log(`✅ Data encrypted with key: ${keyName}`);
       return {
         success: true,
-        encryptedData: result.ciphertext,
+        encryptedData: result.ciphertext.toString('base64'), // Convert Buffer to base64 string for Firestore storage
       };
     } catch (error) {
       console.error('❌ Error encrypting data:', error);
@@ -762,9 +762,22 @@ class GCPClient {
         keyName
       );
 
+      // Handle both old format (numeric object) and new format (base64 string)
+      let ciphertextBuffer;
+      if (typeof encryptedData === 'string') {
+        // New format: base64 string
+        ciphertextBuffer = Buffer.from(encryptedData, 'base64');
+      } else if (typeof encryptedData === 'object' && !Array.isArray(encryptedData)) {
+        // Old format: numeric object (convert back to Buffer)
+        const numericArray = Object.values(encryptedData);
+        ciphertextBuffer = Buffer.from(numericArray);
+      } else {
+        throw new Error('Invalid encrypted data format');
+      }
+
       const [result] = await this.kmsClient.decrypt({
         name: keyPath,
-        ciphertext: encryptedData,
+        ciphertext: ciphertextBuffer,
       });
 
       const decryptedData = JSON.parse(
