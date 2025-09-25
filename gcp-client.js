@@ -744,9 +744,10 @@ class GCPClient {
       console.log(`🔍 Encryption debug - ciphertext length: ${result.ciphertext.length}`);
       console.log(`🔍 Encryption debug - first 50 chars of base64: ${result.ciphertext.toString('base64').substring(0, 50)}`);
       
+      // Store as Buffer directly - Firestore handles Buffers correctly
       return {
         success: true,
-        encryptedData: result.ciphertext.toString('base64'), // Convert Buffer to base64 string for Firestore storage
+        encryptedData: result.ciphertext, // Store Buffer directly instead of base64 string
       };
     } catch (error) {
       console.error('❌ Error encrypting data:', error);
@@ -766,19 +767,23 @@ class GCPClient {
         keyName
       );
 
-      // Handle both old format (numeric object) and new format (base64 string)
+      // Handle different formats: Buffer (new), base64 string, or numeric object (old corrupted)
       let ciphertextBuffer;
       console.log(`🔍 Decryption debug - encryptedData type: ${typeof encryptedData}`);
       console.log(`🔍 Decryption debug - encryptedData isArray: ${Array.isArray(encryptedData)}`);
-      console.log(`🔍 Decryption debug - encryptedData keys: ${Object.keys(encryptedData).slice(0, 10).join(', ')}`);
+      console.log(`🔍 Decryption debug - encryptedData isBuffer: ${Buffer.isBuffer(encryptedData)}`);
       
-      if (typeof encryptedData === 'string') {
-        // New format: base64 string
+      if (Buffer.isBuffer(encryptedData)) {
+        // New format: Buffer (stored directly)
+        console.log(`🔍 Decryption debug - treating as Buffer, length: ${encryptedData.length}`);
+        ciphertextBuffer = encryptedData;
+      } else if (typeof encryptedData === 'string') {
+        // Fallback: base64 string
         console.log(`🔍 Decryption debug - treating as base64 string, length: ${encryptedData.length}`);
         ciphertextBuffer = Buffer.from(encryptedData, 'base64');
       } else if (typeof encryptedData === 'object' && !Array.isArray(encryptedData)) {
-        // Old format: numeric object (convert back to Buffer)
-        console.log(`🔍 Decryption debug - treating as numeric object, keys count: ${Object.keys(encryptedData).length}`);
+        // Old corrupted format: numeric object (character-by-character)
+        console.log(`🔍 Decryption debug - treating as corrupted numeric object, keys count: ${Object.keys(encryptedData).length}`);
         const numericArray = Object.values(encryptedData);
         console.log(`🔍 Decryption debug - numeric array length: ${numericArray.length}, first 10 values: ${numericArray.slice(0, 10).join(', ')}`);
         ciphertextBuffer = Buffer.from(numericArray);
