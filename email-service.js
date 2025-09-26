@@ -35,7 +35,7 @@ class EmailService {
             <p><strong>Public URL:</strong> <a href="${publicUrl}" style="color: #2563eb;">${publicUrl}</a></p>
             <p>You can view submissions and manage your form from your dashboard.</p>
             <p style="margin: 20px 0;">
-              <a href="${dashboardUrl}" style="background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500;">View Dashboard</a>
+              <a href="${dashboardUrl}" style="color: #4F46E5; text-decoration: underline;">Access your dashboard</a>
             </p>
             <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
             <p style="color: #6b7280; font-size: 12px;">This email was sent from ChatterForms</p>
@@ -91,8 +91,7 @@ class EmailService {
             <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
             ${content}
             <p style="margin: 20px 0;">
-              <a href="${submissionsUrl}" style="background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500;">View Submissions</a>
-              <a href="${dashboardUrl}" style="background-color: #6B7280; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500; margin-left: 10px;">Dashboard</a>
+              <a href="${submissionsUrl}" style="color: #4F46E5; text-decoration: underline;">View submissions in your dashboard</a>
             </p>
             <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
             <p style="color: #6b7280; font-size: 12px;">This email was sent from ChatterForms</p>
@@ -142,7 +141,7 @@ class EmailService {
             <p><strong>Deleted at:</strong> ${new Date().toLocaleString()}</p>
             <p>This form and all its submissions have been permanently removed.</p>
             <p style="margin: 20px 0;">
-              <a href="${dashboardUrl}" style="background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500;">View Dashboard</a>
+              <a href="${dashboardUrl}" style="color: #4F46E5; text-decoration: underline;">Access your dashboard</a>
             </p>
             <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
             <p style="color: #6b7280; font-size: 12px;">This email was sent from ChatterForms</p>
