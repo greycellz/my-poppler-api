@@ -1,4 +1,4 @@
-FROM node:18
+FROM node:18-slim
 
 # Install system dependencies for both Poppler and Puppeteer
 RUN apt-get update && apt-get install -y \

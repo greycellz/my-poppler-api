@@ -22,6 +22,9 @@ app.set('trust proxy', 1);
 const GCPClient = require('./gcp-client');
 const gcpClient = new GCPClient();
 
+// Initialize Email Service
+const emailService = require('./email-service');
+
 // Environment-aware base URL construction
 const getBaseUrl = () => {
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
@@ -1697,6 +1700,116 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ============== EMAIL API ENDPOINTS ==============
+
+// Send form published email
+app.post('/api/emails/send-form-published', async (req, res) => {
+  try {
+    const { userEmail, formTitle, publicUrl } = req.body;
+    
+    if (!userEmail || !formTitle || !publicUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userEmail, formTitle, publicUrl'
+      });
+    }
+    
+    console.log(`📧 Form published email request for: ${formTitle}`);
+    const result = await emailService.sendFormPublishedEmail(userEmail, formTitle, publicUrl);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        messageId: result.messageId,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error in form published email endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Send form submission email
+app.post('/api/emails/send-form-submission', async (req, res) => {
+  try {
+    const { userEmail, formTitle, submissionData, isHipaa = false } = req.body;
+    
+    if (!userEmail || !formTitle || !submissionData) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userEmail, formTitle, submissionData'
+      });
+    }
+    
+    console.log(`📧 Form submission email request for: ${formTitle} (HIPAA: ${isHipaa})`);
+    const result = await emailService.sendFormSubmissionEmail(userEmail, formTitle, submissionData, isHipaa);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        messageId: result.messageId,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error in form submission email endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Send form deleted email
+app.post('/api/emails/send-form-deleted', async (req, res) => {
+  try {
+    const { userEmail, formTitle } = req.body;
+    
+    if (!userEmail || !formTitle) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userEmail, formTitle'
+      });
+    }
+    
+    console.log(`📧 Form deleted email request for: ${formTitle}`);
+    const result = await emailService.sendFormDeletedEmail(userEmail, formTitle);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        messageId: result.messageId,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error in form deleted email endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
 // ============== SERVER STARTUP ==============
 
 app.listen(PORT, () => {
@@ -1720,6 +1833,9 @@ app.listen(PORT, () => {
   console.log(`📦 Form Migration: POST ${BASE_URL}/auth/migrate-forms`);
   console.log(`👤 Session Check: GET ${BASE_URL}/auth/session`);
   console.log(`💳 Stripe Webhooks: POST ${BASE_URL}/api/billing/webhook`);
+  console.log(`📧 Form Published Email: POST ${BASE_URL}/api/emails/send-form-published`);
+  console.log(`📧 Form Submission Email: POST ${BASE_URL}/api/emails/send-form-submission`);
+  console.log(`📧 Form Deleted Email: POST ${BASE_URL}/api/emails/send-form-deleted`);
   console.log(`🏥 Health: GET ${BASE_URL}/health`);
   
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
