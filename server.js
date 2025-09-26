@@ -1707,10 +1707,10 @@ app.post('/api/emails/send-form-published', async (req, res) => {
   try {
     const { userEmail, formTitle, publicUrl } = req.body;
     
-    if (!userEmail || !formTitle || !publicUrl) {
+    if (!formTitle || !publicUrl) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: userEmail, formTitle, publicUrl'
+        error: 'Missing required fields: formTitle, publicUrl'
       });
     }
     
@@ -1718,11 +1718,20 @@ app.post('/api/emails/send-form-published', async (req, res) => {
     const result = await emailService.sendFormPublishedEmail(userEmail, formTitle, publicUrl);
     
     if (result.success) {
-      res.json({
-        success: true,
-        messageId: result.messageId,
-        timestamp: new Date().toISOString()
-      });
+      if (result.skipped) {
+        res.json({
+          success: true,
+          skipped: true,
+          reason: result.reason,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        res.json({
+          success: true,
+          messageId: result.messageId,
+          timestamp: new Date().toISOString()
+        });
+      }
     } else {
       res.status(500).json({
         success: false,
@@ -1741,24 +1750,33 @@ app.post('/api/emails/send-form-published', async (req, res) => {
 // Send form submission email
 app.post('/api/emails/send-form-submission', async (req, res) => {
   try {
-    const { userEmail, formTitle, submissionData, isHipaa = false } = req.body;
+    const { userEmail, formTitle, submissionData, isHipaa = false, formId = null } = req.body;
     
-    if (!userEmail || !formTitle || !submissionData) {
+    if (!formTitle || !submissionData) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: userEmail, formTitle, submissionData'
+        error: 'Missing required fields: formTitle, submissionData'
       });
     }
     
     console.log(`📧 Form submission email request for: ${formTitle} (HIPAA: ${isHipaa})`);
-    const result = await emailService.sendFormSubmissionEmail(userEmail, formTitle, submissionData, isHipaa);
+    const result = await emailService.sendFormSubmissionEmail(userEmail, formTitle, submissionData, isHipaa, formId);
     
     if (result.success) {
-      res.json({
-        success: true,
-        messageId: result.messageId,
-        timestamp: new Date().toISOString()
-      });
+      if (result.skipped) {
+        res.json({
+          success: true,
+          skipped: true,
+          reason: result.reason,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        res.json({
+          success: true,
+          messageId: result.messageId,
+          timestamp: new Date().toISOString()
+        });
+      }
     } else {
       res.status(500).json({
         success: false,
@@ -1779,10 +1797,10 @@ app.post('/api/emails/send-form-deleted', async (req, res) => {
   try {
     const { userEmail, formTitle } = req.body;
     
-    if (!userEmail || !formTitle) {
+    if (!formTitle) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: userEmail, formTitle'
+        error: 'Missing required fields: formTitle'
       });
     }
     
@@ -1790,11 +1808,20 @@ app.post('/api/emails/send-form-deleted', async (req, res) => {
     const result = await emailService.sendFormDeletedEmail(userEmail, formTitle);
     
     if (result.success) {
-      res.json({
-        success: true,
-        messageId: result.messageId,
-        timestamp: new Date().toISOString()
-      });
+      if (result.skipped) {
+        res.json({
+          success: true,
+          skipped: true,
+          reason: result.reason,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        res.json({
+          success: true,
+          messageId: result.messageId,
+          timestamp: new Date().toISOString()
+        });
+      }
     } else {
       res.status(500).json({
         success: false,

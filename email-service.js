@@ -14,7 +14,15 @@ class EmailService {
 
   async sendFormPublishedEmail(userEmail, formTitle, publicUrl) {
     try {
+      // Skip if no email provided
+      if (!userEmail || userEmail.trim() === '') {
+        console.log('📧 Skipping form published email - no user email provided');
+        return { success: true, skipped: true, reason: 'No user email provided' };
+      }
+
       console.log(`📧 Sending form published email to: ${userEmail}`);
+      
+      const dashboardUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
       
       const data = await this.mg.messages.create(this.domain, {
         from: this.fromEmail,
@@ -26,6 +34,9 @@ class EmailService {
             <p><strong>Form:</strong> ${formTitle}</p>
             <p><strong>Public URL:</strong> <a href="${publicUrl}" style="color: #2563eb;">${publicUrl}</a></p>
             <p>You can view submissions and manage your form from your dashboard.</p>
+            <p style="margin: 20px 0;">
+              <a href="${dashboardUrl}" style="background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500;">View Dashboard</a>
+            </p>
             <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
             <p style="color: #6b7280; font-size: 12px;">This email was sent from ChatterForms</p>
           </div>
@@ -36,6 +47,7 @@ class EmailService {
           Public URL: ${publicUrl}
           
           You can view submissions and manage your form from your dashboard.
+          Dashboard: ${dashboardUrl}
         `
       });
       
@@ -47,13 +59,22 @@ class EmailService {
     }
   }
 
-  async sendFormSubmissionEmail(userEmail, formTitle, submissionData, isHipaa = false) {
+  async sendFormSubmissionEmail(userEmail, formTitle, submissionData, isHipaa = false, formId = null) {
     try {
+      // Skip if no email provided
+      if (!userEmail || userEmail.trim() === '') {
+        console.log('📧 Skipping form submission email - no user email provided');
+        return { success: true, skipped: true, reason: 'No user email provided' };
+      }
+
       console.log(`📧 Sending form submission email to: ${userEmail} (HIPAA: ${isHipaa})`);
       
       const subject = isHipaa 
         ? `🔒 New HIPAA submission for "${formTitle}"`
         : `📝 New submission for "${formTitle}"`;
+      
+      const dashboardUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+      const submissionsUrl = formId ? `${dashboardUrl}/dashboard?formId=${formId}&tab=submissions` : `${dashboardUrl}/dashboard`;
       
       const content = isHipaa
         ? `<p>You received a new HIPAA-compliant submission. View details in your dashboard.</p>`
@@ -69,6 +90,10 @@ class EmailService {
             <p><strong>Form:</strong> ${formTitle}</p>
             <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
             ${content}
+            <p style="margin: 20px 0;">
+              <a href="${submissionsUrl}" style="background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500;">View Submissions</a>
+              <a href="${dashboardUrl}" style="background-color: #6B7280; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500; margin-left: 10px;">Dashboard</a>
+            </p>
             <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
             <p style="color: #6b7280; font-size: 12px;">This email was sent from ChatterForms</p>
           </div>
@@ -80,6 +105,9 @@ class EmailService {
           Timestamp: ${new Date().toLocaleString()}
           
           ${isHipaa ? 'View details in your dashboard.' : JSON.stringify(submissionData, null, 2)}
+          
+          View Submissions: ${submissionsUrl}
+          Dashboard: ${dashboardUrl}
         `
       });
       
@@ -93,7 +121,15 @@ class EmailService {
 
   async sendFormDeletedEmail(userEmail, formTitle) {
     try {
+      // Skip if no email provided
+      if (!userEmail || userEmail.trim() === '') {
+        console.log('📧 Skipping form deleted email - no user email provided');
+        return { success: true, skipped: true, reason: 'No user email provided' };
+      }
+
       console.log(`📧 Sending form deleted email to: ${userEmail}`);
+      
+      const dashboardUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
       
       const data = await this.mg.messages.create(this.domain, {
         from: this.fromEmail,
@@ -105,6 +141,9 @@ class EmailService {
             <p><strong>Form:</strong> ${formTitle}</p>
             <p><strong>Deleted at:</strong> ${new Date().toLocaleString()}</p>
             <p>This form and all its submissions have been permanently removed.</p>
+            <p style="margin: 20px 0;">
+              <a href="${dashboardUrl}" style="background-color: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 500;">View Dashboard</a>
+            </p>
             <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
             <p style="color: #6b7280; font-size: 12px;">This email was sent from ChatterForms</p>
           </div>
@@ -115,6 +154,8 @@ class EmailService {
           Deleted at: ${new Date().toLocaleString()}
           
           This form and all its submissions have been permanently removed.
+          
+          Dashboard: ${dashboardUrl}
         `
       });
       
