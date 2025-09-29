@@ -1481,7 +1481,7 @@ app.get('/api/submissions/:submissionId/pdf/:fieldId', async (req, res) => {
 
     // Generate signed URL for PDF download
     const downloadUrl = await gcpClient.pdfGenerator.getPDFDownloadURL(
-      pdfData.isHipaa ? 'chatterforms-hipaa-data' : 'chatterforms-data',
+      pdfData.isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1',
       pdfData.filename,
       60 // 60 minutes expiration
     );

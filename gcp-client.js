@@ -879,7 +879,7 @@ class GCPClient {
       }
 
       const formSchema = formDoc.data();
-      const bucketName = isHipaa ? 'chatterforms-hipaa-data' : 'chatterforms-data';
+      const bucketName = isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
 
       // Generate PDF for each signature field
       for (const [fieldId, signatureData] of signatureFields) {
