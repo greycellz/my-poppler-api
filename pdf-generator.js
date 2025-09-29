@@ -20,6 +20,9 @@ class PDFGenerator {
     
     try {
       console.log('📄 Starting PDF generation with signature...');
+      console.log(`📄 Signature data method: ${signatureData.method}`);
+      console.log(`📄 Signature data completedAt: ${signatureData.completedAt}`);
+      console.log(`📄 Signature image size: ${signatureData.imageBase64?.length || 0} characters`);
       
       // Launch browser
       browser = await puppeteer.launch({
@@ -46,6 +49,17 @@ class PDFGenerator {
       });
 
       await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+
+      // Wait for images to load
+      await page.waitForFunction(() => {
+        const images = document.querySelectorAll('img');
+        return Array.from(images).every(img => img.complete && img.naturalHeight !== 0);
+      }, { timeout: 10000 });
+
+      // Add a small delay to ensure everything is rendered
+      await page.waitForTimeout(1000);
+
+      console.log('📄 HTML content set, generating PDF...');
 
       // Generate PDF
       const pdfBuffer = await page.pdf({
