@@ -81,11 +81,6 @@ class PDFGenerator {
         private: true
       });
 
-      // Ensure file is private - no public access
-      await file.acl.delete({
-        entity: 'allUsers'
-      });
-
       console.log(`✅ PDF generated and uploaded: ${filename}`);
 
       return {
