@@ -929,6 +929,9 @@ app.post('/submit-form', async (req, res) => {
         clientMetadata
       );
 
+      // Generate PDF if signature data exists
+      await gcpClient.generateSignedPDFIfNeeded(submissionId, formId, formData, false);
+
       // Update form analytics
       try {
         const analyticsResult = await gcpClient.updateFormAnalytics(formId, userId || 'anonymous');
@@ -1440,6 +1443,58 @@ app.get('/api/forms/:formId', async (req, res) => {
       error: 'Failed to retrieve form',
       details: error.message,
       timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== PDF DOWNLOAD ENDPOINT ==============
+app.get('/api/submissions/:submissionId/pdf/:fieldId', async (req, res) => {
+  try {
+    const { submissionId, fieldId } = req.params;
+
+    console.log(`📄 Requesting PDF for submission ${submissionId}, field ${fieldId}`);
+
+    // Get submission data
+    const submissionRef = gcpClient.firestore.collection('submissions').doc(submissionId);
+    const submissionDoc = await submissionRef.get();
+
+    if (!submissionDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Submission not found'
+      });
+    }
+
+    const submissionData = submissionDoc.data();
+    const pdfData = submissionData.pdfs?.[fieldId];
+
+    if (!pdfData) {
+      return res.status(404).json({
+        success: false,
+        error: 'PDF not found for this field'
+      });
+    }
+
+    // Generate signed URL for PDF download
+    const downloadUrl = await gcpClient.pdfGenerator.getPDFDownloadURL(
+      pdfData.isHipaa ? 'chatterforms-hipaa-data' : 'chatterforms-data',
+      pdfData.filename,
+      60 // 60 minutes expiration
+    );
+
+    res.json({
+      success: true,
+      downloadUrl,
+      filename: pdfData.filename,
+      size: pdfData.size,
+      generatedAt: pdfData.generatedAt
+    });
+
+  } catch (error) {
+    console.error('❌ Error retrieving PDF:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve PDF'
     });
   }
 });

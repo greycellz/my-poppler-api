@@ -7,6 +7,7 @@ const { Firestore } = require('@google-cloud/firestore');
 const { Storage } = require('@google-cloud/storage');
 const { BigQuery } = require('@google-cloud/bigquery');
 const { KeyManagementServiceClient } = require('@google-cloud/kms');
+const PDFGenerator = require('./pdf-generator');
 const path = require('path');
 const fs = require('fs');
 
@@ -17,6 +18,9 @@ class GCPClient {
     
     // Initialize GCP clients
     this.initializeClients();
+    
+    // Initialize PDF generator
+    this.pdfGenerator = new PDFGenerator();
   }
 
   initializeClients() {
@@ -835,6 +839,9 @@ class GCPClient {
       // Upload to HIPAA-compliant storage
       await this.uploadSubmissionData(submissionId, formData, true);
 
+      // Generate PDF if signature data exists
+      await this.generateSignedPDFIfNeeded(submissionId, formId, formData, true);
+
       // Update analytics (without sensitive data)
       await this.updateFormAnalytics(formId, userId);
 
@@ -843,6 +850,84 @@ class GCPClient {
     } catch (error) {
       console.error('❌ Error processing HIPAA submission:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Generate signed PDF if signature data exists in form submission
+   */
+  async generateSignedPDFIfNeeded(submissionId, formId, formData, isHipaa = false) {
+    try {
+      // Check for signature data in form submission
+      const signatureFields = Object.entries(formData).filter(([key, value]) => 
+        value && typeof value === 'object' && 'imageBase64' in value
+      );
+
+      if (signatureFields.length === 0) {
+        console.log('📄 No signature data found, skipping PDF generation');
+        return;
+      }
+
+      console.log(`📄 Found ${signatureFields.length} signature field(s), generating PDF...`);
+
+      // Get form schema for PDF generation
+      const formRef = this.firestore.collection('forms').doc(formId);
+      const formDoc = await formRef.get();
+      
+      if (!formDoc.exists) {
+        throw new Error(`Form ${formId} not found`);
+      }
+
+      const formSchema = formDoc.data();
+      const bucketName = isHipaa ? 'chatterforms-hipaa-data' : 'chatterforms-data';
+
+      // Generate PDF for each signature field
+      for (const [fieldId, signatureData] of signatureFields) {
+        try {
+          const pdfResult = await this.pdfGenerator.generateSignedPDF({
+            formData,
+            formSchema,
+            signatureData,
+            bucketName,
+            isHipaa
+          });
+
+          console.log(`✅ PDF generated: ${pdfResult.filename}`);
+          
+          // Store PDF reference in submission metadata
+          await this.storePDFReference(submissionId, fieldId, pdfResult, isHipaa);
+          
+        } catch (error) {
+          console.error(`❌ Failed to generate PDF for signature field ${fieldId}:`, error);
+          // Don't fail the entire submission if PDF generation fails
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error in PDF generation:', error);
+      // Don't fail the entire submission if PDF generation fails
+    }
+  }
+
+  /**
+   * Store PDF reference in submission metadata
+   */
+  async storePDFReference(submissionId, fieldId, pdfResult, isHipaa = false) {
+    try {
+      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      
+      await submissionRef.update({
+        [`pdfs.${fieldId}`]: {
+          filename: pdfResult.filename,
+          url: pdfResult.url,
+          size: pdfResult.size,
+          generatedAt: new Date().toISOString(),
+          isHipaa
+        }
+      });
+
+      console.log(`✅ PDF reference stored for submission ${submissionId}, field ${fieldId}`);
+    } catch (error) {
+      console.error('❌ Failed to store PDF reference:', error);
     }
   }
 
