@@ -1,9 +1,8 @@
 const puppeteer = require('puppeteer');
-const { Storage } = require('@google-cloud/storage');
 
 class PDFGenerator {
-  constructor() {
-    this.storage = new Storage();
+  constructor(gcpClient) {
+    this.gcpClient = gcpClient;
   }
 
   /**
@@ -64,8 +63,8 @@ class PDFGenerator {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `signed-forms/${formSchema.id || 'form'}_${timestamp}.pdf`;
 
-      // Upload to GCS
-      const bucket = this.storage.bucket(bucketName);
+      // Upload to GCS using existing GCP client
+      const bucket = this.gcpClient.storage.bucket(bucketName);
       const file = bucket.file(filename);
 
       await file.save(pdfBuffer, {
@@ -76,7 +75,15 @@ class PDFGenerator {
             isHipaa: isHipaa.toString(),
             generatedAt: new Date().toISOString()
           }
-        }
+        },
+        // Ensure file is private and not publicly accessible
+        public: false,
+        private: true
+      });
+
+      // Ensure file is private - no public access
+      await file.acl.delete({
+        entity: 'allUsers'
       });
 
       console.log(`✅ PDF generated and uploaded: ${filename}`);
@@ -253,7 +260,7 @@ class PDFGenerator {
    */
   async getPDFDownloadURL(bucketName, filename, expirationMinutes = 60) {
     try {
-      const bucket = this.storage.bucket(bucketName);
+      const bucket = this.gcpClient.storage.bucket(bucketName);
       const file = bucket.file(filename);
 
       const [signedUrl] = await file.getSignedUrl({

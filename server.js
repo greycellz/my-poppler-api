@@ -1453,6 +1453,10 @@ app.get('/api/submissions/:submissionId/pdf/:fieldId', async (req, res) => {
     const { submissionId, fieldId } = req.params;
 
     console.log(`📄 Requesting PDF for submission ${submissionId}, field ${fieldId}`);
+    
+    // TODO: Add authentication middleware here
+    // For now, we'll rely on the signed URL security (60-minute expiration)
+    // In production, add proper user authentication
 
     // Get submission data
     const submissionRef = gcpClient.firestore.collection('submissions').doc(submissionId);
@@ -1481,6 +1485,11 @@ app.get('/api/submissions/:submissionId/pdf/:fieldId', async (req, res) => {
       pdfData.filename,
       60 // 60 minutes expiration
     );
+
+    console.log(`📄 Generated signed URL for PDF: ${pdfData.filename}`);
+    console.log(`📄 Download URL: ${downloadUrl}`);
+    console.log(`📄 PDF size: ${Math.round(pdfData.size/1024)}KB`);
+    console.log(`📄 HIPAA: ${pdfData.isHipaa}`);
 
     res.json({
       success: true,

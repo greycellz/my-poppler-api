@@ -19,8 +19,8 @@ class GCPClient {
     // Initialize GCP clients
     this.initializeClients();
     
-    // Initialize PDF generator
-    this.pdfGenerator = new PDFGenerator();
+    // Initialize PDF generator with this GCP client
+    this.pdfGenerator = new PDFGenerator(this);
   }
 
   initializeClients() {
@@ -893,6 +893,8 @@ class GCPClient {
           });
 
           console.log(`✅ PDF generated: ${pdfResult.filename}`);
+          console.log(`📄 PDF URL: ${pdfResult.url}`);
+          console.log(`📄 PDF size: ${Math.round(pdfResult.size/1024)}KB`);
           
           // Store PDF reference in submission metadata
           await this.storePDFReference(submissionId, fieldId, pdfResult, isHipaa);
