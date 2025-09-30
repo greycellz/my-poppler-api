@@ -306,10 +306,16 @@ class GCPClient {
       const fileAssociations = [];
       const processedFormData = { ...formData };
       
-      // Look for file fields in the form data
+      // Filter out signature data to avoid Firestore index limits
+      const signatureFields = [];
       Object.keys(formData).forEach(fieldId => {
         const fieldData = formData[fieldId];
-        if (fieldData && typeof fieldData === 'object' && fieldData.gcpUrl) {
+        if (fieldData && typeof fieldData === 'object' && 'imageBase64' in fieldData) {
+          // This is a signature field - don't store in Firestore
+          signatureFields.push(fieldId);
+          delete processedFormData[fieldId];
+          console.log(`📝 Excluded signature field ${fieldId} from Firestore storage`);
+        } else if (fieldData && typeof fieldData === 'object' && fieldData.gcpUrl) {
           // This is a file field with GCP URL
           fileAssociations.push({
             fieldId,
@@ -319,9 +325,6 @@ class GCPClient {
             gcpUrl: fieldData.gcpUrl,
             uploadedAt: fieldData.uploadedAt
           });
-          
-          // Keep the file data in submission_data for backward compatibility
-          // but also store it in a dedicated field for easy access
         }
       });
 
@@ -331,6 +334,7 @@ class GCPClient {
         user_id: userId,
         submission_data: processedFormData,
         file_associations: fileAssociations, // Dedicated field for file associations
+        signature_fields: signatureFields, // Track which fields were signatures (stored in GCS)
         timestamp: new Date(),
         ip_address: metadata.ipAddress,
         user_agent: metadata.userAgent,
