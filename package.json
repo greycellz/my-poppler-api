@@ -59,5 +59,8 @@
     "license": "MIT",
     "puppeteer": {
         "skipDownload": true
-    }
+  },
+  "overrides": {
+    "@smithy/util-utf8": "4.1.0"
+  }
 }
