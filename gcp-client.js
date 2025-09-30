@@ -876,10 +876,58 @@ class GCPClient {
       for (const [fieldId, signatureData] of signatureFields) {
         try {
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-          const filename = `signatures/${submissionId}/${fieldId}_${timestamp}.png`;
+          // Determine file extension based on data URL prefix
+          const isJpeg = signatureData.imageBase64.startsWith('data:image/jpeg;base64,');
+          const fileExtension = isJpeg ? 'jpg' : 'png';
+          const filename = `signatures/${submissionId}/${fieldId}_${timestamp}.${fileExtension}`;
+          
+          // Debug base64 data
+          console.log(`📝 Base64 data length: ${signatureData.imageBase64.length}`);
+          console.log(`📝 Base64 starts with: ${signatureData.imageBase64.substring(0, 50)}...`);
+          console.log(`📝 Base64 ends with: ...${signatureData.imageBase64.substring(signatureData.imageBase64.length - 50)}`);
+          
+          // Clean base64 data - remove data URL prefix if present
+          let cleanBase64 = signatureData.imageBase64;
+          if (cleanBase64.startsWith('data:image/jpeg;base64,')) {
+            cleanBase64 = cleanBase64.replace('data:image/jpeg;base64,', '');
+            console.log(`📝 Removed JPEG data URL prefix, clean length: ${cleanBase64.length}`);
+          } else if (cleanBase64.startsWith('data:image/png;base64,')) {
+            cleanBase64 = cleanBase64.replace('data:image/png;base64,', '');
+            console.log(`📝 Removed PNG data URL prefix, clean length: ${cleanBase64.length}`);
+          }
           
           // Convert base64 to buffer
-          const imageBuffer = Buffer.from(signatureData.imageBase64, 'base64');
+          const imageBuffer = Buffer.from(cleanBase64, 'base64');
+          
+          console.log(`📝 Buffer length: ${imageBuffer.length}`);
+          console.log(`📝 Buffer first 20 bytes: ${imageBuffer.subarray(0, 20).toString('hex')}`);
+          
+          // Validate image header based on format
+          if (isJpeg) {
+            // Validate JPEG header (starts with FF D8)
+            const jpegHeader = imageBuffer.subarray(0, 2);
+            const expectedJpegHeader = Buffer.from([0xFF, 0xD8]);
+            const isJpegValid = jpegHeader.equals(expectedJpegHeader);
+            console.log(`📝 JPEG header valid: ${isJpegValid}`);
+            console.log(`📝 JPEG header bytes: ${jpegHeader.toString('hex')}`);
+            console.log(`📝 Expected JPEG header: ${expectedJpegHeader.toString('hex')}`);
+            
+            if (!isJpegValid) {
+              console.error(`❌ Invalid JPEG header! This might be the issue.`);
+            }
+          } else {
+            // Validate PNG header
+            const pngHeader = imageBuffer.subarray(0, 8);
+            const expectedPngHeader = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+            const isPng = pngHeader.equals(expectedPngHeader);
+            console.log(`📝 PNG header valid: ${isPng}`);
+            console.log(`📝 PNG header bytes: ${pngHeader.toString('hex')}`);
+            console.log(`📝 Expected PNG header: ${expectedPngHeader.toString('hex')}`);
+            
+            if (!isPng) {
+              console.error(`❌ Invalid PNG header! This might be the issue.`);
+            }
+          }
           
           // Upload to GCS
           const bucket = this.storage.bucket(bucketName);
@@ -887,14 +935,15 @@ class GCPClient {
           
           await file.save(imageBuffer, {
             metadata: {
-              contentType: 'image/png',
+              contentType: isJpeg ? 'image/jpeg' : 'image/png',
               metadata: {
                 submissionId,
                 fieldId,
                 method: signatureData.method,
                 completedAt: signatureData.completedAt,
                 timezone: signatureData.timezone,
-                isHipaa: isHipaa.toString()
+                isHipaa: isHipaa.toString(),
+                format: isJpeg ? 'jpeg' : 'png'
               }
             }
           });
