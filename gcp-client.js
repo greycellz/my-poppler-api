@@ -900,6 +900,9 @@ class GCPClient {
           });
 
           console.log(`✅ Signature stored: ${filename}`);
+          console.log(`📝 Signature file size: ${imageBuffer.length} bytes`);
+          console.log(`📝 Signature bucket: ${bucketName}`);
+          console.log(`📝 Signature GCS URL: gs://${bucketName}/${filename}`);
           
           // Store reference in Firestore (just metadata, not the image)
           await this.storeSignatureReference(submissionId, fieldId, {

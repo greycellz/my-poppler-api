@@ -1477,12 +1477,31 @@ app.get('/api/submissions/:submissionId/signature/:fieldId', async (req, res) =>
 
     // Generate signed URL for signature download
     const bucketName = signatureData.isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
-    const downloadUrl = await gcpClient.storage.bucket(bucketName).file(signatureData.filename).getSignedUrl({
+    
+    console.log(`📝 Attempting to generate signed URL for: ${signatureData.filename}`);
+    console.log(`📝 Using bucket: ${bucketName}`);
+    
+    // Check if file exists first
+    const file = gcpClient.storage.bucket(bucketName).file(signatureData.filename);
+    const [exists] = await file.exists();
+    
+    if (!exists) {
+      console.error(`❌ File does not exist: ${signatureData.filename}`);
+      return res.status(404).json({
+        success: false,
+        error: 'Signature file not found in storage'
+      });
+    }
+    
+    console.log(`✅ File exists, generating signed URL...`);
+    
+    const downloadUrl = await file.getSignedUrl({
       action: 'read',
       expires: Date.now() + (60 * 60 * 1000) // 1 hour expiration
     });
 
     console.log(`📝 Generated signed URL for signature: ${signatureData.filename}`);
+    console.log(`📝 Download URL: ${downloadUrl[0]}`);
 
     res.json({
       success: true,
