@@ -1151,6 +1151,7 @@ class GCPClient {
    */
   async generateSignedPDFIfNeeded(submissionId, formId, formData, isHipaa = false) {
     try {
+      const crypto = require('crypto');
       // Check for signature data in form submission
       const signatureFields = Object.entries(formData).filter(([key, value]) => 
         value && typeof value === 'object' && 'imageBase64' in value
@@ -1174,6 +1175,21 @@ class GCPClient {
       const formSchema = formDoc.data();
       const bucketName = isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
 
+      // Compute immutable submission hash for audit trail (does not reveal PHI)
+      const submissionHash = crypto.createHash('sha256').update(JSON.stringify(formData)).digest('hex');
+
+      // Fetch submission metadata for audit (IP/UA)
+      let ipAddress = undefined;
+      let userAgent = undefined;
+      try {
+        const subDoc = await this.firestore.collection('submissions').doc(submissionId).get();
+        if (subDoc.exists) {
+          const sdata = subDoc.data();
+          ipAddress = sdata?.ip_address;
+          userAgent = sdata?.user_agent;
+        }
+      } catch {}
+
       // Generate PDF for each signature field
       for (const [fieldId, signatureData] of signatureFields) {
         try {
@@ -1182,7 +1198,11 @@ class GCPClient {
             formSchema,
             signatureData,
             bucketName,
-            isHipaa
+            isHipaa,
+            submissionId,
+            submissionHash,
+            ipAddress,
+            userAgent
           });
 
           console.log(`✅ PDF generated: ${pdfResult.filename}`);
@@ -1190,7 +1210,7 @@ class GCPClient {
           console.log(`📄 PDF size: ${Math.round(pdfResult.size/1024)}KB`);
           
           // Store PDF reference in submission metadata
-          await this.storePDFReference(submissionId, fieldId, pdfResult, isHipaa);
+          await this.storePDFReference(submissionId, fieldId, { ...pdfResult, submissionHash }, isHipaa);
           
         } catch (error) {
           console.error(`❌ Failed to generate PDF for signature field ${fieldId}:`, error);
