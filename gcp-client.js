@@ -679,7 +679,19 @@ class GCPClient {
                                !Array.isArray(data.submission_data) && 
                                Object.keys(data.submission_data).every(key => !isNaN(key));
         
-        if (data.is_hipaa && (data.encrypted || isEncryptedData)) {
+        // If HIPAA doc is trimmed and points to GCS, load JSON directly
+        if (data.is_hipaa && data.data_gcs_path) {
+          try {
+            const bucketName = 'chatterforms-submissions-us-central1';
+            console.log(`📥 Loading HIPAA submission from GCS: gs://${bucketName}/${data.data_gcs_path}`);
+            const [buf] = await this.storage.bucket(bucketName).file(data.data_gcs_path).download();
+            submissionData = JSON.parse(buf.toString('utf8'));
+            console.log(`✅ Loaded HIPAA submission from GCS: ${data.submission_id}`);
+          } catch (e) {
+            console.error(`❌ Failed loading HIPAA submission from GCS for ${data.submission_id}:`, e.message);
+            submissionData = null;
+          }
+        } else if (data.is_hipaa && (data.encrypted || isEncryptedData)) {
           try {
             console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id} (encrypted: ${data.encrypted}, looks encrypted: ${isEncryptedData})`);
             console.log(`🔑 Attempting decryption with key: hipaa-data-key`);
@@ -697,7 +709,7 @@ class GCPClient {
             } catch (fallbackError) {
               console.error(`❌ Failed to decrypt HIPAA submission ${data.submission_id} with fallback key:`, fallbackError.message);
               // Keep encrypted data if decryption fails
-              submissionData = data.submission_data;
+              submissionData = typeof data.submission_data !== 'undefined' ? data.submission_data : null;
             }
           }
         } else {
@@ -717,8 +729,11 @@ class GCPClient {
           file_associations: data.file_associations || []
         };
         
-        // Debug: Log sample of submission data
-        console.log(`📊 Submission ${data.submission_id} data sample:`, JSON.stringify(submissionData).substring(0, 200) + '...');
+        // Debug: Log sample of submission data (guard null/undefined)
+        const sample = submissionData === undefined ? 'undefined' :
+                       submissionData === null ? 'null' :
+                       JSON.stringify(submissionData).substring(0, 200);
+        console.log(`📊 Submission ${data.submission_id} data sample:`, sample + '...');
         
         return result;
       }));
