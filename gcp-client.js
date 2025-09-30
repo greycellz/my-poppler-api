@@ -329,10 +329,12 @@ class GCPClient {
       });
 
       // Diagnostics: measure Firestore payload size/shape before write
+      let diagnostics = { keysCount: 0, bytes: 0 };
       try {
         const keysCount = Object.keys(processedFormData || {}).length;
         const jsonStr = JSON.stringify(processedFormData || {});
         const bytes = Buffer.byteLength(jsonStr, 'utf8');
+        diagnostics = { keysCount, bytes };
         console.log(
           `📏 Firestore submission_data diagnostics → keys: ${keysCount}, bytes: ${bytes}, isHipaa: ${!!metadata.isHipaa}, encrypted: ${!!metadata.encrypted}`
         );
@@ -340,19 +342,31 @@ class GCPClient {
         console.log('⚠️ Failed to compute diagnostics for submission_data', e);
       }
 
-      const submissionDoc = {
+      const isHipaa = metadata.isHipaa || false;
+      const baseDoc = {
         submission_id: submissionId,
         form_id: formId,
         user_id: userId,
-        submission_data: processedFormData,
         file_associations: fileAssociations, // Dedicated field for file associations
         signature_fields: signatureFields, // Track which fields were signatures (stored in GCS)
         timestamp: new Date(),
         ip_address: metadata.ipAddress,
         user_agent: metadata.userAgent,
-        is_hipaa: metadata.isHipaa || false,
+        is_hipaa: isHipaa,
         encrypted: metadata.encrypted || false, // Set based on metadata
       };
+
+      // HIPAA-only trim: store data pointer instead of full submission_data to avoid index explosion
+      const submissionDoc = isHipaa
+        ? {
+            ...baseDoc,
+            data_gcs_path: `submissions/${submissionId}/data.json`,
+            data_size_bytes: diagnostics.bytes,
+          }
+        : {
+            ...baseDoc,
+            submission_data: processedFormData,
+          };
 
       await this.firestore
         .collection('submissions')
