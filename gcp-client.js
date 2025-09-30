@@ -747,6 +747,157 @@ class GCPClient {
   }
 
   /**
+   * Get paginated form submissions with lazy loading
+   */
+  async getFormSubmissionsPaginated(formId, limit = 20, offset = 0, sort = 'desc', search = '', dateFrom = '', dateTo = '') {
+    try {
+      console.log(`📋 Getting paginated submissions for form: ${formId}, limit: ${limit}, offset: ${offset}`);
+      
+      // Build Firestore query with pagination
+      let query = this.firestore
+        .collection('submissions')
+        .where('form_id', '==', formId);
+      
+      // Add date filters if provided
+      if (dateFrom) {
+        query = query.where('timestamp', '>=', new Date(dateFrom));
+      }
+      if (dateTo) {
+        query = query.where('timestamp', '<=', new Date(dateTo));
+      }
+      
+      // Add sorting
+      query = query.orderBy('timestamp', sort === 'desc' ? 'desc' : 'asc');
+      
+      // Get total count (for pagination metadata) - we need to do this separately
+      // because Firestore doesn't support count() with complex queries efficiently
+      const totalSnapshot = await this.firestore
+        .collection('submissions')
+        .where('form_id', '==', formId)
+        .get();
+      
+      const total = totalSnapshot.size;
+      
+      // Apply pagination
+      query = query.limit(limit).offset(offset);
+      
+      const submissionsSnapshot = await query.get();
+      
+      if (submissionsSnapshot.empty) {
+        console.log(`📝 No submissions found for form: ${formId} (page ${Math.floor(offset/limit) + 1})`);
+        return {
+          submissions: [],
+          total: 0,
+          hasNext: false,
+          hasPrev: offset > 0
+        };
+      }
+      
+      // Process submissions with lightweight data (no decryption yet)
+      const submissions = submissionsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        
+        // Return lightweight version first
+        const lightweightSubmission = {
+          submission_id: data.submission_id,
+          form_id: data.form_id,
+          user_id: data.user_id,
+          timestamp: data.timestamp?.toDate?.() || data.timestamp,
+          ip_address: data.ip_address,
+          user_agent: data.user_agent,
+          is_hipaa: data.is_hipaa,
+          encrypted: data.encrypted,
+          file_associations: data.file_associations || [],
+          // Don't include submission_data yet - load on demand
+          submission_data: null,
+          _needsDecryption: data.is_hipaa && (data.encrypted || data.data_gcs_path),
+          _hasGcsData: data.is_hipaa && data.data_gcs_path
+        };
+        
+        return lightweightSubmission;
+      });
+      
+      const hasNext = offset + limit < total;
+      const hasPrev = offset > 0;
+      
+      console.log(`✅ Retrieved ${submissions.length} submissions (page ${Math.floor(offset/limit) + 1}) for form: ${formId}`);
+      console.log(`📊 Total: ${total}, HasNext: ${hasNext}, HasPrev: ${hasPrev}`);
+      
+      return {
+        submissions,
+        total,
+        hasNext,
+        hasPrev
+      };
+    } catch (error) {
+      console.error(`❌ Error getting paginated submissions for ${formId}:`, error);
+      return { submissions: [], total: 0, hasNext: false, hasPrev: false };
+    }
+  }
+
+  /**
+   * Get submission data on demand (lazy loading)
+   */
+  async getSubmissionData(submissionId) {
+    try {
+      console.log(`📋 Loading submission data for: ${submissionId}`);
+      
+      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      const submissionDoc = await submissionRef.get();
+      
+      if (!submissionDoc.exists) {
+        console.log(`❌ Submission not found: ${submissionId}`);
+        return null;
+      }
+      
+      const data = submissionDoc.data();
+      
+      // Handle different data storage scenarios
+      if (data.is_hipaa && data.data_gcs_path) {
+        // HIPAA data stored in GCS (trimmed Firestore document)
+        try {
+          const bucketName = 'chatterforms-submissions-us-central1';
+          console.log(`📥 Loading HIPAA submission from GCS: gs://${bucketName}/${data.data_gcs_path}`);
+          const [buf] = await this.storage.bucket(bucketName).file(data.data_gcs_path).download();
+          const submissionData = JSON.parse(buf.toString('utf8'));
+          console.log(`✅ Loaded HIPAA submission from GCS: ${submissionId}`);
+          return submissionData;
+        } catch (error) {
+          console.error(`❌ Failed loading HIPAA submission from GCS for ${submissionId}:`, error.message);
+          return null;
+        }
+      } else if (data.is_hipaa && data.encrypted) {
+        // HIPAA data encrypted in Firestore
+        try {
+          console.log(`🔓 Decrypting HIPAA submission: ${submissionId}`);
+          const decryptedResult = await this.decryptData(data.submission_data, 'hipaa-data-key');
+          console.log(`✅ HIPAA submission decrypted: ${submissionId}`);
+          return decryptedResult.decryptedData;
+        } catch (error) {
+          console.error(`❌ Failed to decrypt HIPAA submission ${submissionId}:`, error.message);
+          // Try fallback key
+          try {
+            console.log(`🔑 Attempting decryption with fallback key: form-data-key`);
+            const decryptedResult = await this.decryptData(data.submission_data, 'form-data-key');
+            console.log(`✅ HIPAA submission decrypted with fallback key: ${submissionId}`);
+            return decryptedResult.decryptedData;
+          } catch (fallbackError) {
+            console.error(`❌ Failed to decrypt HIPAA submission ${submissionId} with fallback key:`, fallbackError.message);
+            return null;
+          }
+        }
+      } else {
+        // Regular submission data
+        console.log(`📝 Loading regular submission data: ${submissionId}`);
+        return data.submission_data;
+      }
+    } catch (error) {
+      console.error(`❌ Error loading submission data for ${submissionId}:`, error);
+      return null;
+    }
+  }
+
+  /**
    * Get all analytics data (for admin purposes)
    */
   async getAllAnalytics(limit = 100) {

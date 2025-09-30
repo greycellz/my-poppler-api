@@ -1637,6 +1637,115 @@ app.get('/api/forms/:formId/submissions', async (req, res) => {
   }
 });
 
+// ============== PAGINATED FORM SUBMISSIONS ENDPOINT ==============
+app.get('/api/forms/:formId/submissions/paginated', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const { 
+      page = 1, 
+      limit = 20, 
+      sort = 'desc',
+      search = '',
+      dateFrom = '',
+      dateTo = ''
+    } = req.query;
+    
+    if (!formId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID is required'
+      });
+    }
+    
+    console.log(`📋 BACKEND: /api/forms/${formId}/submissions/paginated endpoint called`);
+    console.log(`📋 BACKEND: Page: ${page}, Limit: ${limit}, Sort: ${sort}`);
+    console.log(`📋 BACKEND: Search: "${search}", DateFrom: ${dateFrom}, DateTo: ${dateTo}`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Get paginated submissions
+    const result = await gcpClient.getFormSubmissionsPaginated(
+      formId, 
+      parseInt(limit), 
+      (parseInt(page) - 1) * parseInt(limit), 
+      sort,
+      search,
+      dateFrom,
+      dateTo
+    );
+    
+    console.log(`✅ Retrieved ${result.submissions.length} submissions (page ${page}) for form: ${formId}`);
+    console.log(`📊 Total submissions: ${result.total}, HasNext: ${result.hasNext}, HasPrev: ${result.hasPrev}`);
+    
+    res.json({
+      success: true,
+      formId,
+      submissions: result.submissions,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: result.total,
+        totalPages: Math.ceil(result.total / parseInt(limit)),
+        hasNext: result.hasNext,
+        hasPrev: result.hasPrev
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching paginated form submissions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch paginated form submissions',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== LAZY SUBMISSION DATA LOADING ==============
+app.get('/api/submissions/:submissionId/data', async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    
+    console.log(`📋 BACKEND: /api/submissions/${submissionId}/data endpoint called`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Get submission data on demand
+    const submissionData = await gcpClient.getSubmissionData(submissionId);
+    
+    if (submissionData !== null) {
+      console.log(`✅ Loaded submission data for: ${submissionId}`);
+      res.json({
+        success: true,
+        submissionId,
+        submission_data: submissionData,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      console.log(`❌ No submission data found for: ${submissionId}`);
+      res.status(404).json({
+        success: false,
+        error: 'Submission data not found'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error loading submission data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load submission data',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== SIGNATURE SIGNED URLS (BATCH) ==============
 
 app.get('/api/submissions/:submissionId/signatures', async (req, res) => {
