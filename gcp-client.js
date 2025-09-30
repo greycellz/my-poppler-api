@@ -251,7 +251,7 @@ class GCPClient {
       for (const doc of snapshot.docs) {
         const data = doc.data();
         
-        // Decrypt HIPAA data if needed
+        // Resolve submission data depending on storage mode
         let submissionData = data.submission_data;
         
         // Check if this looks like encrypted data (numeric array pattern)
@@ -259,7 +259,19 @@ class GCPClient {
                                !Array.isArray(data.submission_data) && 
                                Object.keys(data.submission_data).every(key => !isNaN(key));
         
-        if (data.is_hipaa && (data.encrypted || isEncryptedData)) {
+        // New HIPAA path: trimmed Firestore doc with pointer to GCS JSON
+        if (data.is_hipaa && data.data_gcs_path) {
+          try {
+            const bucketName = 'chatterforms-submissions-us-central1';
+            console.log(`📥 Loading HIPAA submission from GCS: gs://${bucketName}/${data.data_gcs_path}`);
+            const [buf] = await this.storage.bucket(bucketName).file(data.data_gcs_path).download();
+            submissionData = JSON.parse(buf.toString('utf8'));
+            console.log(`✅ Loaded HIPAA submission from GCS: ${data.submission_id}`);
+          } catch (e) {
+            console.error(`❌ Failed loading HIPAA submission from GCS for ${data.submission_id}:`, e.message);
+            submissionData = null;
+          }
+        } else if (data.is_hipaa && (data.encrypted || isEncryptedData)) {
           try {
             console.log(`🔓 Decrypting HIPAA submission: ${data.submission_id} (encrypted: ${data.encrypted}, looks encrypted: ${isEncryptedData})`);
             console.log(`🔑 Attempting decryption with key: hipaa-data-key`);
