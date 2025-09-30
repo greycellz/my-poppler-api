@@ -929,8 +929,8 @@ app.post('/submit-form', async (req, res) => {
         clientMetadata
       );
 
-      // Generate PDF if signature data exists
-      await gcpClient.generateSignedPDFIfNeeded(submissionId, formId, formData, false);
+      // Store signature images in GCS (skip PDF generation for now)
+      await gcpClient.storeSignatureImages(submissionId, formId, formData, false);
 
       // Update form analytics
       try {
@@ -1443,6 +1443,62 @@ app.get('/api/forms/:formId', async (req, res) => {
       error: 'Failed to retrieve form',
       details: error.message,
       timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== SIGNATURE DOWNLOAD ENDPOINT ==============
+app.get('/api/submissions/:submissionId/signature/:fieldId', async (req, res) => {
+  try {
+    const { submissionId, fieldId } = req.params;
+
+    console.log(`📝 Requesting signature for submission ${submissionId}, field ${fieldId}`);
+
+    // Get submission data
+    const submissionRef = gcpClient.firestore.collection('submissions').doc(submissionId);
+    const submissionDoc = await submissionRef.get();
+
+    if (!submissionDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Submission not found'
+      });
+    }
+
+    const submissionData = submissionDoc.data();
+    const signatureData = submissionData.signatures?.[fieldId];
+
+    if (!signatureData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Signature not found for this field'
+      });
+    }
+
+    // Generate signed URL for signature download
+    const bucketName = signatureData.isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
+    const downloadUrl = await gcpClient.storage.bucket(bucketName).file(signatureData.filename).getSignedUrl({
+      action: 'read',
+      expires: Date.now() + (60 * 60 * 1000) // 1 hour expiration
+    });
+
+    console.log(`📝 Generated signed URL for signature: ${signatureData.filename}`);
+
+    res.json({
+      success: true,
+      downloadUrl: downloadUrl[0],
+      filename: signatureData.filename,
+      size: signatureData.size,
+      method: signatureData.method,
+      completedAt: signatureData.completedAt,
+      timezone: signatureData.timezone
+    });
+
+  } catch (error) {
+    console.error('❌ Error retrieving signature:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve signature'
     });
   }
 });

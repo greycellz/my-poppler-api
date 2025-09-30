@@ -839,8 +839,8 @@ class GCPClient {
       // Upload to HIPAA-compliant storage
       await this.uploadSubmissionData(submissionId, formData, true);
 
-      // Generate PDF if signature data exists
-      await this.generateSignedPDFIfNeeded(submissionId, formId, formData, true);
+      // Store signature images in GCS (skip PDF generation for now)
+      await this.storeSignatureImages(submissionId, formId, formData, true);
 
       // Update analytics (without sensitive data)
       await this.updateFormAnalytics(formId, userId);
@@ -850,6 +850,102 @@ class GCPClient {
     } catch (error) {
       console.error('❌ Error processing HIPAA submission:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Store signature images directly in GCS (simplified approach)
+   */
+  async storeSignatureImages(submissionId, formId, formData, isHipaa = false) {
+    try {
+      // Check for signature data in form submission
+      const signatureFields = Object.entries(formData).filter(([key, value]) => 
+        value && typeof value === 'object' && 'imageBase64' in value
+      );
+
+      if (signatureFields.length === 0) {
+        console.log('📝 No signature data found, skipping signature storage');
+        return;
+      }
+
+      console.log(`📝 Found ${signatureFields.length} signature field(s), storing in GCS...`);
+
+      const bucketName = isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
+
+      // Store each signature image
+      for (const [fieldId, signatureData] of signatureFields) {
+        try {
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const filename = `signatures/${submissionId}/${fieldId}_${timestamp}.png`;
+          
+          // Convert base64 to buffer
+          const imageBuffer = Buffer.from(signatureData.imageBase64, 'base64');
+          
+          // Upload to GCS
+          const bucket = this.storage.bucket(bucketName);
+          const file = bucket.file(filename);
+          
+          await file.save(imageBuffer, {
+            metadata: {
+              contentType: 'image/png',
+              metadata: {
+                submissionId,
+                fieldId,
+                method: signatureData.method,
+                completedAt: signatureData.completedAt,
+                timezone: signatureData.timezone,
+                isHipaa: isHipaa.toString()
+              }
+            }
+          });
+
+          console.log(`✅ Signature stored: ${filename}`);
+          
+          // Store reference in Firestore (just metadata, not the image)
+          await this.storeSignatureReference(submissionId, fieldId, {
+            filename,
+            url: `gs://${bucketName}/${filename}`,
+            size: imageBuffer.length,
+            method: signatureData.method,
+            completedAt: signatureData.completedAt,
+            timezone: signatureData.timezone,
+            isHipaa
+          });
+          
+        } catch (error) {
+          console.error(`❌ Failed to store signature for field ${fieldId}:`, error);
+          // Don't fail the entire submission if signature storage fails
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error in signature storage:', error);
+      // Don't fail the entire submission if signature storage fails
+    }
+  }
+
+  /**
+   * Store signature reference in Firestore (metadata only)
+   */
+  async storeSignatureReference(submissionId, fieldId, signatureInfo) {
+    try {
+      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      
+      await submissionRef.update({
+        [`signatures.${fieldId}`]: {
+          filename: signatureInfo.filename,
+          url: signatureInfo.url,
+          size: signatureInfo.size,
+          method: signatureInfo.method,
+          completedAt: signatureInfo.completedAt,
+          timezone: signatureInfo.timezone,
+          isHipaa: signatureInfo.isHipaa,
+          storedAt: new Date().toISOString()
+        }
+      });
+
+      console.log(`✅ Signature reference stored for submission ${submissionId}, field ${fieldId}`);
+    } catch (error) {
+      console.error('❌ Failed to store signature reference:', error);
     }
   }
 
