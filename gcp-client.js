@@ -328,6 +328,18 @@ class GCPClient {
         }
       });
 
+      // Diagnostics: measure Firestore payload size/shape before write
+      try {
+        const keysCount = Object.keys(processedFormData || {}).length;
+        const jsonStr = JSON.stringify(processedFormData || {});
+        const bytes = Buffer.byteLength(jsonStr, 'utf8');
+        console.log(
+          `📏 Firestore submission_data diagnostics → keys: ${keysCount}, bytes: ${bytes}, isHipaa: ${!!metadata.isHipaa}, encrypted: ${!!metadata.encrypted}`
+        );
+      } catch (e) {
+        console.log('⚠️ Failed to compute diagnostics for submission_data', e);
+      }
+
       const submissionDoc = {
         submission_id: submissionId,
         form_id: formId,
