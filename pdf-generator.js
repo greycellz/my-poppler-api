@@ -50,16 +50,17 @@ class PDFGenerator {
 
       await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
 
-      // Wait for images to load
-      await page.waitForFunction(() => {
-        const images = document.querySelectorAll('img');
-        return Array.from(images).every(img => img.complete && img.naturalHeight !== 0);
-      }, { timeout: 10000 });
-
-      // Add a small delay to ensure everything is rendered
-      await page.waitForTimeout(1000);
+      // Add a delay to ensure everything is rendered
+      await page.waitForTimeout(2000);
 
       console.log('📄 HTML content set, generating PDF...');
+      
+      // Debug: Check if the image element exists
+      const imageExists = await page.evaluate(() => {
+        const img = document.querySelector('.signature-image');
+        return img ? { exists: true, src: img.src.substring(0, 50) + '...' } : { exists: false };
+      });
+      console.log('📄 Image element check:', imageExists);
 
       // Generate PDF
       const pdfBuffer = await page.pdf({
