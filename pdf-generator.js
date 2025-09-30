@@ -51,7 +51,7 @@ class PDFGenerator {
       await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
 
       // Add a delay to ensure everything is rendered
-      await page.waitForTimeout(2000);
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       console.log('📄 HTML content set, generating PDF...');
       
