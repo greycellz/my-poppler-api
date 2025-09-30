@@ -119,16 +119,24 @@ class PDFGenerator {
    * Generate HTML content for PDF
    */
   generateHTMLContent({ formData, formSchema, signatureData, isHipaa }) {
-    const currentDate = new Date().toLocaleDateString('en-US', {
+    const pacificTz = 'America/Los_Angeles';
+    const submittedAt = signatureData?.completedAt ? new Date(signatureData.completedAt) : new Date();
+
+    const currentDate = submittedAt.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
-      day: 'numeric'
+      day: 'numeric',
+      timeZone: pacificTz
     });
 
-    const currentTime = new Date().toLocaleTimeString('en-US', {
+    const currentTime = submittedAt.toLocaleTimeString('en-US', {
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZone: pacificTz
     });
+
+    const displayFields = (formSchema?.structure?.fields || formSchema?.fields || []);
+    const formTitle = formSchema?.structure?.title || formSchema?.title || 'Untitled Form';
 
     // Filter out signature fields for display
     const displayData = Object.entries(formData).filter(([key, value]) => {
@@ -226,14 +234,14 @@ class PDFGenerator {
 </head>
 <body>
     <div class="header">
-        <div class="form-title">${formSchema.title || 'Untitled Form'}</div>
+        <div class="form-title">${formTitle}</div>
         <div>Submitted on ${currentDate} at ${currentTime}</div>
         ${isHipaa ? '<span class="hipaa-badge">HIPAA COMPLIANT</span>' : ''}
     </div>
 
     <div class="form-data">
         ${displayData.map(([fieldId, value]) => {
-          const field = formSchema.fields?.find(f => f.id === fieldId);
+          const field = displayFields.find(f => f.id === fieldId);
           const label = field?.label || fieldId;
           const displayValue = Array.isArray(value) ? value.join(', ') : value;
           
@@ -250,9 +258,9 @@ class PDFGenerator {
         <div class="signature-title">Digital Signature</div>
         <img src="${signatureData.imageBase64.startsWith('data:') ? signatureData.imageBase64 : `data:image/jpeg;base64,${signatureData.imageBase64}`}" alt="Digital Signature" class="signature-image" />
         <div class="signature-details">
-            <div><strong>Signed:</strong> ${new Date(signatureData.completedAt).toLocaleString()}</div>
+            <div><strong>Signed:</strong> ${submittedAt.toLocaleString('en-US', { timeZone: pacificTz })}</div>
             <div><strong>Method:</strong> ${signatureData.method === 'draw' ? 'Hand-drawn' : 'Typed'}</div>
-            <div><strong>Timezone:</strong> ${signatureData.timezone}</div>
+            <div><strong>Timezone:</strong> ${pacificTz}</div>
         </div>
     </div>
 
