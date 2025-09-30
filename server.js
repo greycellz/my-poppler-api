@@ -1637,6 +1637,37 @@ app.get('/api/forms/:formId/submissions', async (req, res) => {
   }
 });
 
+// ============== SIGNATURE SIGNED URLS (BATCH) ==============
+
+app.get('/api/submissions/:submissionId/signatures', async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    console.log(`🖊️ Fetching signature URLs for submission: ${submissionId}`);
+    const urls = await gcpClient.getSignatureSignedUrls(submissionId);
+    res.json({ success: true, submissionId, urls, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('❌ Error fetching signature URLs:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch signature URLs' });
+  }
+});
+
+// ============== PDF GENERATE-OR-RETURN ==============
+
+app.post('/api/submissions/:submissionId/pdf/:fieldId/generate-or-return', async (req, res) => {
+  try {
+    const { submissionId, fieldId } = req.params;
+    console.log(`📄 Generate-or-return PDF for submission ${submissionId}, field ${fieldId}`);
+    const result = await gcpClient.getOrCreateSignedPDF(submissionId, fieldId);
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+    res.json({ success: true, downloadUrl: result.downloadUrl, filename: result.filename, size: result.size });
+  } catch (error) {
+    console.error('❌ Error generate-or-return PDF:', error);
+    res.status(500).json({ success: false, error: 'Failed to generate or retrieve PDF' });
+  }
+});
+
 // ============== DELETE FORM ENDPOINT ==============
 app.delete('/api/forms/:formId', async (req, res) => {
   try {

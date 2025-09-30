@@ -830,29 +830,32 @@ class GCPClient {
 
       // Handle different formats: Buffer (new), base64 string, or numeric object (old corrupted)
       let ciphertextBuffer;
-      console.log(`🔍 Decryption debug - encryptedData type: ${typeof encryptedData}`);
-      console.log(`🔍 Decryption debug - encryptedData isArray: ${Array.isArray(encryptedData)}`);
-      console.log(`🔍 Decryption debug - encryptedData isBuffer: ${Buffer.isBuffer(encryptedData)}`);
+      const debugDecrypt = process.env.DEBUG_DECRYPT === '1';
+      if (debugDecrypt) {
+        console.log(`🔍 Decryption debug - encryptedData type: ${typeof encryptedData}`);
+        console.log(`🔍 Decryption debug - encryptedData isArray: ${Array.isArray(encryptedData)}`);
+        console.log(`🔍 Decryption debug - encryptedData isBuffer: ${Buffer.isBuffer(encryptedData)}`);
+      }
       
       if (Buffer.isBuffer(encryptedData)) {
         // New format: Buffer (stored directly)
-        console.log(`🔍 Decryption debug - treating as Buffer, length: ${encryptedData.length}`);
+        if (debugDecrypt) console.log(`🔍 Decryption debug - treating as Buffer, length: ${encryptedData.length}`);
         ciphertextBuffer = encryptedData;
       } else if (typeof encryptedData === 'string') {
         // Fallback: base64 string
-        console.log(`🔍 Decryption debug - treating as base64 string, length: ${encryptedData.length}`);
+        if (debugDecrypt) console.log(`🔍 Decryption debug - treating as base64 string, length: ${encryptedData.length}`);
         ciphertextBuffer = Buffer.from(encryptedData, 'base64');
       } else if (typeof encryptedData === 'object' && !Array.isArray(encryptedData)) {
         // Old corrupted format: numeric object (character-by-character)
-        console.log(`🔍 Decryption debug - treating as corrupted numeric object, keys count: ${Object.keys(encryptedData).length}`);
+        if (debugDecrypt) console.log(`🔍 Decryption debug - treating as corrupted numeric object, keys count: ${Object.keys(encryptedData).length}`);
         const numericArray = Object.values(encryptedData);
-        console.log(`🔍 Decryption debug - numeric array length: ${numericArray.length}, first 10 values: ${numericArray.slice(0, 10).join(', ')}`);
+        if (debugDecrypt) console.log(`🔍 Decryption debug - numeric array length: ${numericArray.length}, first 10 values: ${numericArray.slice(0, 10).join(', ')}`);
         ciphertextBuffer = Buffer.from(numericArray);
       } else {
         throw new Error('Invalid encrypted data format');
       }
       
-      console.log(`🔍 Decryption debug - final ciphertextBuffer length: ${ciphertextBuffer.length}`);
+      if (debugDecrypt) console.log(`🔍 Decryption debug - final ciphertextBuffer length: ${ciphertextBuffer.length}`);
 
       const [result] = await this.kmsClient.decrypt({
         name: keyPath,
@@ -871,6 +874,91 @@ class GCPClient {
     } catch (error) {
       console.error('❌ Error decrypting data:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get signed URLs for all signature images for a submission
+   */
+  async getSignatureSignedUrls(submissionId) {
+    try {
+      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      const doc = await submissionRef.get();
+      if (!doc.exists) {
+        return {};
+      }
+      const data = doc.data();
+      const signatures = data.signatures || {};
+      const result = {};
+
+      for (const [fieldId, sig] of Object.entries(signatures)) {
+        try {
+          const bucketName = sig.isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
+          const file = this.storage.bucket(bucketName).file(sig.filename);
+          const [exists] = await file.exists();
+          if (!exists) {
+            continue;
+          }
+          const [signedUrl] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 60 * 60 * 1000 });
+          result[fieldId] = signedUrl;
+        } catch (e) {
+          console.warn(`⚠️ Could not create signed URL for signature field ${fieldId}: ${e.message}`);
+        }
+      }
+      return result;
+    } catch (error) {
+      console.error('❌ Error generating signature signed URLs:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Get or create a signed PDF for a specific submission and signature field
+   */
+  async getOrCreateSignedPDF(submissionId, fieldId) {
+    try {
+      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      const doc = await submissionRef.get();
+      if (!doc.exists) {
+        throw new Error('Submission not found');
+      }
+      const data = doc.data();
+      const formId = data.form_id;
+      const isHipaa = !!data.is_hipaa;
+
+      // If PDF already referenced, return its signed URL
+      const existing = data.pdfs?.[fieldId];
+      if (existing) {
+        const bucketName = existing.isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
+        const url = await this.pdfGenerator.getPDFDownloadURL(bucketName, existing.filename, 60);
+        return { success: true, downloadUrl: url, filename: existing.filename, size: existing.size };
+      }
+
+      // Need form data to generate. Load from Firestore field for non-HIPAA; for HIPAA from GCS JSON.
+      let formData;
+      if (isHipaa) {
+        if (!data.data_gcs_path) throw new Error('HIPAA submission missing data_gcs_path');
+        const [buf] = await this.storage.bucket('chatterforms-submissions-us-central1').file(data.data_gcs_path).download();
+        formData = JSON.parse(buf.toString('utf8'));
+      } else {
+        formData = data.submission_data;
+      }
+
+      // Generate PDFs for signatures in this submission
+      await this.generateSignedPDFIfNeeded(submissionId, formId, formData, isHipaa);
+
+      // Reload and return
+      const refreshed = await submissionRef.get();
+      const refreshedPdf = refreshed.data().pdfs?.[fieldId];
+      if (!refreshedPdf) {
+        throw new Error('PDF not generated');
+      }
+      const bucketName = refreshedPdf.isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
+      const url = await this.pdfGenerator.getPDFDownloadURL(bucketName, refreshedPdf.filename, 60);
+      return { success: true, downloadUrl: url, filename: refreshedPdf.filename, size: refreshedPdf.size };
+    } catch (error) {
+      console.error('❌ Error getOrCreateSignedPDF:', error);
+      return { success: false, error: error.message };
     }
   }
 

@@ -248,7 +248,7 @@ class PDFGenerator {
 
     <div class="signature-section">
         <div class="signature-title">Digital Signature</div>
-        <img src="data:image/png;base64,${signatureData.imageBase64}" alt="Digital Signature" class="signature-image" />
+        <img src="${signatureData.imageBase64.startsWith('data:') ? signatureData.imageBase64 : `data:image/jpeg;base64,${signatureData.imageBase64}`}" alt="Digital Signature" class="signature-image" />
         <div class="signature-details">
             <div><strong>Signed:</strong> ${new Date(signatureData.completedAt).toLocaleString()}</div>
             <div><strong>Method:</strong> ${signatureData.method === 'draw' ? 'Hand-drawn' : 'Typed'}</div>
