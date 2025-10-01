@@ -2220,6 +2220,27 @@ class GCPClient {
   }
 
   /**
+   * Update Stripe account data
+   */
+  async updateStripeAccount(accountId, updates) {
+    try {
+      console.log(`💳 Updating Stripe account: ${accountId}`);
+      
+      const accountRef = this.firestore.collection('user_stripe_accounts').doc(accountId);
+      await accountRef.update({
+        ...updates,
+        updated_at: new Date()
+      });
+      
+      console.log(`✅ Stripe account updated: ${accountId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Error updating Stripe account:', error);
+      return false;
+    }
+  }
+
+  /**
    * Update payment transaction status
    */
   async updatePaymentTransaction(transactionId, updates) {

@@ -2262,7 +2262,7 @@ app.get('/api/stripe/account/:userId', async (req, res) => {
     const account = await stripe.accounts.retrieve(stripeAccount.stripe_account_id);
     
     // Update local account data
-    await gcpClient.updatePaymentTransaction(stripeAccount.id, {
+    await gcpClient.updateStripeAccount(stripeAccount.id, {
       charges_enabled: account.charges_enabled,
       payouts_enabled: account.payouts_enabled,
       details_submitted: account.details_submitted,
@@ -2586,7 +2586,7 @@ async function handleAccountUpdate(account) {
     
     if (localAccount) {
       // Update local account data
-      await gcpClient.updatePaymentTransaction(localAccount.id, {
+      await gcpClient.updateStripeAccount(localAccount.id, {
         charges_enabled: account.charges_enabled,
         payouts_enabled: account.payouts_enabled,
         details_submitted: account.details_submitted,
