@@ -159,6 +159,32 @@ class GCPClient {
         .doc(formId)
         .set(formDoc);
 
+      // Store payment field configurations if the form contains payment fields
+      if (formData.fields && Array.isArray(formData.fields)) {
+        const paymentFields = formData.fields.filter(field => field.type === 'payment');
+        if (paymentFields.length > 0) {
+          console.log(`💳 Found ${paymentFields.length} payment field(s) in form ${formId}`);
+          
+          // Get user's Stripe account for payment fields
+          const stripeAccount = await this.getStripeAccount(finalUserId);
+          if (!stripeAccount) {
+            console.log(`⚠️ No Stripe account found for user ${finalUserId}, payment fields will not be configured`);
+          } else {
+            // Store each payment field configuration
+            for (const field of paymentFields) {
+              await this.storePaymentField(formId, field.id, {
+                amount: Math.round((field.amount || 0) * 100), // Convert to cents
+                currency: field.currency || 'usd',
+                description: field.description || '',
+                product_name: field.productName || '',
+                stripe_account_id: stripeAccount.stripe_account_id,
+                is_required: field.required || false
+              });
+            }
+          }
+        }
+      }
+
       // If this is an anonymous form, add it to the session
       if (isAnonymous && anonymousSessionId) {
         await this.addFormToAnonymousSession(anonymousSessionId, formId);
