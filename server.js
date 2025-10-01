@@ -2165,10 +2165,12 @@ app.post('/api/stripe/connect', async (req, res) => {
     console.log(`✅ Stripe Express account created: ${account.id}`);
 
     // Create account link for onboarding
+    const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com'
+    console.log(`🔗 Using frontend URL for redirects: ${frontendUrl}`);
     const accountLink = await stripe.accountLinks.create({
       account: account.id,
-      refresh_url: `${BASE_URL}/settings?stripe_refresh=true`,
-      return_url: `${BASE_URL}/settings?stripe_success=true`,
+      refresh_url: `${frontendUrl}/settings?stripe_refresh=true`,
+      return_url: `${frontendUrl}/settings?stripe_success=true`,
       type: 'account_onboarding'
     });
 
@@ -2214,10 +2216,12 @@ app.post('/api/stripe/account-link', async (req, res) => {
     }
 
     // Create account link
+    const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com'
+    console.log(`🔗 Using frontend URL for redirects: ${frontendUrl}`);
     const accountLink = await stripe.accountLinks.create({
       account: stripeAccount.stripe_account_id,
-      refresh_url: refreshUrl || `${BASE_URL}/dashboard?stripe_refresh=true`,
-      return_url: returnUrl || `${BASE_URL}/dashboard?stripe_success=true`,
+      refresh_url: refreshUrl || `${frontendUrl}/settings?stripe_refresh=true`,
+      return_url: returnUrl || `${frontendUrl}/settings?stripe_success=true`,
       type: 'account_onboarding'
     });
 
@@ -2243,6 +2247,8 @@ app.get('/api/stripe/account/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     console.log(`💳 Getting Stripe account status for user: ${userId}`);
+    console.log(`🔍 Request URL: ${req.url}`);
+    console.log(`🔍 Request method: ${req.method}`);
 
     const stripeAccount = await gcpClient.getStripeAccount(userId);
     if (!stripeAccount) {
