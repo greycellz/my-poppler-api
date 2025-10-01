@@ -1923,6 +1923,9 @@ app.post('/api/auto-save-form', async (req, res) => {
     const currentForm = await gcpClient.getFormById(formId);
     const currentPublishedStatus = currentForm?.is_published || false;
 
+    // Use HIPAA setting from the form schema being sent (not from database)
+    const hipaaStatus = formSchema?.isHipaa || false;
+
     // Store the form structure with auto-save metadata
     const result = await gcpClient.storeFormStructure(
       formId,
@@ -1932,6 +1935,7 @@ app.post('/api/auto-save-form', async (req, res) => {
         source: 'auto-save',
         isUpdate: true,
         isPublished: currentPublishedStatus, // Preserve existing published status
+        isHipaa: hipaaStatus, // Use HIPAA status from the form schema being sent
         updatedAt: new Date().toISOString()
       }
     );
