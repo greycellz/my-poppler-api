@@ -2120,6 +2120,470 @@ app.post('/api/emails/send-form-deleted', async (req, res) => {
   }
 });
 
+// ============== PAYMENT INTEGRATION ENDPOINTS ==============
+
+// Connect Stripe account (Express account creation)
+app.post('/api/stripe/connect', async (req, res) => {
+  try {
+    console.log('💳 Stripe Connect request received');
+    
+    const { userId, email, country = 'US' } = req.body;
+    
+    if (!userId || !email) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and email are required'
+      });
+    }
+
+    // Create Express account
+    const account = await stripe.accounts.create({
+      type: 'express',
+      country: country,
+      email: email,
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true }
+      }
+    });
+
+    // Store account information
+    const accountId = await gcpClient.storeStripeAccount(
+      userId, 
+      account.id, 
+      'express', 
+      {
+        charges_enabled: false,
+        details_submitted: false,
+        capabilities: account.capabilities,
+        country: account.country,
+        default_currency: account.default_currency,
+        email: account.email
+      }
+    );
+
+    console.log(`✅ Stripe Express account created: ${account.id}`);
+
+    res.json({
+      success: true,
+      accountId: account.id,
+      accountType: 'express',
+      nextStep: 'account_link'
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating Stripe account:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create Stripe account'
+    });
+  }
+});
+
+// Create account link for onboarding
+app.post('/api/stripe/account-link', async (req, res) => {
+  try {
+    console.log('🔗 Creating Stripe account link');
+    
+    const { userId, refreshUrl, returnUrl } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    // Get user's Stripe account
+    const stripeAccount = await gcpClient.getStripeAccount(userId);
+    if (!stripeAccount) {
+      return res.status(404).json({
+        success: false,
+        error: 'Stripe account not found'
+      });
+    }
+
+    // Create account link
+    const accountLink = await stripe.accountLinks.create({
+      account: stripeAccount.stripe_account_id,
+      refresh_url: refreshUrl || `${BASE_URL}/dashboard?stripe_refresh=true`,
+      return_url: returnUrl || `${BASE_URL}/dashboard?stripe_success=true`,
+      type: 'account_onboarding'
+    });
+
+    console.log(`✅ Account link created for account: ${stripeAccount.stripe_account_id}`);
+
+    res.json({
+      success: true,
+      url: accountLink.url,
+      expires_at: accountLink.expires_at
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating account link:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create account link'
+    });
+  }
+});
+
+// Get Stripe account status
+app.get('/api/stripe/account/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log(`💳 Getting Stripe account status for user: ${userId}`);
+
+    const stripeAccount = await gcpClient.getStripeAccount(userId);
+    if (!stripeAccount) {
+      return res.status(404).json({
+        success: false,
+        error: 'Stripe account not found'
+      });
+    }
+
+    // Sync with Stripe to get latest status
+    const account = await stripe.accounts.retrieve(stripeAccount.stripe_account_id);
+    
+    // Update local account data
+    await gcpClient.updatePaymentTransaction(stripeAccount.id, {
+      charges_enabled: account.charges_enabled,
+      payouts_enabled: account.payouts_enabled,
+      details_submitted: account.details_submitted,
+      last_sync_at: new Date()
+    });
+
+    res.json({
+      success: true,
+      account: {
+        id: stripeAccount.id,
+        stripe_account_id: stripeAccount.stripe_account_id,
+        account_type: stripeAccount.account_type,
+        is_verified: account.charges_enabled && account.details_submitted,
+        charges_enabled: account.charges_enabled,
+        payouts_enabled: account.payouts_enabled,
+        details_submitted: account.details_submitted,
+        country: account.country,
+        default_currency: account.default_currency,
+        email: account.email
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting Stripe account:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get Stripe account'
+    });
+  }
+});
+
+// Create payment intent for form submission
+app.post('/api/stripe/create-payment-intent', async (req, res) => {
+  try {
+    console.log('💳 Creating payment intent');
+    
+    const { 
+      formId, 
+      fieldId, 
+      amount, 
+      currency = 'usd',
+      customerEmail,
+      customerName,
+      billingAddress 
+    } = req.body;
+
+    if (!formId || !fieldId || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID, field ID, and amount are required'
+      });
+    }
+
+    // Get payment field configuration
+    const paymentFields = await gcpClient.getPaymentFields(formId);
+    const paymentField = paymentFields.find(field => field.field_id === fieldId);
+    
+    if (!paymentField) {
+      return res.status(404).json({
+        success: false,
+        error: 'Payment field not found'
+      });
+    }
+
+    // Create payment intent
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: paymentField.amount,
+      currency: paymentField.currency,
+      application_fee_amount: 0, // No application fee for now
+      transfer_data: {
+        destination: paymentField.stripe_account_id
+      },
+      metadata: {
+        form_id: formId,
+        field_id: fieldId,
+        customer_email: customerEmail || '',
+        customer_name: customerName || ''
+      },
+      receipt_email: customerEmail,
+      customer_name: customerName,
+      billing_address_collection: 'required'
+    });
+
+    console.log(`✅ Payment intent created: ${paymentIntent.id}`);
+
+    res.json({
+      success: true,
+      client_secret: paymentIntent.client_secret,
+      payment_intent_id: paymentIntent.id,
+      amount: paymentIntent.amount,
+      currency: paymentIntent.currency
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating payment intent:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create payment intent'
+    });
+  }
+});
+
+// Handle successful payment
+app.post('/api/stripe/payment-success', async (req, res) => {
+  try {
+    console.log('✅ Payment success webhook received');
+    
+    const { 
+      submissionId, 
+      formId, 
+      fieldId, 
+      paymentIntentId,
+      customerEmail,
+      customerName,
+      billingAddress 
+    } = req.body;
+
+    if (!submissionId || !formId || !fieldId || !paymentIntentId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters'
+      });
+    }
+
+    // Get payment intent details from Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    // Get payment field to get Stripe account ID
+    const paymentFields = await gcpClient.getPaymentFields(formId);
+    const paymentField = paymentFields.find(field => field.field_id === fieldId);
+    
+    if (!paymentField) {
+      return res.status(404).json({
+        success: false,
+        error: 'Payment field not found'
+      });
+    }
+
+    // Store payment transaction
+    const transactionId = await gcpClient.storePaymentTransaction(
+      submissionId,
+      formId,
+      fieldId,
+      {
+        paymentIntentId: paymentIntent.id,
+        stripeAccountId: paymentField.stripe_account_id,
+        amount: paymentIntent.amount,
+        currency: paymentIntent.currency,
+        status: 'succeeded',
+        customerEmail: customerEmail || paymentIntent.receipt_email,
+        customerName: customerName,
+        billingAddress: billingAddress,
+        paymentMethod: paymentIntent.payment_method ? {
+          type: paymentIntent.payment_method.type,
+          brand: paymentIntent.payment_method.card?.brand,
+          last4: paymentIntent.payment_method.card?.last4,
+          exp_month: paymentIntent.payment_method.card?.exp_month,
+          exp_year: paymentIntent.payment_method.card?.exp_year
+        } : null,
+        receiptUrl: paymentIntent.charges?.data?.[0]?.receipt_url,
+        completedAt: new Date()
+      }
+    );
+
+    console.log(`✅ Payment transaction stored: ${transactionId}`);
+
+    res.json({
+      success: true,
+      transactionId: transactionId,
+      paymentIntentId: paymentIntent.id,
+      amount: paymentIntent.amount,
+      currency: paymentIntent.currency,
+      status: 'succeeded'
+    });
+
+  } catch (error) {
+    console.error('❌ Error processing payment success:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process payment success'
+    });
+  }
+});
+
+// Get payment transactions for a submission
+app.get('/api/stripe/transactions/:submissionId', async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    console.log(`💳 Getting payment transactions for submission: ${submissionId}`);
+
+    const transactions = await gcpClient.getPaymentTransactions(submissionId);
+    
+    // Remove sensitive information before sending to frontend
+    const safeTransactions = transactions.map(transaction => ({
+      id: transaction.id,
+      field_id: transaction.field_id,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      status: transaction.status,
+      customer_email: transaction.customer_email,
+      customer_name: transaction.customer_name,
+      created_at: transaction.created_at,
+      completed_at: transaction.completed_at,
+      receipt_url: transaction.receipt_url
+    }));
+
+    res.json({
+      success: true,
+      transactions: safeTransactions
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting payment transactions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get payment transactions'
+    });
+  }
+});
+
+// Stripe webhook handler for payment events
+app.post('/api/stripe/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+  try {
+    const sig = req.headers['stripe-signature'];
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    if (!endpointSecret) {
+      console.error('❌ Stripe webhook secret not configured');
+      return res.status(400).json({ error: 'Webhook secret not configured' });
+    }
+
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+    } catch (err) {
+      console.error('❌ Webhook signature verification failed:', err.message);
+      return res.status(400).json({ error: `Webhook Error: ${err.message}` });
+    }
+
+    console.log(`🔔 Stripe webhook received: ${event.type}`);
+
+    // Handle the event
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        await handlePaymentSuccess(event.data.object);
+        break;
+      case 'payment_intent.payment_failed':
+        await handlePaymentFailure(event.data.object);
+        break;
+      case 'account.updated':
+        await handleAccountUpdate(event.data.object);
+        break;
+      default:
+        console.log(`ℹ️ Unhandled event type: ${event.type}`);
+    }
+
+    res.json({ received: true });
+
+  } catch (error) {
+    console.error('❌ Error processing Stripe webhook:', error);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
+});
+
+// Helper function to handle successful payments
+async function handlePaymentSuccess(paymentIntent) {
+  try {
+    console.log(`✅ Payment succeeded: ${paymentIntent.id}`);
+    
+    // Find the transaction by payment intent ID
+    const transaction = await gcpClient.getPaymentTransactionByIntentId(paymentIntent.id);
+    
+    if (transaction) {
+      // Update transaction status
+      await gcpClient.updatePaymentTransaction(transaction.id, {
+        status: 'succeeded',
+        completed_at: new Date(),
+        receipt_url: paymentIntent.charges?.data?.[0]?.receipt_url
+      });
+      
+      console.log(`✅ Transaction updated: ${transaction.id}`);
+    } else {
+      console.log(`⚠️ No transaction found for payment intent: ${paymentIntent.id}`);
+    }
+  } catch (error) {
+    console.error('❌ Error handling payment success:', error);
+  }
+}
+
+// Helper function to handle failed payments
+async function handlePaymentFailure(paymentIntent) {
+  try {
+    console.log(`❌ Payment failed: ${paymentIntent.id}`);
+    
+    // Find the transaction by payment intent ID
+    const transaction = await gcpClient.getPaymentTransactionByIntentId(paymentIntent.id);
+    
+    if (transaction) {
+      // Update transaction status
+      await gcpClient.updatePaymentTransaction(transaction.id, {
+        status: 'failed',
+        failure_reason: paymentIntent.last_payment_error?.message || 'Payment failed'
+      });
+      
+      console.log(`❌ Transaction updated: ${transaction.id}`);
+    } else {
+      console.log(`⚠️ No transaction found for payment intent: ${paymentIntent.id}`);
+    }
+  } catch (error) {
+    console.error('❌ Error handling payment failure:', error);
+  }
+}
+
+// Helper function to handle account updates
+async function handleAccountUpdate(account) {
+  try {
+    console.log(`🔄 Account updated: ${account.id}`);
+    
+    // Find the local account record
+    const localAccount = await gcpClient.getStripeAccount(account.id);
+    
+    if (localAccount) {
+      // Update local account data
+      await gcpClient.updatePaymentTransaction(localAccount.id, {
+        charges_enabled: account.charges_enabled,
+        payouts_enabled: account.payouts_enabled,
+        details_submitted: account.details_submitted,
+        last_sync_at: new Date()
+      });
+      
+      console.log(`🔄 Account data updated: ${localAccount.id}`);
+    }
+  } catch (error) {
+    console.error('❌ Error handling account update:', error);
+  }
+}
+
 // ============== SERVER STARTUP ==============
 
 app.listen(PORT, () => {

@@ -2063,6 +2063,232 @@ class GCPClient {
       return null;
     }
   }
+
+  // ============== PAYMENT INTEGRATION METHODS ==============
+
+  /**
+   * Store Stripe account information for a user
+   */
+  async storeStripeAccount(userId, stripeAccountId, accountType, accountData) {
+    try {
+      console.log(`💳 Storing Stripe account for user: ${userId}`);
+      
+      const accountRef = this.firestore.collection('user_stripe_accounts').doc();
+      
+      const accountDoc = {
+        user_id: userId,
+        stripe_account_id: stripeAccountId,
+        account_type: accountType,
+        is_verified: accountData.charges_enabled && accountData.details_submitted,
+        capabilities: accountData.capabilities || {},
+        charges_enabled: accountData.charges_enabled || false,
+        payouts_enabled: accountData.payouts_enabled || false,
+        details_submitted: accountData.details_submitted || false,
+        country: accountData.country || 'US',
+        default_currency: accountData.default_currency || 'usd',
+        email: accountData.email || '',
+        created_at: new Date(),
+        updated_at: new Date(),
+        last_sync_at: new Date()
+      };
+
+      await accountRef.set(accountDoc);
+      console.log(`✅ Stripe account stored: ${accountRef.id}`);
+      return accountRef.id;
+    } catch (error) {
+      console.error('❌ Error storing Stripe account:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's Stripe account information
+   */
+  async getStripeAccount(userId) {
+    try {
+      console.log(`💳 Getting Stripe account for user: ${userId}`);
+      
+      const accountQuery = await this.firestore
+        .collection('user_stripe_accounts')
+        .where('user_id', '==', userId)
+        .limit(1)
+        .get();
+
+      if (accountQuery.empty) {
+        console.log(`❌ No Stripe account found for user: ${userId}`);
+        return null;
+      }
+
+      const accountDoc = accountQuery.docs[0];
+      const accountData = { id: accountDoc.id, ...accountDoc.data() };
+      console.log(`✅ Found Stripe account: ${accountData.stripe_account_id}`);
+      return accountData;
+    } catch (error) {
+      console.error('❌ Error getting Stripe account:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Store payment field configuration for a form
+   */
+  async storePaymentField(formId, fieldId, paymentConfig) {
+    try {
+      console.log(`💰 Storing payment field for form: ${formId}, field: ${fieldId}`);
+      
+      const fieldRef = this.firestore.collection('payment_fields').doc();
+      
+      const fieldDoc = {
+        form_id: formId,
+        field_id: fieldId,
+        amount: paymentConfig.amount,
+        currency: paymentConfig.currency || 'usd',
+        description: paymentConfig.description || '',
+        stripe_account_id: paymentConfig.stripeAccountId,
+        is_required: paymentConfig.isRequired !== false,
+        metadata: paymentConfig.metadata || {},
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+
+      await fieldRef.set(fieldDoc);
+      console.log(`✅ Payment field stored: ${fieldRef.id}`);
+      return fieldRef.id;
+    } catch (error) {
+      console.error('❌ Error storing payment field:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get payment fields for a form
+   */
+  async getPaymentFields(formId) {
+    try {
+      console.log(`💰 Getting payment fields for form: ${formId}`);
+      
+      const fieldsQuery = await this.firestore
+        .collection('payment_fields')
+        .where('form_id', '==', formId)
+        .get();
+
+      const fields = fieldsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log(`✅ Found ${fields.length} payment fields for form: ${formId}`);
+      return fields;
+    } catch (error) {
+      console.error('❌ Error getting payment fields:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Store payment transaction record
+   */
+  async storePaymentTransaction(submissionId, formId, fieldId, paymentData) {
+    try {
+      console.log(`💳 Storing payment transaction for submission: ${submissionId}`);
+      
+      const transactionRef = this.firestore.collection('payment_transactions').doc();
+      
+      const transactionDoc = {
+        submission_id: submissionId,
+        form_id: formId,
+        field_id: fieldId,
+        stripe_payment_intent_id: paymentData.paymentIntentId,
+        stripe_account_id: paymentData.stripeAccountId,
+        amount: paymentData.amount,
+        currency: paymentData.currency,
+        status: paymentData.status || 'pending',
+        customer_email: paymentData.customerEmail || '',
+        customer_name: paymentData.customerName,
+        billing_address: paymentData.billingAddress,
+        payment_method: paymentData.paymentMethod,
+        receipt_url: paymentData.receiptUrl,
+        created_at: new Date(),
+        updated_at: new Date(),
+        completed_at: paymentData.completedAt,
+        failure_reason: paymentData.failureReason
+      };
+
+      await transactionRef.set(transactionDoc);
+      console.log(`✅ Payment transaction stored: ${transactionRef.id}`);
+      return transactionRef.id;
+    } catch (error) {
+      console.error('❌ Error storing payment transaction:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update payment transaction status
+   */
+  async updatePaymentTransaction(transactionId, updates) {
+    try {
+      console.log(`💳 Updating payment transaction: ${transactionId}`);
+      
+      const transactionRef = this.firestore.collection('payment_transactions').doc(transactionId);
+      
+      const updateData = {
+        ...updates,
+        updated_at: new Date()
+      };
+
+      await transactionRef.update(updateData);
+      console.log(`✅ Payment transaction updated: ${transactionId}`);
+    } catch (error) {
+      console.error('❌ Error updating payment transaction:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get payment transactions for a submission
+   */
+  async getPaymentTransactions(submissionId) {
+    try {
+      console.log(`💳 Getting payment transactions for submission: ${submissionId}`);
+      
+      const transactionsQuery = await this.firestore
+        .collection('payment_transactions')
+        .where('submission_id', '==', submissionId)
+        .get();
+
+      const transactions = transactionsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log(`✅ Found ${transactions.length} payment transactions for submission: ${submissionId}`);
+      return transactions;
+    } catch (error) {
+      console.error('❌ Error getting payment transactions:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get payment transaction by Stripe payment intent ID
+   */
+  async getPaymentTransactionByIntentId(paymentIntentId) {
+    try {
+      console.log(`💳 Getting payment transaction by intent ID: ${paymentIntentId}`);
+      
+      const transactionQuery = await this.firestore
+        .collection('payment_transactions')
+        .where('stripe_payment_intent_id', '==', paymentIntentId)
+        .limit(1)
+        .get();
+
+      if (transactionQuery.empty) {
+        console.log(`❌ No payment transaction found for intent: ${paymentIntentId}`);
+        return null;
+      }
+
+      const transactionDoc = transactionQuery.docs[0];
+      const transactionData = { id: transactionDoc.id, ...transactionDoc.data() };
+      console.log(`✅ Found payment transaction: ${transactionData.id}`);
+      return transactionData;
+    } catch (error) {
+      console.error('❌ Error getting payment transaction by intent ID:', error);
+      return null;
+    }
+  }
 }
 
 module.exports = GCPClient;
