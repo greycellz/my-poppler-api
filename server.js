@@ -2164,11 +2164,21 @@ app.post('/api/stripe/connect', async (req, res) => {
 
     console.log(`✅ Stripe Express account created: ${account.id}`);
 
+    // Create account link for onboarding
+    const accountLink = await stripe.accountLinks.create({
+      account: account.id,
+      refresh_url: `${BASE_URL}/settings?stripe_refresh=true`,
+      return_url: `${BASE_URL}/settings?stripe_success=true`,
+      type: 'account_onboarding'
+    });
+
+    console.log(`🔗 Account link created: ${accountLink.url}`);
+
     res.json({
       success: true,
       accountId: account.id,
       accountType: 'express',
-      nextStep: 'account_link'
+      onboardingUrl: accountLink.url
     });
 
   } catch (error) {
