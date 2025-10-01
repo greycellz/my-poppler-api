@@ -165,22 +165,27 @@ class GCPClient {
         if (paymentFields.length > 0) {
           console.log(`💳 Found ${paymentFields.length} payment field(s) in form ${formId}`);
           
-          // Get user's Stripe account for payment fields
-          const stripeAccount = await this.getStripeAccount(finalUserId);
-          if (!stripeAccount) {
-            console.log(`⚠️ No Stripe account found for user ${finalUserId}, payment fields will not be configured`);
-          } else {
-            // Store each payment field configuration
-            for (const field of paymentFields) {
-              await this.storePaymentField(formId, field.id, {
-                amount: Math.round((field.amount || 0) * 100), // Convert to cents
-                currency: field.currency || 'usd',
-                description: field.description || '',
-                product_name: field.productName || '',
-                stripe_account_id: stripeAccount.stripe_account_id,
-                is_required: field.required || false
-              });
+          try {
+            // Get user's Stripe account for payment fields
+            const stripeAccount = await this.getStripeAccount(finalUserId);
+            if (!stripeAccount) {
+              console.log(`⚠️ No Stripe account found for user ${finalUserId}, payment fields will not be configured`);
+            } else {
+              // Store each payment field configuration
+              for (const field of paymentFields) {
+                await this.storePaymentField(formId, field.id, {
+                  amount: Math.round((field.amount || 0) * 100), // Convert to cents
+                  currency: field.currency || 'usd',
+                  description: field.description || '',
+                  product_name: field.productName || '',
+                  stripe_account_id: stripeAccount.stripe_account_id,
+                  isRequired: field.required || false
+                });
+              }
             }
+          } catch (paymentError) {
+            console.error('❌ Error storing payment fields (non-blocking):', paymentError);
+            // Don't throw the error - let the form save continue
           }
         }
       }
@@ -2170,7 +2175,7 @@ class GCPClient {
         amount: paymentConfig.amount,
         currency: paymentConfig.currency || 'usd',
         description: paymentConfig.description || '',
-        stripe_account_id: paymentConfig.stripeAccountId,
+        stripe_account_id: paymentConfig.stripe_account_id,
         is_required: paymentConfig.isRequired !== false,
         metadata: paymentConfig.metadata || {},
         created_at: new Date(),
