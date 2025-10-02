@@ -3,7 +3,7 @@
  * Validates data formats, field names, and error handling
  */
 
-const BASE_URL = process.env.RAILWAY_URL || 'https://my-poppler-api-production.up.railway.app'
+const BASE_URL = process.env.RAILWAY_URL || 'https://my-poppler-api-dev.up.railway.app'
 
 async function testCalendlyEndpoints() {
   console.log('🧪 Testing Calendly Integration Endpoints')

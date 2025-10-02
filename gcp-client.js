@@ -188,6 +188,32 @@ class GCPClient {
             // Don't throw the error - let the form save continue
           }
         }
+
+        // Store calendar field configurations if the form contains calendar fields
+        const calendarFields = formData.fields.filter(field => field.type === 'calendar');
+        if (calendarFields.length > 0) {
+          console.log(`📅 Found ${calendarFields.length} calendar field(s) in form ${formId}`);
+          
+          try {
+            // Store each calendar field configuration
+            for (const field of calendarFields) {
+              await this.storeCalendarField(formId, field.id, {
+                calendlyUrl: field.calendlyUrl || '',
+                eventTypeUri: field.eventTypeUri || '',
+                eventName: field.eventName || '',
+                duration: field.duration || 15,
+                requirePaymentFirst: field.requirePaymentFirst || false,
+                isRequired: field.required || false,
+                timezone: 'UTC',
+                metadata: {}
+              });
+            }
+            console.log(`✅ Calendar field configurations stored for form ${formId}`);
+          } catch (calendarError) {
+            console.error('❌ Error storing calendar fields (non-blocking):', calendarError);
+            // Don't throw the error - let the form save continue
+          }
+        }
       }
 
       // If this is an anonymous form, add it to the session
