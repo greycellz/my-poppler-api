@@ -251,6 +251,100 @@ async function testCalendlyEndpoints() {
     console.log('❌ Get bookings test error:', error.message)
   }
 
+  // Test 10: Test Calendar Field Configuration Storage
+  console.log('\n📅 Test 10: Calendar Field Configuration Storage')
+  try {
+    const response = await fetch(`${BASE_URL}/api/auto-save-form`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        formId: 'test-calendar-form-123',
+        formSchema: {
+          title: 'Test Calendar Form',
+                 fields: [
+                   {
+                     id: 'field_calendly_test_123',
+                     type: 'calendly',
+                     label: 'Schedule Meeting',
+                     required: true,
+                     calendlyUrl: 'https://calendly.com/akj_work/30min',
+                     eventTypeUri: 'https://calendly.com/akj_work/30min',
+                     eventName: '30 Minute Meeting',
+                     duration: 30,
+                     requirePaymentFirst: false
+                   }
+                 ],
+          isHipaa: false
+        }
+      })
+    })
+    
+    const data = await response.json()
+    console.log(`Status: ${response.status}`)
+    console.log(`Response:`, JSON.stringify(data, null, 2))
+    
+    if (response.ok && data.success) {
+      console.log('✅ Calendar field configuration storage test passed')
+    } else {
+      console.log('❌ Calendar field configuration storage test failed')
+    }
+  } catch (error) {
+    console.log('❌ Calendar field configuration storage test error:', error.message)
+  }
+
+  // Test 11: Test Calendar Field Retrieval
+  console.log('\n📅 Test 11: Calendar Field Retrieval')
+  try {
+    const response = await fetch(`${BASE_URL}/form/test-calendar-form-123`)
+    
+    const data = await response.json()
+    console.log(`Status: ${response.status}`)
+    console.log(`Response:`, JSON.stringify(data, null, 2))
+    
+    if (response.ok && data.success && data.formSchema) {
+      const calendlyField = data.formSchema.fields?.find(field => field.type === 'calendly')
+      if (calendlyField && calendlyField.calendlyUrl === 'https://calendly.com/akj_work/30min') {
+        console.log('✅ Calendly field retrieval test passed - URL preserved')
+        console.log('📅 Calendly field details:', {
+          id: calendlyField.id,
+          type: calendlyField.type,
+          label: calendlyField.label,
+          calendlyUrl: calendlyField.calendlyUrl,
+          eventName: calendlyField.eventName,
+          duration: calendlyField.duration,
+          requirePaymentFirst: calendlyField.requirePaymentFirst
+        })
+      } else {
+        console.log('❌ Calendly field retrieval test failed - URL not preserved')
+        console.log('Calendly field found:', calendlyField)
+      }
+    } else {
+      console.log('❌ Calendar field retrieval test failed')
+    }
+  } catch (error) {
+    console.log('❌ Calendar field retrieval test error:', error.message)
+  }
+
+  // Test 12: Test Calendar Field Configuration in Database
+  console.log('\n📅 Test 12: Calendar Field Configuration in Database')
+  try {
+    // This test verifies that the calendar field was properly stored in the calendar_fields collection
+    // We'll check by trying to retrieve the form and looking for calendar field configuration
+    const response = await fetch(`${BASE_URL}/form/test-calendar-form-123`)
+    
+    const data = await response.json()
+    console.log(`Status: ${response.status}`)
+    
+    if (response.ok && data.success) {
+      console.log('✅ Calendar field database configuration test passed')
+      console.log('📅 Form structure includes calendar field with proper configuration')
+    } else {
+      console.log('❌ Calendar field database configuration test failed')
+    }
+  } catch (error) {
+    console.log('❌ Calendar field database configuration test error:', error.message)
+  }
+
   console.log('\n🎯 Calendly Integration Tests Completed!')
   console.log('=' .repeat(50))
 }

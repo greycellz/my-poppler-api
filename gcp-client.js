@@ -189,14 +189,14 @@ class GCPClient {
           }
         }
 
-        // Store calendar field configurations if the form contains calendar fields
-        const calendarFields = formData.fields.filter(field => field.type === 'calendar');
-        if (calendarFields.length > 0) {
-          console.log(`📅 Found ${calendarFields.length} calendar field(s) in form ${formId}`);
+        // Store calendly field configurations if the form contains calendly fields
+        const calendlyFields = formData.fields.filter(field => field.type === 'calendly');
+        if (calendlyFields.length > 0) {
+          console.log(`📅 Found ${calendlyFields.length} calendly field(s) in form ${formId}`);
           
           try {
-            // Store each calendar field configuration
-            for (const field of calendarFields) {
+            // Store each calendly field configuration
+            for (const field of calendlyFields) {
               await this.storeCalendarField(formId, field.id, {
                 calendlyUrl: field.calendlyUrl || '',
                 eventTypeUri: field.eventTypeUri || '',
@@ -208,9 +208,9 @@ class GCPClient {
                 metadata: {}
               });
             }
-            console.log(`✅ Calendar field configurations stored for form ${formId}`);
-          } catch (calendarError) {
-            console.error('❌ Error storing calendar fields (non-blocking):', calendarError);
+            console.log(`✅ Calendly field configurations stored for form ${formId}`);
+          } catch (calendlyError) {
+            console.error('❌ Error storing calendly fields (non-blocking):', calendlyError);
             // Don't throw the error - let the form save continue
           }
         }
@@ -435,7 +435,7 @@ class GCPClient {
         : {
             ...baseDoc,
             submission_data: processedFormData,
-          };
+      };
 
       await this.firestore
         .collection('submissions')
