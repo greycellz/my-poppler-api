@@ -2631,6 +2631,245 @@ async function handleAccountUpdate(account) {
   }
 }
 
+// ========================================
+// CALENDLY INTEGRATION ENDPOINTS
+// ========================================
+
+/**
+ * Connect Calendly account
+ */
+app.post('/api/calendly/connect', async (req, res) => {
+  try {
+    console.log('📅 Connecting Calendly account');
+    
+    const { userId, calendlyUsername, calendlyUrl } = req.body;
+
+    if (!userId || !calendlyUsername || !calendlyUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID, Calendly username, and URL are required'
+      });
+    }
+
+    // Validate Calendly URL format
+    if (!calendlyUrl.includes('calendly.com/')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Calendly URL format'
+      });
+    }
+
+    // Store Calendly account
+    const accountId = await gcpClient.storeCalendlyAccount(
+      userId,
+      calendlyUsername,
+      calendlyUrl,
+      [] // Event types will be fetched separately
+    );
+
+    console.log(`✅ Calendly account connected: ${accountId}`);
+
+    res.json({
+      success: true,
+      accountId,
+      message: 'Calendly account connected successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error connecting Calendly account:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to connect Calendly account'
+    });
+  }
+});
+
+/**
+ * Get Calendly account status
+ */
+app.get('/api/calendly/account/:userId', async (req, res) => {
+  try {
+    console.log(`📅 Getting Calendly account status for user: ${req.params.userId}`);
+    
+    const account = await gcpClient.getCalendlyAccount(req.params.userId);
+    
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: 'Calendly account not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      account: {
+        id: account.id,
+        calendlyUsername: account.calendly_username,
+        calendlyUrl: account.calendly_url,
+        isConnected: account.is_connected,
+        eventTypes: account.event_types || [],
+        connectedAt: account.created_at
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting Calendly account:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get Calendly account'
+    });
+  }
+});
+
+/**
+ * Get Calendly event types
+ */
+app.get('/api/calendly/event-types/:userId', async (req, res) => {
+  try {
+    console.log(`📅 Getting Calendly event types for user: ${req.params.userId}`);
+    
+    const account = await gcpClient.getCalendlyAccount(req.params.userId);
+    
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: 'Calendly account not found'
+      });
+    }
+
+    // For now, return basic event types
+    // In the future, we can integrate with Calendly API to fetch real event types
+    const eventTypes = [
+      {
+        uri: `${account.calendly_url}/15min`,
+        name: '15 Minute Meeting',
+        duration: 15,
+        description: 'Quick 15-minute call',
+        color: '#0066cc',
+        active: true
+      },
+      {
+        uri: `${account.calendly_url}/30min`,
+        name: '30 Minute Meeting',
+        duration: 30,
+        description: 'Standard 30-minute meeting',
+        color: '#0066cc',
+        active: true
+      },
+      {
+        uri: `${account.calendly_url}/60min`,
+        name: '1 Hour Meeting',
+        duration: 60,
+        description: '1-hour detailed discussion',
+        color: '#0066cc',
+        active: true
+      }
+    ];
+
+    res.json({
+      success: true,
+      eventTypes
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting Calendly event types:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get Calendly event types'
+    });
+  }
+});
+
+/**
+ * Store calendar booking
+ */
+app.post('/api/calendly/booking', async (req, res) => {
+  try {
+    console.log('📅 Storing calendar booking');
+    
+    const { 
+      submissionId, 
+      formId, 
+      fieldId, 
+      eventUri, 
+      eventName, 
+      startTime, 
+      endTime, 
+      duration, 
+      timezone, 
+      attendeeEmail, 
+      attendeeName, 
+      attendeePhone, 
+      bookingUrl 
+    } = req.body;
+
+    if (!submissionId || !formId || !fieldId || !eventUri) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required booking data'
+      });
+    }
+
+    const bookingData = {
+      eventUri,
+      eventName,
+      startTime,
+      endTime,
+      duration,
+      timezone,
+      attendeeEmail,
+      attendeeName,
+      attendeePhone,
+      bookingUrl
+    };
+
+    const bookingId = await gcpClient.storeCalendarBooking(
+      submissionId,
+      formId,
+      fieldId,
+      bookingData
+    );
+
+    console.log(`✅ Calendar booking stored: ${bookingId}`);
+
+    res.json({
+      success: true,
+      bookingId,
+      message: 'Calendar booking stored successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error storing calendar booking:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to store calendar booking'
+    });
+  }
+});
+
+/**
+ * Get calendar bookings for a submission
+ */
+app.get('/api/calendly/bookings/:submissionId', async (req, res) => {
+  try {
+    console.log(`📅 Getting calendar bookings for submission: ${req.params.submissionId}`);
+    
+    const bookings = await gcpClient.getCalendarBookings(req.params.submissionId);
+
+    res.json({
+      success: true,
+      bookings
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting calendar bookings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get calendar bookings'
+    });
+  }
+});
+
 // ============== SERVER STARTUP ==============
 
 app.listen(PORT, () => {

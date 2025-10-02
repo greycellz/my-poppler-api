@@ -2342,6 +2342,201 @@ class GCPClient {
       return null;
     }
   }
+
+  // ========================================
+  // CALENDLY INTEGRATION METHODS
+  // ========================================
+
+  /**
+   * Store Calendly account information
+   */
+  async storeCalendlyAccount(userId, calendlyUsername, calendlyUrl, eventTypes) {
+    try {
+      console.log(`📅 Storing Calendly account for user: ${userId}`);
+      
+      const accountRef = this.firestore.collection('user_calendly_accounts').doc();
+      
+      const accountDoc = {
+        user_id: userId,
+        calendly_username: calendlyUsername,
+        calendly_url: calendlyUrl,
+        is_connected: true,
+        event_types: eventTypes || [],
+        created_at: new Date(),
+        updated_at: new Date(),
+        last_sync_at: new Date()
+      };
+
+      await accountRef.set(accountDoc);
+      console.log(`✅ Calendly account stored: ${accountRef.id}`);
+      return accountRef.id;
+    } catch (error) {
+      console.error('❌ Error storing Calendly account:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's Calendly account
+   */
+  async getCalendlyAccount(userId) {
+    try {
+      console.log(`📅 Getting Calendly account for user: ${userId}`);
+      
+      const accountQuery = await this.firestore
+        .collection('user_calendly_accounts')
+        .where('user_id', '==', userId)
+        .limit(1)
+        .get();
+
+      if (accountQuery.empty) {
+        console.log(`❌ No Calendly account found for user: ${userId}`);
+        return null;
+      }
+
+      const accountDoc = accountQuery.docs[0];
+      const accountData = { id: accountDoc.id, ...accountDoc.data() };
+      console.log(`✅ Found Calendly account: ${accountData.id}`);
+      return accountData;
+    } catch (error) {
+      console.error('❌ Error getting Calendly account:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Store calendar field configuration
+   */
+  async storeCalendarField(formId, fieldId, calendarConfig) {
+    try {
+      console.log(`📅 Storing calendar field for form: ${formId}, field: ${fieldId}`);
+      
+      const fieldRef = this.firestore.collection('calendar_fields').doc();
+      
+      const fieldDoc = {
+        form_id: formId,
+        field_id: fieldId,
+        calendly_url: calendarConfig.calendlyUrl,
+        event_type_uri: calendarConfig.eventTypeUri,
+        event_name: calendarConfig.eventName,
+        duration: calendarConfig.duration,
+        require_payment_first: calendarConfig.requirePaymentFirst || false,
+        is_required: calendarConfig.isRequired !== false,
+        timezone: calendarConfig.timezone || 'UTC',
+        metadata: calendarConfig.metadata || {},
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+
+      await fieldRef.set(fieldDoc);
+      console.log(`✅ Calendar field stored: ${fieldRef.id}`);
+      return fieldRef.id;
+    } catch (error) {
+      console.error('❌ Error storing calendar field:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get calendar fields for a form
+   */
+  async getCalendarFields(formId) {
+    try {
+      console.log(`📅 Getting calendar fields for form: ${formId}`);
+      
+      const fieldsQuery = await this.firestore
+        .collection('calendar_fields')
+        .where('form_id', '==', formId)
+        .get();
+
+      const fields = fieldsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log(`✅ Found ${fields.length} calendar fields for form: ${formId}`);
+      return fields;
+    } catch (error) {
+      console.error('❌ Error getting calendar fields:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Store calendar booking
+   */
+  async storeCalendarBooking(submissionId, formId, fieldId, bookingData) {
+    try {
+      console.log(`📅 Storing calendar booking for submission: ${submissionId}`);
+      
+      const bookingRef = this.firestore.collection('calendar_bookings').doc();
+      
+      const bookingDoc = {
+        submission_id: submissionId,
+        form_id: formId,
+        field_id: fieldId,
+        calendly_event_uri: bookingData.eventUri,
+        event_name: bookingData.eventName,
+        start_time: bookingData.startTime,
+        end_time: bookingData.endTime,
+        duration: bookingData.duration,
+        timezone: bookingData.timezone,
+        attendee_email: bookingData.attendeeEmail,
+        attendee_name: bookingData.attendeeName,
+        attendee_phone: bookingData.attendeePhone,
+        status: 'scheduled',
+        calendly_booking_url: bookingData.bookingUrl,
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+
+      await bookingRef.set(bookingDoc);
+      console.log(`✅ Calendar booking stored: ${bookingRef.id}`);
+      return bookingRef.id;
+    } catch (error) {
+      console.error('❌ Error storing calendar booking:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update calendar booking status
+   */
+  async updateCalendarBooking(bookingId, updates) {
+    try {
+      console.log(`📅 Updating calendar booking: ${bookingId}`);
+      
+      const bookingRef = this.firestore.collection('calendar_bookings').doc(bookingId);
+      
+      const updateData = {
+        ...updates,
+        updated_at: new Date()
+      };
+
+      await bookingRef.update(updateData);
+      console.log(`✅ Calendar booking updated: ${bookingId}`);
+    } catch (error) {
+      console.error('❌ Error updating calendar booking:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get calendar bookings for a submission
+   */
+  async getCalendarBookings(submissionId) {
+    try {
+      console.log(`📅 Getting calendar bookings for submission: ${submissionId}`);
+      
+      const bookingsQuery = await this.firestore
+        .collection('calendar_bookings')
+        .where('submission_id', '==', submissionId)
+        .get();
+
+      const bookings = bookingsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log(`✅ Found ${bookings.length} calendar bookings for submission: ${submissionId}`);
+      return bookings;
+    } catch (error) {
+      console.error('❌ Error getting calendar bookings:', error);
+      return [];
+    }
+  }
 }
 
 module.exports = GCPClient;
