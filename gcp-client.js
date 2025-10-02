@@ -2175,6 +2175,7 @@ class GCPClient {
         amount: paymentConfig.amount,
         currency: paymentConfig.currency || 'usd',
         description: paymentConfig.description || '',
+        product_name: paymentConfig.product_name || '',
         stripe_account_id: paymentConfig.stripe_account_id,
         is_required: paymentConfig.isRequired !== false,
         metadata: paymentConfig.metadata || {},

@@ -2316,6 +2316,22 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
       });
     }
 
+    // Validate amount is a positive number
+    if (typeof amount !== 'number' || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Amount must be a positive number'
+      });
+    }
+
+    // Validate currency is a valid 3-letter code
+    if (!currency || typeof currency !== 'string' || currency.length !== 3) {
+      return res.status(400).json({
+        success: false,
+        error: 'Currency must be a valid 3-letter code (e.g., usd, eur)'
+      });
+    }
+
     // Get payment field configuration
     const paymentFields = await gcpClient.getPaymentFields(formId);
     const paymentField = paymentFields.find(field => field.field_id === fieldId);
@@ -2341,9 +2357,7 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
         customer_email: customerEmail || '',
         customer_name: customerName || ''
       },
-      receipt_email: customerEmail,
-      customer_name: customerName,
-      billing_address_collection: 'required'
+      ...(customerEmail && { receipt_email: customerEmail }) // Only include if provided
     });
 
     console.log(`✅ Payment intent created: ${paymentIntent.id}`);
@@ -2358,9 +2372,26 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error creating payment intent:', error);
-    res.status(500).json({
+    
+    // Provide more specific error information
+    let errorMessage = 'Failed to create payment intent';
+    let statusCode = 500;
+    
+    if (error.type === 'StripeInvalidRequestError') {
+      errorMessage = `Invalid request: ${error.message}`;
+      statusCode = 400;
+    } else if (error.type === 'StripeCardError') {
+      errorMessage = `Card error: ${error.message}`;
+      statusCode = 400;
+    } else if (error.type === 'StripeRateLimitError') {
+      errorMessage = 'Rate limit exceeded. Please try again later.';
+      statusCode = 429;
+    }
+    
+    res.status(statusCode).json({
       success: false,
-      error: 'Failed to create payment intent'
+      error: errorMessage,
+      details: error.message
     });
   }
 });
