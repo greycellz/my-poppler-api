@@ -2803,10 +2803,35 @@ app.post('/api/calendly/booking', async (req, res) => {
       bookingUrl 
     } = req.body;
 
+    // Validate required fields
     if (!submissionId || !formId || !fieldId || !eventUri) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required booking data'
+        error: 'Missing required booking data: submissionId, formId, fieldId, and eventUri are required'
+      });
+    }
+
+    // Validate optional but important fields
+    if (!eventName || !startTime || !endTime) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required booking details: eventName, startTime, and endTime are required'
+      });
+    }
+
+    // Validate duration is a positive number
+    if (duration && (typeof duration !== 'number' || duration <= 0)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Duration must be a positive number'
+      });
+    }
+
+    // Validate email format if provided
+    if (attendeeEmail && !attendeeEmail.includes('@')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid attendee email format'
       });
     }
 

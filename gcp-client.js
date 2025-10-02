@@ -2411,15 +2411,29 @@ class GCPClient {
     try {
       console.log(`📅 Storing calendar field for form: ${formId}, field: ${fieldId}`);
       
+      // Validate required fields
+      if (!formId || !fieldId) {
+        throw new Error('Form ID and field ID are required');
+      }
+      
+      if (!calendarConfig.calendlyUrl || !calendarConfig.eventName) {
+        throw new Error('Calendly URL and event name are required');
+      }
+      
+      // Validate duration is a positive number
+      if (calendarConfig.duration && (typeof calendarConfig.duration !== 'number' || calendarConfig.duration <= 0)) {
+        throw new Error('Duration must be a positive number');
+      }
+      
       const fieldRef = this.firestore.collection('calendar_fields').doc();
       
       const fieldDoc = {
         form_id: formId,
         field_id: fieldId,
         calendly_url: calendarConfig.calendlyUrl,
-        event_type_uri: calendarConfig.eventTypeUri,
+        event_type_uri: calendarConfig.eventTypeUri || `${calendarConfig.calendlyUrl}/${calendarConfig.duration || 15}min`,
         event_name: calendarConfig.eventName,
-        duration: calendarConfig.duration,
+        duration: calendarConfig.duration || 15,
         require_payment_first: calendarConfig.requirePaymentFirst || false,
         is_required: calendarConfig.isRequired !== false,
         timezone: calendarConfig.timezone || 'UTC',
