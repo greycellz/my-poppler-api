@@ -2127,7 +2127,7 @@ app.post('/api/stripe/connect', async (req, res) => {
   try {
     console.log('💳 Stripe Connect request received');
     
-    const { userId, email, country = 'US' } = req.body;
+    const { userId, email, country = 'US', nickname } = req.body;
     
     if (!userId || !email) {
       return res.status(400).json({
@@ -2159,7 +2159,8 @@ app.post('/api/stripe/connect', async (req, res) => {
         country: account.country,
         default_currency: account.default_currency,
         email: account.email
-      }
+      },
+      nickname
     );
 
     console.log(`✅ Stripe Express account created: ${account.id}`);

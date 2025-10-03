@@ -2126,7 +2126,7 @@ class GCPClient {
   /**
    * Store Stripe account information for a user
    */
-  async storeStripeAccount(userId, stripeAccountId, accountType, accountData) {
+  async storeStripeAccount(userId, stripeAccountId, accountType, accountData, nickname = null) {
     try {
       console.log(`💳 Storing Stripe account for user: ${userId}`);
       
@@ -2136,6 +2136,7 @@ class GCPClient {
         user_id: userId,
         stripe_account_id: stripeAccountId,
         account_type: accountType,
+        nickname: nickname || null,
         is_verified: accountData.charges_enabled && accountData.details_submitted,
         capabilities: accountData.capabilities || {},
         charges_enabled: accountData.charges_enabled || false,
@@ -2150,7 +2151,7 @@ class GCPClient {
       };
 
       await accountRef.set(accountDoc);
-      console.log(`✅ Stripe account stored: ${accountRef.id}`);
+      console.log(`✅ Stripe account stored: ${accountRef.id}${nickname ? ` (nickname: ${nickname})` : ''}`);
       return accountRef.id;
     } catch (error) {
       console.error('❌ Error storing Stripe account:', error);
@@ -2328,6 +2329,7 @@ class GCPClient {
         id: doc.id,
         stripe_account_id: doc.data().stripe_account_id,
         account_type: doc.data().account_type,
+        nickname: doc.data().nickname || null,
         charges_enabled: doc.data().charges_enabled,
         payouts_enabled: doc.data().payouts_enabled,
         details_submitted: doc.data().details_submitted,
