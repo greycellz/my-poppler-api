@@ -2461,6 +2461,32 @@ class GCPClient {
   }
 
   /**
+   * Delete a Calendly account URL for a user
+   */
+  async deleteCalendlyAccount(userId, accountId) {
+    try {
+      console.log(`🗑️ Deleting Calendly account ${accountId} for user: ${userId}`);
+      const ref = this.firestore.collection('user_calendly_accounts').doc(accountId);
+      const doc = await ref.get();
+      if (!doc.exists) {
+        console.log(`❌ Calendly account not found: ${accountId}`);
+        return { success: false, reason: 'not_found' };
+      }
+      const data = doc.data() || {};
+      if (data.user_id !== userId) {
+        console.log(`❌ Forbidden delete attempt for account ${accountId}`);
+        return { success: false, reason: 'forbidden' };
+      }
+      await ref.delete();
+      console.log(`✅ Calendly account deleted: ${accountId}`);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error deleting Calendly account:', error);
+      return { success: false, reason: 'error' };
+    }
+  }
+
+  /**
    * Store calendar field configuration
    */
   async storeCalendarField(formId, fieldId, calendarConfig) {

@@ -2711,6 +2711,24 @@ app.get('/api/calendly/account/:userId', async (req, res) => {
   }
 });
 
+// Delete Calendly URL for a user
+app.delete('/api/calendly/account/:userId/:accountId', async (req, res) => {
+  try {
+    const { userId, accountId } = req.params;
+    console.log(`🗑️ Request to delete Calendly account ${accountId} for user ${userId}`);
+    const result = await gcpClient.deleteCalendlyAccount(userId, accountId);
+    if (!result.success) {
+      if (result.reason === 'not_found') return res.status(404).json({ success: false, error: 'Calendly URL not found' });
+      if (result.reason === 'forbidden') return res.status(403).json({ success: false, error: 'Forbidden' });
+      return res.status(500).json({ success: false, error: 'Failed to delete Calendly URL' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error deleting Calendly URL:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete Calendly URL' });
+  }
+});
+
 /**
  * Get Calendly event types
  */
@@ -2801,11 +2819,11 @@ app.post('/api/calendly/booking', async (req, res) => {
       });
     }
 
-    // Validate optional but important fields
-    if (!eventName || !startTime || !endTime) {
+    // Validate optional but important fields - allow fallback values
+    if (!eventName || eventName.trim() === '') {
       return res.status(400).json({
         success: false,
-        error: 'Missing required booking details: eventName, startTime, and endTime are required'
+        error: 'Missing required booking details: eventName is required'
       });
     }
 
