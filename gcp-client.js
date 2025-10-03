@@ -2430,6 +2430,36 @@ class GCPClient {
     }
   }
 
+  async getCalendlyAccounts(userId) {
+    try {
+      console.log(`📅 Getting all Calendly accounts for user: ${userId}`);
+      
+      const accountsQuery = await this.firestore
+        .collection('user_calendly_accounts')
+        .where('user_id', '==', userId)
+        .get();
+
+      if (accountsQuery.empty) {
+        console.log(`❌ No Calendly accounts found for user: ${userId}`);
+        return [];
+      }
+
+      const accounts = accountsQuery.docs.map(doc => ({
+        id: doc.id,
+        calendly_url: doc.data().calendly_url,
+        event_types: doc.data().event_types || [],
+        is_connected: doc.data().is_connected || true,
+        created_at: doc.data().created_at
+      }));
+
+      console.log(`✅ Found ${accounts.length} Calendly accounts for user: ${userId}`);
+      return accounts;
+    } catch (error) {
+      console.error('❌ Error getting Calendly accounts:', error);
+      return [];
+    }
+  }
+
   /**
    * Store calendar field configuration
    */

@@ -2642,12 +2642,12 @@ app.post('/api/calendly/connect', async (req, res) => {
   try {
     console.log('📅 Connecting Calendly account');
     
-    const { userId, calendlyUsername, calendlyUrl } = req.body;
+    const { userId, calendlyUrl } = req.body;
 
-    if (!userId || !calendlyUsername || !calendlyUrl) {
+    if (!userId || !calendlyUrl) {
       return res.status(400).json({
         success: false,
-        error: 'User ID, Calendly username, and URL are required'
+        error: 'User ID and Calendly URL are required'
       });
     }
 
@@ -2659,6 +2659,10 @@ app.post('/api/calendly/connect', async (req, res) => {
       });
     }
 
+    // Extract username from URL for storage
+    const urlParts = calendlyUrl.split('/');
+    const calendlyUsername = urlParts[urlParts.length - 1] || 'unknown';
+    
     // Store Calendly account
     const accountId = await gcpClient.storeCalendlyAccount(
       userId,
@@ -2691,25 +2695,11 @@ app.get('/api/calendly/account/:userId', async (req, res) => {
   try {
     console.log(`📅 Getting Calendly account status for user: ${req.params.userId}`);
     
-    const account = await gcpClient.getCalendlyAccount(req.params.userId);
+    const accounts = await gcpClient.getCalendlyAccounts(req.params.userId);
     
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        error: 'Calendly account not found'
-      });
-    }
-
     res.json({
       success: true,
-      account: {
-        id: account.id,
-        calendlyUsername: account.calendly_username,
-        calendlyUrl: account.calendly_url,
-        isConnected: account.is_connected,
-        eventTypes: account.event_types || [],
-        connectedAt: account.created_at
-      }
+      accounts: accounts || []
     });
 
   } catch (error) {
