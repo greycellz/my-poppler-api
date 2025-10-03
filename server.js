@@ -2192,17 +2192,18 @@ app.post('/api/stripe/connect', async (req, res) => {
   }
 });
 
-// Create account link for onboarding
+// Create account link with smart link type selection
 app.post('/api/stripe/account-link', async (req, res) => {
   try {
     console.log('🔗 Creating Stripe account link');
     
-    const { userId, refreshUrl, returnUrl } = req.body;
+    const { userId, refreshUrl, returnUrl, linkType } = req.body;
     
     if (!userId) {
       return res.status(400).json({
         success: false,
-        error: 'User ID is required'
+        error: 'User ID is required',
+        code: 'MISSING_USER_ID'
       });
     }
 
@@ -2211,18 +2212,40 @@ app.post('/api/stripe/account-link', async (req, res) => {
     if (!stripeAccount) {
       return res.status(404).json({
         success: false,
-        error: 'Stripe account not found'
+        error: 'Stripe account not found',
+        code: 'ACCOUNT_NOT_FOUND'
       });
+    }
+
+    // Get current account status to determine link type
+    const account = await stripe.accounts.retrieve(stripeAccount.stripe_account_id);
+    
+    // Determine the appropriate link type
+    let finalLinkType = linkType;
+    if (!finalLinkType) {
+      if (!account.details_submitted) {
+        finalLinkType = 'account_onboarding';
+      } else if (!account.charges_enabled || !account.payouts_enabled) {
+        finalLinkType = 'account_update';
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'Account is already fully set up',
+          code: 'ACCOUNT_COMPLETE'
+        });
+      }
     }
 
     // Create account link
     const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com'
     console.log(`🔗 Using frontend URL for redirects: ${frontendUrl}`);
+    console.log(`🔗 Creating ${finalLinkType} link for account: ${stripeAccount.stripe_account_id}`);
+    
     const accountLink = await stripe.accountLinks.create({
       account: stripeAccount.stripe_account_id,
       refresh_url: refreshUrl || `${frontendUrl}/settings?stripe_refresh=true`,
       return_url: returnUrl || `${frontendUrl}/settings?stripe_success=true`,
-      type: 'account_onboarding'
+      type: finalLinkType
     });
 
     console.log(`✅ Account link created for account: ${stripeAccount.stripe_account_id}`);
@@ -2230,31 +2253,42 @@ app.post('/api/stripe/account-link', async (req, res) => {
     res.json({
       success: true,
       url: accountLink.url,
-      expires_at: accountLink.expires_at
+      expires_at: accountLink.expires_at,
+      link_type: finalLinkType
     });
 
   } catch (error) {
     console.error('❌ Error creating account link:', error);
+    
+    // Handle specific Stripe errors
+    if (error.type === 'StripeInvalidRequestError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request to Stripe',
+        code: 'INVALID_REQUEST'
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      error: 'Failed to create account link'
+      error: 'Failed to create account link',
+      code: 'INTERNAL_ERROR'
     });
   }
 });
 
-// Get Stripe account status
+// Get Stripe account status with comprehensive status checking
 app.get('/api/stripe/account/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     console.log(`💳 Getting Stripe account status for user: ${userId}`);
-    console.log(`🔍 Request URL: ${req.url}`);
-    console.log(`🔍 Request method: ${req.method}`);
 
     const stripeAccount = await gcpClient.getStripeAccount(userId);
     if (!stripeAccount) {
       return res.status(404).json({
         success: false,
-        error: 'Stripe account not found'
+        error: 'Stripe account not found',
+        code: 'ACCOUNT_NOT_FOUND'
       });
     }
 
@@ -2269,27 +2303,128 @@ app.get('/api/stripe/account/:userId', async (req, res) => {
       last_sync_at: new Date()
     });
 
+    // Determine account status and required actions
+    const isFullySetup = account.charges_enabled && account.payouts_enabled && account.details_submitted;
+    const needsOnboarding = !account.details_submitted;
+    const needsVerification = account.details_submitted && !account.charges_enabled;
+    const needsPayouts = account.charges_enabled && !account.payouts_enabled;
+
+    // Determine what link type to use
+    let linkType = null;
+    let actionText = null;
+    
+    if (needsOnboarding) {
+      linkType = 'account_onboarding';
+      actionText = 'Complete Business Profile';
+    } else if (needsVerification) {
+      linkType = 'account_update';
+      actionText = 'Complete Verification';
+    } else if (needsPayouts) {
+      linkType = 'account_update';
+      actionText = 'Add Bank Account';
+    }
+
     res.json({
       success: true,
       account: {
         id: stripeAccount.id,
         stripe_account_id: stripeAccount.stripe_account_id,
         account_type: stripeAccount.account_type,
-        is_verified: account.charges_enabled && account.details_submitted,
+        is_fully_setup: isFullySetup,
         charges_enabled: account.charges_enabled,
         payouts_enabled: account.payouts_enabled,
         details_submitted: account.details_submitted,
         country: account.country,
         default_currency: account.default_currency,
-        email: account.email
+        email: account.email,
+        // Status indicators
+        needs_onboarding: needsOnboarding,
+        needs_verification: needsVerification,
+        needs_payouts: needsPayouts,
+        // Action details
+        link_type: linkType,
+        action_text: actionText,
+        can_receive_payments: account.charges_enabled && account.payouts_enabled
       }
     });
 
   } catch (error) {
     console.error('❌ Error getting Stripe account:', error);
+    
+    // Handle specific Stripe errors
+    if (error.type === 'StripeInvalidRequestError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Stripe account',
+        code: 'INVALID_ACCOUNT'
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      error: 'Failed to get Stripe account'
+      error: 'Failed to get Stripe account',
+      code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+// Delete Stripe account connection
+app.delete('/api/stripe/account/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log(`🗑️ Deleting Stripe account for user: ${userId}`);
+
+    // Get the user's Stripe account
+    const stripeAccount = await gcpClient.getStripeAccount(userId);
+    if (!stripeAccount) {
+      return res.status(404).json({
+        success: false,
+        error: 'Stripe account not found',
+        code: 'ACCOUNT_NOT_FOUND'
+      });
+    }
+
+    // Deactivate the Stripe account (don't delete completely for compliance)
+    try {
+      await stripe.accounts.del(stripeAccount.stripe_account_id);
+      console.log(`✅ Stripe account deactivated: ${stripeAccount.stripe_account_id}`);
+    } catch (stripeError) {
+      console.warn(`⚠️ Could not deactivate Stripe account: ${stripeError.message}`);
+      // Continue with local cleanup even if Stripe deactivation fails
+    }
+
+    // Delete local account data
+    const deleted = await gcpClient.deleteStripeAccount(userId);
+    if (!deleted) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to delete local account data',
+        code: 'DELETE_FAILED'
+      });
+    }
+
+    console.log(`✅ Stripe account deleted for user: ${userId}`);
+    res.json({
+      success: true,
+      message: 'Stripe account disconnected successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error deleting Stripe account:', error);
+    
+    // Handle specific errors
+    if (error.type === 'StripeInvalidRequestError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Stripe account',
+        code: 'INVALID_ACCOUNT'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete Stripe account',
+      code: 'INTERNAL_ERROR'
     });
   }
 });

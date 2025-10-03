@@ -2299,6 +2299,49 @@ class GCPClient {
   }
 
   /**
+   * Delete Stripe account and related data
+   */
+  async deleteStripeAccount(userId) {
+    try {
+      console.log(`🗑️ Deleting Stripe account for user: ${userId}`);
+      
+      // Get the account first to verify ownership
+      const stripeAccount = await this.getStripeAccount(userId);
+      if (!stripeAccount) {
+        console.log(`❌ No Stripe account found for user: ${userId}`);
+        return false;
+      }
+
+      // Delete the main account record
+      const accountRef = this.firestore.collection('user_stripe_accounts').doc(stripeAccount.id);
+      await accountRef.delete();
+      
+      // Clean up related payment fields
+      const paymentFieldsQuery = await this.firestore
+        .collection('payment_fields')
+        .where('stripe_account_id', '==', stripeAccount.stripe_account_id)
+        .get();
+      
+      const batch = this.firestore.batch();
+      paymentFieldsQuery.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      
+      if (paymentFieldsQuery.docs.length > 0) {
+        await batch.commit();
+        console.log(`✅ Deleted ${paymentFieldsQuery.docs.length} related payment fields`);
+      }
+      
+      // Note: We don't delete payment transactions for audit/compliance reasons
+      console.log(`✅ Stripe account deleted for user: ${userId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Error deleting Stripe account:', error);
+      return false;
+    }
+  }
+
+  /**
    * Update payment transaction status
    */
   async updatePaymentTransaction(transactionId, updates) {
