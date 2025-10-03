@@ -2277,7 +2277,69 @@ app.post('/api/stripe/account-link', async (req, res) => {
   }
 });
 
-// Get Stripe account status with comprehensive status checking
+// Get all Stripe accounts for a user
+app.get('/api/stripe/accounts/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log(`💳 Getting all Stripe accounts for user: ${userId}`);
+
+    const accounts = await gcpClient.getStripeAccounts(userId);
+    
+    // Sync each account with Stripe to get latest status
+    const syncedAccounts = await Promise.all(accounts.map(async (account) => {
+      try {
+        const stripeAccount = await stripe.accounts.retrieve(account.stripe_account_id);
+        
+        // Update local account data
+        await gcpClient.updateStripeAccount(account.id, {
+          charges_enabled: stripeAccount.charges_enabled,
+          payouts_enabled: stripeAccount.payouts_enabled,
+          details_submitted: stripeAccount.details_submitted,
+          last_sync_at: new Date()
+        });
+
+        // Determine account status
+        const isFullySetup = stripeAccount.charges_enabled && stripeAccount.payouts_enabled && stripeAccount.details_submitted;
+        const needsOnboarding = !stripeAccount.details_submitted;
+        const needsVerification = stripeAccount.details_submitted && !stripeAccount.charges_enabled;
+        const needsPayouts = stripeAccount.charges_enabled && !stripeAccount.payouts_enabled;
+
+        return {
+          ...account,
+          is_fully_setup: isFullySetup,
+          charges_enabled: stripeAccount.charges_enabled,
+          payouts_enabled: stripeAccount.payouts_enabled,
+          details_submitted: stripeAccount.details_submitted,
+          country: stripeAccount.country,
+          default_currency: stripeAccount.default_currency,
+          email: stripeAccount.email,
+          needs_onboarding: needsOnboarding,
+          needs_verification: needsVerification,
+          needs_payouts: needsPayouts,
+          can_receive_payments: stripeAccount.charges_enabled && stripeAccount.payouts_enabled
+        };
+      } catch (error) {
+        console.error(`❌ Error syncing account ${account.stripe_account_id}:`, error);
+        return account; // Return original account if sync fails
+      }
+    }));
+
+    res.json({
+      success: true,
+      accounts: syncedAccounts
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting Stripe accounts:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get Stripe accounts',
+      code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+// Get Stripe account status with comprehensive status checking (legacy - for backward compatibility)
 app.get('/api/stripe/account/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -2368,15 +2430,25 @@ app.get('/api/stripe/account/:userId', async (req, res) => {
   }
 });
 
-// Delete Stripe account connection
-app.delete('/api/stripe/account/:userId', async (req, res) => {
+// Delete specific Stripe account connection
+app.delete('/api/stripe/account/:userId/:accountId', async (req, res) => {
   try {
-    const { userId } = req.params;
-    console.log(`🗑️ Deleting Stripe account for user: ${userId}`);
+    const { userId, accountId } = req.params;
+    console.log(`🗑️ Deleting Stripe account ${accountId} for user: ${userId}`);
 
-    // Get the user's Stripe account
-    const stripeAccount = await gcpClient.getStripeAccount(userId);
-    if (!stripeAccount) {
+    if (!userId || !accountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and Account ID are required',
+        code: 'MISSING_PARAMETERS'
+      });
+    }
+
+    // Get the specific account to verify ownership and get Stripe account ID
+    const accountRef = gcpClient.firestore.collection('user_stripe_accounts').doc(accountId);
+    const accountDoc = await accountRef.get();
+    
+    if (!accountDoc.exists) {
       return res.status(404).json({
         success: false,
         error: 'Stripe account not found',
@@ -2384,17 +2456,26 @@ app.delete('/api/stripe/account/:userId', async (req, res) => {
       });
     }
 
+    const accountData = accountDoc.data();
+    if (accountData.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized to delete this Stripe account',
+        code: 'UNAUTHORIZED'
+      });
+    }
+
     // Deactivate the Stripe account (don't delete completely for compliance)
     try {
-      await stripe.accounts.del(stripeAccount.stripe_account_id);
-      console.log(`✅ Stripe account deactivated: ${stripeAccount.stripe_account_id}`);
+      await stripe.accounts.del(accountData.stripe_account_id);
+      console.log(`✅ Stripe account deactivated: ${accountData.stripe_account_id}`);
     } catch (stripeError) {
       console.warn(`⚠️ Could not deactivate Stripe account: ${stripeError.message}`);
       // Continue with local cleanup even if Stripe deactivation fails
     }
 
     // Delete local account data
-    const deleted = await gcpClient.deleteStripeAccount(userId);
+    const deleted = await gcpClient.deleteStripeAccount(userId, accountId);
     if (!deleted) {
       return res.status(500).json({
         success: false,
@@ -2403,7 +2484,7 @@ app.delete('/api/stripe/account/:userId', async (req, res) => {
       });
     }
 
-    console.log(`✅ Stripe account deleted for user: ${userId}`);
+    console.log(`✅ Stripe account deleted: ${accountId}`);
     res.json({
       success: true,
       message: 'Stripe account disconnected successfully'

@@ -2168,7 +2168,6 @@ class GCPClient {
       const accountQuery = await this.firestore
         .collection('user_stripe_accounts')
         .where('user_id', '==', userId)
-        .limit(1)
         .get();
 
       if (accountQuery.empty) {
@@ -2176,9 +2175,19 @@ class GCPClient {
         return null;
       }
 
-      const accountDoc = accountQuery.docs[0];
-      const accountData = { id: accountDoc.id, ...accountDoc.data() };
-      console.log(`✅ Found Stripe account: ${accountData.stripe_account_id}`);
+      // Log all accounts found for debugging
+      console.log(`🔍 Found ${accountQuery.docs.length} Stripe account(s) for user: ${userId}`);
+      accountQuery.docs.forEach((doc, index) => {
+        const data = doc.data();
+        console.log(`  Account ${index + 1}: ${data.stripe_account_id} (created: ${data.created_at})`);
+      });
+
+      // Return the most recent account (by created_at)
+      const accounts = accountQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const sortedAccounts = accounts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      const accountData = sortedAccounts[0];
+      
+      console.log(`✅ Using most recent Stripe account: ${accountData.stripe_account_id}`);
       return accountData;
     } catch (error) {
       console.error('❌ Error getting Stripe account:', error);
@@ -2299,41 +2308,87 @@ class GCPClient {
   }
 
   /**
+   * Get all Stripe accounts for a user
+   */
+  async getStripeAccounts(userId) {
+    try {
+      console.log(`💳 Getting all Stripe accounts for user: ${userId}`);
+      
+      const accountQuery = await this.firestore
+        .collection('user_stripe_accounts')
+        .where('user_id', '==', userId)
+        .get();
+
+      if (accountQuery.empty) {
+        console.log(`❌ No Stripe accounts found for user: ${userId}`);
+        return [];
+      }
+
+      const accounts = accountQuery.docs.map(doc => ({
+        id: doc.id,
+        stripe_account_id: doc.data().stripe_account_id,
+        account_type: doc.data().account_type,
+        charges_enabled: doc.data().charges_enabled,
+        payouts_enabled: doc.data().payouts_enabled,
+        details_submitted: doc.data().details_submitted,
+        country: doc.data().country,
+        default_currency: doc.data().default_currency,
+        email: doc.data().email,
+        created_at: doc.data().created_at,
+        last_sync_at: doc.data().last_sync_at
+      }));
+
+      console.log(`✅ Found ${accounts.length} Stripe account(s) for user: ${userId}`);
+      return accounts;
+    } catch (error) {
+      console.error('❌ Error getting Stripe accounts:', error);
+      return [];
+    }
+  }
+
+  /**
    * Delete Stripe account and related data
    */
-  async deleteStripeAccount(userId) {
+  async deleteStripeAccount(userId, accountId) {
     try {
-      console.log(`🗑️ Deleting Stripe account for user: ${userId}`);
+      console.log(`🗑️ Deleting Stripe account ${accountId} for user: ${userId}`);
       
-      // Get the account first to verify ownership
-      const stripeAccount = await this.getStripeAccount(userId);
-      if (!stripeAccount) {
-        console.log(`❌ No Stripe account found for user: ${userId}`);
+      // Get the specific account to verify ownership
+      const accountRef = this.firestore.collection('user_stripe_accounts').doc(accountId);
+      const accountDoc = await accountRef.get();
+      
+      if (!accountDoc.exists) {
+        console.log(`❌ Stripe account ${accountId} not found`);
         return false;
       }
 
-      // Delete the main account record
-      const accountRef = this.firestore.collection('user_stripe_accounts').doc(stripeAccount.id);
+      const accountData = accountDoc.data();
+      if (accountData.user_id !== userId) {
+        console.warn(`⚠️ User ${userId} attempted to delete Stripe account ${accountId} owned by another user`);
+        return false; // Not authorized
+      }
+
+      // Delete the account record
       await accountRef.delete();
+      console.log(`✅ Deleted Stripe account record: ${accountId}`);
       
-      // Clean up related payment fields
+      // Clean up related payment fields for this specific account
       const paymentFieldsQuery = await this.firestore
         .collection('payment_fields')
-        .where('stripe_account_id', '==', stripeAccount.stripe_account_id)
+        .where('stripe_account_id', '==', accountData.stripe_account_id)
         .get();
       
-      const batch = this.firestore.batch();
-      paymentFieldsQuery.docs.forEach(doc => {
-        batch.delete(doc.ref);
-      });
-      
       if (paymentFieldsQuery.docs.length > 0) {
+        const batch = this.firestore.batch();
+        paymentFieldsQuery.docs.forEach(doc => {
+          batch.delete(doc.ref);
+        });
         await batch.commit();
-        console.log(`✅ Deleted ${paymentFieldsQuery.docs.length} related payment fields`);
+        console.log(`✅ Deleted ${paymentFieldsQuery.docs.length} payment fields for account: ${accountData.stripe_account_id}`);
       }
       
       // Note: We don't delete payment transactions for audit/compliance reasons
-      console.log(`✅ Stripe account deleted for user: ${userId}`);
+      console.log(`✅ Stripe account deleted: ${accountId}`);
       return true;
     } catch (error) {
       console.error('❌ Error deleting Stripe account:', error);
