@@ -2362,13 +2362,18 @@ app.post('/api/stripe/account-link', async (req, res) => {
     // Determine the appropriate link type
     let finalLinkType = linkType;
     if (!finalLinkType) {
+      console.log(`🔍 Account type: ${stripeAccount.account_type}, details_submitted: ${account.details_submitted}, charges_enabled: ${account.charges_enabled}, payouts_enabled: ${account.payouts_enabled}`);
+      
       // OAuth accounts (standard) can only use account_onboarding
       if (stripeAccount.account_type === 'standard') {
         finalLinkType = 'account_onboarding';
+        console.log(`🔗 OAuth account detected, using account_onboarding`);
       } else if (!account.details_submitted) {
         finalLinkType = 'account_onboarding';
+        console.log(`🔗 Details not submitted, using account_onboarding`);
       } else if (!account.charges_enabled || !account.payouts_enabled) {
         finalLinkType = 'account_update';
+        console.log(`🔗 Account needs updates, using account_update`);
       } else {
         return res.status(400).json({
           success: false,
