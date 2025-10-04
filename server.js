@@ -2193,6 +2193,132 @@ app.post('/api/stripe/connect', async (req, res) => {
   }
 });
 
+// OAuth flow for existing Stripe accounts
+app.get('/api/stripe/connect-oauth', async (req, res) => {
+  try {
+    console.log('🔗 OAuth authorization request received');
+    
+    const { userId } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    const clientId = process.env.STRIPE_CONNECT_CLIENT_ID;
+    const redirectUri = process.env.STRIPE_CONNECT_REDIRECT_URI;
+    
+    if (!clientId || !redirectUri) {
+      return res.status(500).json({
+        success: false,
+        error: 'OAuth configuration missing'
+      });
+    }
+
+    // Store userId in session for callback
+    req.session.oauthUserId = userId;
+
+    const authUrl = `https://connect.stripe.com/oauth/authorize?` +
+      `response_type=code&` +
+      `client_id=${clientId}&` +
+      `scope=read_write&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+      `state=${userId}`;
+
+    console.log(`🔗 Redirecting to OAuth: ${authUrl}`);
+    res.redirect(authUrl);
+
+  } catch (error) {
+    console.error('❌ Error initiating OAuth:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initiate OAuth flow'
+    });
+  }
+});
+
+// OAuth callback handler
+app.get('/api/stripe/connect-callback', async (req, res) => {
+  try {
+    console.log('🔗 OAuth callback received');
+    
+    const { code, state } = req.query;
+    
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        error: 'Authorization code missing'
+      });
+    }
+
+    const userId = state || req.session.oauthUserId;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID missing from OAuth flow'
+      });
+    }
+
+    console.log(`🔗 Exchanging code for access token for user: ${userId}`);
+
+    // Exchange authorization code for access token
+    const response = await fetch('https://connect.stripe.com/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_secret: process.env.STRIPE_SECRET_KEY,
+        code: code,
+        grant_type: 'authorization_code'
+      })
+    });
+
+    const tokenData = await response.json();
+
+    if (!response.ok) {
+      console.error('❌ OAuth token exchange failed:', tokenData);
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to exchange authorization code for access token',
+        details: tokenData.error_description || tokenData.error
+      });
+    }
+
+    console.log(`✅ OAuth token exchange successful for user: ${userId}`);
+
+    // Store the connected account
+    const accountId = await gcpClient.storeStripeAccount(
+      userId,
+      tokenData.stripe_user_id,
+      'standard',
+      {
+        charges_enabled: true,
+        details_submitted: true,
+        capabilities: tokenData.stripe_publishable_key ? {} : {},
+        country: tokenData.country || 'US',
+        default_currency: tokenData.default_currency || 'usd',
+        email: tokenData.email || ''
+      },
+      'Connected via OAuth'
+    );
+
+    console.log(`✅ Connected account stored: ${accountId}`);
+
+    // Redirect back to settings page
+    const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+    res.redirect(`${frontendUrl}/settings?stripe_oauth_success=true`);
+
+  } catch (error) {
+    console.error('❌ Error handling OAuth callback:', error);
+    const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+    res.redirect(`${frontendUrl}/settings?stripe_oauth_error=true`);
+  }
+});
+
 // Create account link with smart link type selection
 app.post('/api/stripe/account-link', async (req, res) => {
   try {
