@@ -2522,7 +2522,11 @@ app.get('/api/stripe/account/:userId', async (req, res) => {
     let linkType = null;
     let actionText = null;
     
-    if (needsOnboarding) {
+    // OAuth accounts (standard) can only use account_onboarding
+    if (stripeAccount.account_type === 'standard') {
+      linkType = 'account_onboarding';
+      actionText = 'Complete Account Setup';
+    } else if (needsOnboarding) {
       linkType = 'account_onboarding';
       actionText = 'Complete Business Profile';
     } else if (needsVerification) {
