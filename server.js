@@ -2362,7 +2362,10 @@ app.post('/api/stripe/account-link', async (req, res) => {
     // Determine the appropriate link type
     let finalLinkType = linkType;
     if (!finalLinkType) {
-      if (!account.details_submitted) {
+      // OAuth accounts (standard) can only use account_onboarding
+      if (stripeAccount.account_type === 'standard') {
+        finalLinkType = 'account_onboarding';
+      } else if (!account.details_submitted) {
         finalLinkType = 'account_onboarding';
       } else if (!account.charges_enabled || !account.payouts_enabled) {
         finalLinkType = 'account_update';
