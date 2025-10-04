@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { Poppler } = require('node-poppler');
 const puppeteer = require('puppeteer');
 const Stripe = require('stripe');
+const session = require('express-session');
 
 const app = express();
 const poppler = new Poppler();
@@ -309,6 +310,17 @@ app.use((req, res, next) => {
     next();
   }
 });
+
+// Session middleware for OAuth flow
+app.use(session({
+  secret: process.env.JWT_SECRET || 'fallback-secret-for-oauth',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 10 * 60 * 1000 // 10 minutes
+  }
+}));
 
 // ============== UTILITY FUNCTIONS ==============
 
