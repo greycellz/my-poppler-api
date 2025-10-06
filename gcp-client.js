@@ -2341,14 +2341,53 @@ class GCPClient {
         throw new Error('Payment field not found');
       }
 
-      const fieldDoc = fieldsQuery.docs[0];
-      await fieldDoc.ref.update({
-        ...updates,
-        updated_at: new Date()
-      });
+      // If multiple records exist, delete duplicates and keep the most recent one
+      if (fieldsQuery.docs.length > 1) {
+        console.log(`⚠️ Found ${fieldsQuery.docs.length} duplicate payment fields for ${formId}/${fieldId}`);
+        console.log('🧹 Cleaning up duplicates...');
+        
+        // Sort by created_at to get the most recent
+        const sortedDocs = fieldsQuery.docs.sort((a, b) => {
+          const aTime = a.data().created_at?._seconds || 0;
+          const bTime = b.data().created_at?._seconds || 0;
+          return bTime - aTime; // Most recent first
+        });
+        
+        // Keep the most recent, delete the rest
+        const keepDoc = sortedDocs[0];
+        const deleteDocs = sortedDocs.slice(1);
+        
+        console.log(`🧹 Keeping document: ${keepDoc.id}`);
+        console.log(`🧹 Deleting ${deleteDocs.length} duplicate documents`);
+        
+        // Delete duplicates
+        const batch = this.firestore.batch();
+        deleteDocs.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        await batch.commit();
+        
+        console.log(`✅ Cleaned up ${deleteDocs.length} duplicate payment fields`);
+        
+        // Update the remaining document
+        await keepDoc.ref.update({
+          ...updates,
+          updated_at: new Date()
+        });
+        
+        console.log(`✅ Payment field updated: ${keepDoc.id}`);
+        return keepDoc.id;
+      } else {
+        // Single record - update normally
+        const fieldDoc = fieldsQuery.docs[0];
+        await fieldDoc.ref.update({
+          ...updates,
+          updated_at: new Date()
+        });
 
-      console.log(`✅ Payment field updated: ${fieldDoc.id}`);
-      return fieldDoc.id;
+        console.log(`✅ Payment field updated: ${fieldDoc.id}`);
+        return fieldDoc.id;
+      }
     } catch (error) {
       console.error('❌ Error updating payment field:', error);
       throw error;

@@ -1413,6 +1413,72 @@ app.get('/api/debug/payment-fields/:formId', async (req, res) => {
   }
 });
 
+// Cleanup endpoint to remove duplicate payment fields
+app.post('/api/debug/cleanup-payment-fields/:formId/:fieldId', async (req, res) => {
+  try {
+    const { formId, fieldId } = req.params;
+    console.log(`🧹 CLEANUP: Cleaning up duplicate payment fields for form: ${formId}, field: ${fieldId}`);
+    
+    const fieldsQuery = await gcpClient.firestore
+      .collection('payment_fields')
+      .where('form_id', '==', formId)
+      .where('field_id', '==', fieldId)
+      .get();
+
+    if (fieldsQuery.empty) {
+      return res.json({
+        success: true,
+        message: 'No payment fields found to clean up',
+        deleted: 0
+      });
+    }
+
+    if (fieldsQuery.docs.length === 1) {
+      return res.json({
+        success: true,
+        message: 'Only one payment field found, no cleanup needed',
+        deleted: 0
+      });
+    }
+
+    // Sort by created_at to keep the most recent
+    const sortedDocs = fieldsQuery.docs.sort((a, b) => {
+      const aTime = a.data().created_at?._seconds || 0;
+      const bTime = b.data().created_at?._seconds || 0;
+      return bTime - aTime; // Most recent first
+    });
+    
+    // Keep the most recent, delete the rest
+    const keepDoc = sortedDocs[0];
+    const deleteDocs = sortedDocs.slice(1);
+    
+    console.log(`🧹 Keeping document: ${keepDoc.id}`);
+    console.log(`🧹 Deleting ${deleteDocs.length} duplicate documents`);
+    
+    // Delete duplicates
+    const batch = gcpClient.firestore.batch();
+    deleteDocs.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+    
+    console.log(`✅ Cleaned up ${deleteDocs.length} duplicate payment fields`);
+    
+    res.json({
+      success: true,
+      message: `Cleaned up ${deleteDocs.length} duplicate payment fields`,
+      deleted: deleteDocs.length,
+      kept: keepDoc.id
+    });
+  } catch (error) {
+    console.error('❌ Cleanup endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to cleanup payment fields'
+    });
+  }
+});
+
 // ============== FILE SERVING ENDPOINT ==============
 
 // Serve uploaded files securely
