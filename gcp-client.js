@@ -2242,6 +2242,22 @@ class GCPClient {
 
       const fields = fieldsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       console.log(`✅ Found ${fields.length} payment fields for form: ${formId}`);
+      
+      // DEBUG: Log all payment fields found
+      console.log('🔍 PAYMENT FIELDS DEBUG - All fields found:');
+      fields.forEach((field, index) => {
+        console.log(`🔍 Field ${index + 1}:`, {
+          id: field.id,
+          field_id: field.field_id,
+          form_id: field.form_id,
+          stripe_account_id: field.stripe_account_id,
+          amount: field.amount,
+          currency: field.currency,
+          created_at: field.created_at,
+          updated_at: field.updated_at
+        });
+      });
+      
       return fields;
     } catch (error) {
       console.error('❌ Error getting payment fields:', error);

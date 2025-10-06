@@ -1377,6 +1377,42 @@ app.post('/upload-file', upload.single('file'), async (req, res) => {
   }
 })
 
+// ============== DEBUG ENDPOINTS ==============
+
+// Debug endpoint to check payment fields for a form
+app.get('/api/debug/payment-fields/:formId', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    console.log(`🔍 DEBUG: Getting payment fields for form: ${formId}`);
+    
+    const paymentFields = await gcpClient.getPaymentFields(formId);
+    
+    res.json({
+      success: true,
+      formId,
+      count: paymentFields.length,
+      fields: paymentFields.map(field => ({
+        id: field.id,
+        field_id: field.field_id,
+        form_id: field.form_id,
+        stripe_account_id: field.stripe_account_id,
+        amount: field.amount,
+        currency: field.currency,
+        product_name: field.product_name,
+        description: field.description,
+        created_at: field.created_at,
+        updated_at: field.updated_at
+      }))
+    });
+  } catch (error) {
+    console.error('❌ Debug endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get payment fields'
+    });
+  }
+});
+
 // ============== FILE SERVING ENDPOINT ==============
 
 // Serve uploaded files securely
@@ -2764,9 +2800,14 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
 
     // Get payment field configuration
     const paymentFields = await gcpClient.getPaymentFields(formId);
+    console.log('🔍 PAYMENT DEBUG - All payment fields found:', paymentFields.length);
+    console.log('🔍 PAYMENT DEBUG - All payment fields details:', JSON.stringify(paymentFields, null, 2));
+    
     const paymentField = paymentFields.find(field => field.field_id === fieldId);
     
     if (!paymentField) {
+      console.log('🔍 PAYMENT DEBUG - Payment field not found for fieldId:', fieldId);
+      console.log('🔍 PAYMENT DEBUG - Available field IDs:', paymentFields.map(f => f.field_id));
       return res.status(404).json({
         success: false,
         error: 'Payment field not found'
@@ -2780,6 +2821,7 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
     console.log('🔍 - Configured Stripe Account ID:', paymentField.stripe_account_id);
     console.log('🔍 - Amount:', paymentField.amount);
     console.log('🔍 - Currency:', paymentField.currency);
+    console.log('🔍 PAYMENT DEBUG - Full payment field object:', JSON.stringify(paymentField, null, 2));
 
     // Create payment intent
     console.log('🔍 PAYMENT DEBUG - Creating payment intent with account:', paymentField.stripe_account_id);
