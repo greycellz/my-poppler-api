@@ -2773,7 +2773,16 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
       });
     }
 
+    // DEBUG: Log payment field configuration
+    console.log('🔍 PAYMENT DEBUG - Form payment field configuration:');
+    console.log('🔍 - Form ID:', formId);
+    console.log('🔍 - Field ID:', fieldId);
+    console.log('🔍 - Configured Stripe Account ID:', paymentField.stripe_account_id);
+    console.log('🔍 - Amount:', paymentField.amount);
+    console.log('🔍 - Currency:', paymentField.currency);
+
     // Create payment intent
+    console.log('🔍 PAYMENT DEBUG - Creating payment intent with account:', paymentField.stripe_account_id);
     const paymentIntent = await stripe.paymentIntents.create({
       amount: paymentField.amount,
       currency: paymentField.currency,
@@ -2952,6 +2961,16 @@ app.put('/api/stripe/payment-field/:formId/:fieldId', async (req, res) => {
     const { formId, fieldId } = req.params;
     const { stripeAccountId, amount, currency, description, productName } = req.body;
     
+    // DEBUG: Log the update request
+    console.log('🔍 PAYMENT FIELD UPDATE DEBUG:');
+    console.log('🔍 - Form ID:', formId);
+    console.log('🔍 - Field ID:', fieldId);
+    console.log('🔍 - New Stripe Account ID:', stripeAccountId);
+    console.log('🔍 - Amount:', amount);
+    console.log('🔍 - Currency:', currency);
+    console.log('🔍 - Description:', description);
+    console.log('🔍 - Product Name:', productName);
+    
     if (!formId || !fieldId) {
       return res.status(400).json({
         success: false,
@@ -2973,6 +2992,7 @@ app.put('/api/stripe/payment-field/:formId/:fieldId', async (req, res) => {
       });
     }
 
+    console.log('🔍 PAYMENT FIELD UPDATE DEBUG - Updates to apply:', updates);
     await gcpClient.updatePaymentField(formId, fieldId, updates);
     
     console.log(`✅ Payment field updated: ${formId}/${fieldId}`);
