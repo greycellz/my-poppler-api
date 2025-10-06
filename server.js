@@ -1347,10 +1347,13 @@ app.post('/upload-file', upload.single('file'), async (req, res) => {
 
     console.log(`✅ File uploaded successfully: ${fileName}`)
     console.log(`🔗 GCP URL: ${uploadResult.publicUrl}`)
+    
+    // Generate backend file serving URL instead of direct GCP URL
+    const backendFileUrl = `${process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app'}/api/files/${formId}/${fieldId}/${timestamp}${fileExtension}`
 
     res.json({
       success: true,
-      fileUrl: uploadResult.publicUrl,
+      fileUrl: backendFileUrl,
       fileName: file.originalname,
       fileSize: file.size,
       fileType: file.mimetype
@@ -1372,6 +1375,65 @@ app.post('/upload-file', upload.single('file'), async (req, res) => {
     })
   }
 })
+
+// ============== FILE SERVING ENDPOINT ==============
+
+// Serve uploaded files securely
+app.get('/api/files/:formId/:fieldId/:filename', async (req, res) => {
+  try {
+    const { formId, fieldId, filename } = req.params
+    
+    console.log(`📁 File request: ${filename} for form: ${formId}, field: ${fieldId}`)
+    
+    // Construct the file path in GCP Storage
+    const filePath = `form-uploads/${formId}/${fieldId}/${filename}`
+    
+    // Get file from GCP Cloud Storage
+    const bucket = gcpClient.storage.bucket('chatterforms-uploads-us-central1')
+    const file = bucket.file(filePath)
+    
+    // Check if file exists
+    const [exists] = await file.exists()
+    if (!exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      })
+    }
+    
+    // Get file metadata
+    const [metadata] = await file.getMetadata()
+    
+    // Set appropriate headers
+    res.set({
+      'Content-Type': metadata.contentType || 'application/octet-stream',
+      'Content-Length': metadata.size,
+      'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+      'Content-Disposition': `inline; filename="${metadata.name}"`
+    })
+    
+    // Stream the file to the response
+    const stream = file.createReadStream()
+    stream.pipe(res)
+    
+    stream.on('error', (error) => {
+      console.error('❌ Error streaming file:', error)
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to stream file'
+        })
+      }
+    })
+    
+  } catch (error) {
+    console.error('❌ Error serving file:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to serve file'
+    })
+  }
+});
 
 // ============== USER FORMS ENDPOINT ==============
 
