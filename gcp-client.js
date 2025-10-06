@@ -2309,6 +2309,37 @@ class GCPClient {
   }
 
   /**
+   * Update payment field configuration
+   */
+  async updatePaymentField(formId, fieldId, updates) {
+    try {
+      console.log(`💳 Updating payment field for form: ${formId}, field: ${fieldId}`);
+      
+      const fieldsQuery = await this.firestore
+        .collection('payment_fields')
+        .where('form_id', '==', formId)
+        .where('field_id', '==', fieldId)
+        .get();
+
+      if (fieldsQuery.empty) {
+        throw new Error('Payment field not found');
+      }
+
+      const fieldDoc = fieldsQuery.docs[0];
+      await fieldDoc.ref.update({
+        ...updates,
+        updated_at: new Date()
+      });
+
+      console.log(`✅ Payment field updated: ${fieldDoc.id}`);
+      return fieldDoc.id;
+    } catch (error) {
+      console.error('❌ Error updating payment field:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get all Stripe accounts for a user
    */
   async getStripeAccounts(userId) {

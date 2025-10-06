@@ -2881,6 +2881,53 @@ app.get('/api/stripe/transactions/:submissionId', async (req, res) => {
   }
 });
 
+// Update payment field configuration
+app.put('/api/stripe/payment-field/:formId/:fieldId', async (req, res) => {
+  try {
+    console.log('💳 Updating payment field configuration');
+    
+    const { formId, fieldId } = req.params;
+    const { stripeAccountId, amount, currency, description, productName } = req.body;
+    
+    if (!formId || !fieldId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID and field ID are required'
+      });
+    }
+
+    const updates = {};
+    if (stripeAccountId !== undefined) updates.stripe_account_id = stripeAccountId;
+    if (amount !== undefined) updates.amount = Math.round(amount * 100); // Convert to cents
+    if (currency !== undefined) updates.currency = currency;
+    if (description !== undefined) updates.description = description;
+    if (productName !== undefined) updates.product_name = productName;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No updates provided'
+      });
+    }
+
+    await gcpClient.updatePaymentField(formId, fieldId, updates);
+    
+    console.log(`✅ Payment field updated: ${formId}/${fieldId}`);
+    
+    res.json({
+      success: true,
+      message: 'Payment field updated successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating payment field:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update payment field'
+    });
+  }
+});
+
 // Stripe webhook handler for payment events
 app.post('/api/stripe/webhook', express.raw({type: 'application/json'}), async (req, res) => {
   try {
