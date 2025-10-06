@@ -1356,7 +1356,8 @@ app.post('/upload-file', upload.single('file'), async (req, res) => {
       fileUrl: backendFileUrl,
       fileName: file.originalname,
       fileSize: file.size,
-      fileType: file.mimetype
+      fileType: file.mimetype,
+      storedFileName: `${timestamp}${fileExtension}` // Store the actual unique filename
     })
 
   } catch (error) {
