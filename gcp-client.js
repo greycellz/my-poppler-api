@@ -178,24 +178,26 @@ class GCPClient {
                 const existingField = existingFields.find(f => f.field_id === field.id);
                 
                 if (existingField) {
-                  // Update existing payment field
-                  console.log(`🔄 Updating existing payment field: ${field.id}`);
+                  // Update existing payment field - preserve the existing stripe_account_id if field has one
+                  const stripeAccountId = field.stripeAccountId || existingField.stripe_account_id || stripeAccount.stripe_account_id;
+                  console.log(`🔄 Updating existing payment field: ${field.id} with account: ${stripeAccountId}`);
                   await this.updatePaymentField(formId, field.id, {
                     amount: Math.round((field.amount || 0) * 100), // Convert to cents
                     currency: field.currency || 'usd',
                     description: field.description || '',
                     product_name: field.productName || '',
-                    stripe_account_id: stripeAccount.stripe_account_id
+                    stripe_account_id: stripeAccountId
                   });
                 } else {
                   // Create new payment field
-                  console.log(`➕ Creating new payment field: ${field.id}`);
+                  const stripeAccountId = field.stripeAccountId || stripeAccount.stripe_account_id;
+                  console.log(`➕ Creating new payment field: ${field.id} with account: ${stripeAccountId}`);
                   await this.storePaymentField(formId, field.id, {
                     amount: Math.round((field.amount || 0) * 100), // Convert to cents
                     currency: field.currency || 'usd',
                     description: field.description || '',
                     product_name: field.productName || '',
-                    stripe_account_id: stripeAccount.stripe_account_id,
+                    stripe_account_id: stripeAccountId,
                     isRequired: field.required || false
                   });
                 }
