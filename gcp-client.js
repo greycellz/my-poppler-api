@@ -171,16 +171,34 @@ class GCPClient {
             if (!stripeAccount) {
               console.log(`⚠️ No Stripe account found for user ${finalUserId}, payment fields will not be configured`);
             } else {
-              // Store each payment field configuration
+              // Store or update each payment field configuration
               for (const field of paymentFields) {
-                await this.storePaymentField(formId, field.id, {
-                  amount: Math.round((field.amount || 0) * 100), // Convert to cents
-                  currency: field.currency || 'usd',
-                  description: field.description || '',
-                  product_name: field.productName || '',
-                  stripe_account_id: stripeAccount.stripe_account_id,
-                  isRequired: field.required || false
-                });
+                // Check if payment field already exists
+                const existingFields = await this.getPaymentFields(formId);
+                const existingField = existingFields.find(f => f.field_id === field.id);
+                
+                if (existingField) {
+                  // Update existing payment field
+                  console.log(`🔄 Updating existing payment field: ${field.id}`);
+                  await this.updatePaymentField(formId, field.id, {
+                    amount: Math.round((field.amount || 0) * 100), // Convert to cents
+                    currency: field.currency || 'usd',
+                    description: field.description || '',
+                    product_name: field.productName || '',
+                    stripe_account_id: stripeAccount.stripe_account_id
+                  });
+                } else {
+                  // Create new payment field
+                  console.log(`➕ Creating new payment field: ${field.id}`);
+                  await this.storePaymentField(formId, field.id, {
+                    amount: Math.round((field.amount || 0) * 100), // Convert to cents
+                    currency: field.currency || 'usd',
+                    description: field.description || '',
+                    product_name: field.productName || '',
+                    stripe_account_id: stripeAccount.stripe_account_id,
+                    isRequired: field.required || false
+                  });
+                }
               }
             }
           } catch (paymentError) {
