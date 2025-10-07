@@ -246,14 +246,63 @@ class PDFGenerator {
 
     <div class="form-data">
         ${displayData.map(([fieldId, value]) => {
-          const field = displayFields.find(f => f.id === fieldId);
+          const field = displayFields.find(f => f.id === fieldId) || {};
           const label = field?.label || fieldId;
-          const displayValue = Array.isArray(value) ? value.join(', ') : value;
-          
+
+          const renderCalendly = (v) => {
+            if (!v || typeof v !== 'object') return '' + v;
+            const parts = [];
+            if (v.eventName) parts.push(`<div><strong>Event:</strong> ${v.eventName}</div>`);
+            if (v.startTime && v.endTime) {
+              parts.push(`<div><strong>Time:</strong> ${v.startTime} - ${v.endTime}</div>`);
+            } else if (v.startTime || v.endTime) {
+              parts.push(`<div><strong>Status:</strong> Scheduled</div>`);
+            }
+            if (v.duration) parts.push(`<div><strong>Duration:</strong> ${v.duration} minutes</div>`);
+            if (v.attendeeEmail) parts.push(`<div><strong>Email:</strong> ${v.attendeeEmail}</div>`);
+            return parts.join('') || 'Scheduled';
+          };
+
+          const renderPayment = (v) => {
+            if (!v || typeof v !== 'object') return '' + v;
+            const parts = [];
+            if (v.status) parts.push(`<div><strong>Status:</strong> ${v.status}</div>`);
+            if (typeof v.amount === 'number') parts.push(`<div><strong>Amount:</strong> $${(v.amount/100).toFixed(2)} ${v.currency?.toUpperCase() || 'USD'}</div>`);
+            if (v.paymentIntentId) parts.push(`<div><strong>Transaction ID:</strong> ${v.paymentIntentId}</div>`);
+            if (v.completedAt) parts.push(`<div><strong>Completed:</strong> ${new Date(v.completedAt).toLocaleString('en-US', { timeZone: pacificTz })}</div>`);
+            if (v.customerEmail) parts.push(`<div><strong>Email:</strong> ${v.customerEmail}</div>`);
+            return parts.join('') || 'Payment';
+          };
+
+          const renderFile = (v) => {
+            if (!v || typeof v !== 'object') return '' + v;
+            const name = v.fileName || 'File';
+            const size = v.fileSize ? `${(v.fileSize/1024).toFixed(1)} KB` : '';
+            const type = v.fileType || '';
+            const meta = [size, type].filter(Boolean).join(' • ');
+            return `<div>${name}${meta ? ` <span style='color:#9ca3af'>(${meta})</span>` : ''}</div>`;
+          };
+
+          let displayHtml = '';
+          if (Array.isArray(value)) {
+            displayHtml = value.join(', ');
+          } else if (field.type === 'calendly') {
+            displayHtml = renderCalendly(value);
+          } else if (field.type === 'payment') {
+            displayHtml = renderPayment(value);
+          } else if (field.type === 'file') {
+            displayHtml = renderFile(value);
+          } else if (value && typeof value === 'object') {
+            // Fallback stringify for any other objects
+            displayHtml = Object.entries(value).map(([k, v]) => `<div><strong>${k}:</strong> ${v}</div>`).join('');
+          } else {
+            displayHtml = value ?? '';
+          }
+
           return `
             <div class="field-group">
                 <div class="field-label">${label}</div>
-                <div class="field-value">${displayValue}</div>
+                <div class="field-value">${displayHtml}</div>
             </div>
           `;
         }).join('')}
