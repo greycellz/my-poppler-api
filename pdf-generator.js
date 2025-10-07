@@ -261,7 +261,11 @@ class PDFGenerator {
 
     <div class="signature-section">
         <div class="signature-title">Digital Signature</div>
-        <img src="${signatureData.imageBase64.startsWith('data:') ? signatureData.imageBase64 : `data:image/jpeg;base64,${signatureData.imageBase64}`}" alt="Digital Signature" class="signature-image" />
+        <img src="${(() => {
+          const val = signatureData && signatureData.imageBase64 ? signatureData.imageBase64 : '';
+          if (!val) return '';
+          return val.startsWith('data:') ? val : `data:image/jpeg;base64,${val}`;
+        })()}" alt="Digital Signature" class="signature-image" />
         <div class="signature-details">
             <div><strong>Signed:</strong> ${submittedAt.toLocaleString('en-US', { timeZone: pacificTz })}</div>
             <div><strong>Method:</strong> ${signatureData.method === 'draw' ? 'Hand-drawn' : 'Typed'}</div>

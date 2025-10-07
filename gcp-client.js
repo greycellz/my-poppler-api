@@ -1381,12 +1381,37 @@ class GCPClient {
     try {
       const crypto = require('crypto');
       // Check for signature data in form submission
-      const signatureFields = Object.entries(formData).filter(([key, value]) => 
+      let signatureFields = Object.entries(formData).filter(([key, value]) => 
         value && typeof value === 'object' && 'imageBase64' in value
       );
 
+      // Fallback: if base64 was excluded from submission_data, reconstruct from stored GCS signatures
       if (signatureFields.length === 0) {
-        console.log('📄 No signature data found, skipping PDF generation');
+        try {
+          console.log('📄 No inline signature data found; attempting fallback via stored GCS signatures...');
+          const subDoc = await this.firestore.collection('submissions').doc(submissionId).get();
+          const sigMap = subDoc.exists ? (subDoc.data().signatures || {}) : {};
+          const reconstructed = [];
+          for (const [fieldId, sig] of Object.entries(sigMap)) {
+            try {
+              const bucketNameForSig = sig.isHipaa ? 'chatterforms-submissions-us-central1' : 'chatterforms-uploads-us-central1';
+              const [buf] = await this.storage.bucket(bucketNameForSig).file(sig.filename).download();
+              reconstructed.push([fieldId, { imageBase64: buf.toString('base64') }]);
+            } catch (e) {
+              console.warn(`⚠️ Failed to reconstruct signature for ${fieldId}: ${e.message}`);
+            }
+          }
+          if (reconstructed.length > 0) {
+            signatureFields = reconstructed;
+            console.log(`📄 Reconstructed ${reconstructed.length} signature(s) from GCS for PDF generation.`);
+          }
+        } catch (e) {
+          console.warn('⚠️ Fallback GCS signature reconstruction failed:', e.message);
+        }
+      }
+
+      if (signatureFields.length === 0) {
+        console.log('📄 No signature data found (after fallback), skipping PDF generation');
         return;
       }
 
