@@ -2903,9 +2903,11 @@ class GCPClient {
         const data = doc.data();
         // Filter active logos in memory instead of in query
         if (data.isActive !== false) {
+          // Use backend proxy URL to avoid CORS issues
+          const backendUrl = `${process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app'}/api/files/logo/${userId}/${data.id}`;
           logos.push({
             id: data.id,
-            url: data.publicUrl,
+            url: backendUrl,
             displayName: data.displayName,
             position: 'center', // Default position
             height: 150, // Default height

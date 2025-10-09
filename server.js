@@ -1394,6 +1394,15 @@ app.post('/upload-logo', upload.single('file'), async (req, res) => {
 
     console.log(`🖼️ Logo upload request: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)}MB) for user: ${userId}`)
 
+    // Check logo limit (4 logos maximum per user)
+    const existingLogos = await gcpClient.getUserLogos(userId)
+    if (existingLogos.length >= 4) {
+      return res.status(400).json({
+        success: false,
+        error: 'Maximum of 4 logos allowed per user. Please delete an existing logo before uploading a new one.'
+      })
+    }
+
     // Generate unique filename with user context
     const timestamp = Date.now()
     const fileExtension = path.extname(file.originalname)
@@ -1586,6 +1595,91 @@ app.delete('/admin/delete-all-logos/:userId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to delete logos',
+      details: error.message
+    })
+  }
+})
+
+// ============== FILE SERVING ENDPOINTS ==============
+
+// Serve logo files through backend to avoid CORS issues
+app.get('/api/files/logo/:userId/:logoId', async (req, res) => {
+  try {
+    const { userId, logoId } = req.params
+    
+    if (!userId || !logoId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and Logo ID are required'
+      })
+    }
+
+    console.log(`🖼️ Serving logo file: ${logoId} for user: ${userId}`)
+
+    // Get logo metadata from Firestore
+    const logoRef = gcpClient.firestore.collection('user_logos').doc(logoId)
+    const logoDoc = await logoRef.get()
+    
+    if (!logoDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Logo not found'
+      })
+    }
+    
+    const logoData = logoDoc.data()
+    
+    // Verify the logo belongs to the user
+    if (logoData.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized: Logo does not belong to user'
+      })
+    }
+    
+    // Get the file from GCP Storage
+    const gcpUrl = logoData.gcpUrl
+    if (gcpUrl && gcpUrl.startsWith('gs://')) {
+      const bucketName = gcpUrl.split('/')[2]
+      const fileName = gcpUrl.split('/').slice(3).join('/')
+      
+      const bucket = gcpClient.storage.bucket(bucketName)
+      const file = bucket.file(fileName)
+      
+      // Check if file exists
+      const [exists] = await file.exists()
+      if (!exists) {
+        return res.status(404).json({
+          success: false,
+          error: 'Logo file not found in storage'
+        })
+      }
+      
+      // Set appropriate headers
+      res.set({
+        'Content-Type': logoData.fileType || 'image/png',
+        'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
+        'Access-Control-Allow-Origin': '*', // Allow CORS
+        'Access-Control-Allow-Methods': 'GET',
+        'Access-Control-Allow-Headers': 'Content-Type'
+      })
+      
+      // Stream the file
+      file.createReadStream().pipe(res)
+      
+      console.log(`✅ Logo file served: ${fileName}`)
+    } else {
+      return res.status(404).json({
+        success: false,
+        error: 'Invalid logo file path'
+      })
+    }
+
+  } catch (error) {
+    console.error('❌ Error serving logo file:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to serve logo file',
       details: error.message
     })
   }
