@@ -1534,6 +1534,63 @@ app.delete('/delete-logo/:logoId', async (req, res) => {
   }
 })
 
+// ============== TEMPORARY ADMIN ENDPOINTS ==============
+
+// Temporary endpoint to delete all logos for a user (for testing)
+app.delete('/admin/delete-all-logos/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    console.log(`🗑️ Admin: Deleting all logos for user: ${userId}`)
+
+    // Get all logos for the user
+    const logosSnapshot = await gcpClient.firestore
+      .collection('user_logos')
+      .where('userId', '==', userId)
+      .get()
+    
+    let deletedCount = 0
+    const deletePromises = []
+    
+    logosSnapshot.forEach(doc => {
+      const logoData = doc.data()
+      deletePromises.push(
+        gcpClient.deleteLogo(doc.id, userId).then(result => {
+          if (result.success) {
+            deletedCount++
+            console.log(`✅ Deleted logo: ${doc.id}`)
+          }
+        })
+      )
+    })
+    
+    await Promise.all(deletePromises)
+    
+    console.log(`✅ Admin: Deleted ${deletedCount} logos for user: ${userId}`)
+    
+    res.json({
+      success: true,
+      message: `Deleted ${deletedCount} logos for user ${userId}`,
+      deletedCount
+    })
+
+  } catch (error) {
+    console.error('❌ Admin delete all logos error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete logos',
+      details: error.message
+    })
+  }
+})
+
 // ============== DEBUG ENDPOINTS ==============
 
 // Debug endpoint to check payment fields for a form
