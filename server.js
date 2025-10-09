@@ -1441,11 +1441,16 @@ app.post('/upload-logo', upload.single('file'), async (req, res) => {
     console.log(`✅ Logo uploaded successfully: ${logoId}`)
     console.log(`🔗 GCP URL: ${uploadResult.publicUrl}`)
     
+    // Use backend proxy URL to avoid CORS issues (same as getUserLogos)
+    const rawBase = process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app';
+    const baseUrl = rawBase.startsWith('http') ? rawBase : `https://${rawBase}`;
+    const backendUrl = `${baseUrl}/api/files/logo/${userId}/${logoId}`;
+
     res.json({
       success: true,
       logo: {
         id: logoId,
-        url: uploadResult.publicUrl,
+        url: backendUrl,
         displayName: displayName || file.originalname,
         position: 'center',
         height: 150,
