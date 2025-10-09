@@ -2904,7 +2904,10 @@ class GCPClient {
         // Filter active logos in memory instead of in query
         if (data.isActive !== false) {
           // Use backend proxy URL to avoid CORS issues
-          const backendUrl = `${process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app'}/api/files/logo/${userId}/${data.id}`;
+          // Ensure we always include a protocol (https) even if env var is just the domain
+          const rawBase = process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app';
+          const baseUrl = rawBase.startsWith('http') ? rawBase : `https://${rawBase}`;
+          const backendUrl = `${baseUrl}/api/files/logo/${userId}/${data.id}`;
           logos.push({
             id: data.id,
             url: backendUrl,
