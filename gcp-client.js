@@ -2892,25 +2892,30 @@ class GCPClient {
     try {
       console.log(`🖼️ Getting logos for user: ${userId}`);
       
+      // Use a simpler query to avoid index requirements
       const logosSnapshot = await this.firestore
         .collection('user_logos')
         .where('userId', '==', userId)
-        .where('isActive', '==', true)
-        .orderBy('uploadedAt', 'desc')
         .get();
       
       const logos = [];
       logosSnapshot.forEach(doc => {
         const data = doc.data();
-        logos.push({
-          id: data.id,
-          url: data.publicUrl,
-          displayName: data.displayName,
-          position: 'center', // Default position
-          height: 150, // Default height
-          uploadedAt: data.uploadedAt
-        });
+        // Filter active logos in memory instead of in query
+        if (data.isActive !== false) {
+          logos.push({
+            id: data.id,
+            url: data.publicUrl,
+            displayName: data.displayName,
+            position: 'center', // Default position
+            height: 150, // Default height
+            uploadedAt: data.uploadedAt
+          });
+        }
       });
+      
+      // Sort by uploadedAt in memory
+      logos.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
       
       console.log(`✅ Found ${logos.length} logos for user: ${userId}`);
       return logos;
