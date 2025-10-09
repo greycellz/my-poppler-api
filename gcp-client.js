@@ -2864,6 +2864,115 @@ class GCPClient {
       return [];
     }
   }
+
+  // ============== LOGO MANAGEMENT METHODS ==============
+
+  /**
+   * Store logo metadata in Firestore
+   */
+  async storeLogoMetadata(logoData) {
+    try {
+      console.log(`🖼️ Storing logo metadata: ${logoData.id}`);
+      
+      const logoRef = this.firestore.collection('user_logos').doc(logoData.id);
+      await logoRef.set(logoData);
+      
+      console.log(`✅ Logo metadata stored: ${logoData.id}`);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error storing logo metadata:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's logos from Firestore
+   */
+  async getUserLogos(userId) {
+    try {
+      console.log(`🖼️ Getting logos for user: ${userId}`);
+      
+      const logosSnapshot = await this.firestore
+        .collection('user_logos')
+        .where('userId', '==', userId)
+        .where('isActive', '==', true)
+        .orderBy('uploadedAt', 'desc')
+        .get();
+      
+      const logos = [];
+      logosSnapshot.forEach(doc => {
+        const data = doc.data();
+        logos.push({
+          id: data.id,
+          url: data.publicUrl,
+          displayName: data.displayName,
+          position: 'center', // Default position
+          height: 150, // Default height
+          uploadedAt: data.uploadedAt
+        });
+      });
+      
+      console.log(`✅ Found ${logos.length} logos for user: ${userId}`);
+      return logos;
+    } catch (error) {
+      console.error('❌ Error getting user logos:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete logo from GCP and Firestore
+   */
+  async deleteLogo(logoId, userId) {
+    try {
+      console.log(`🗑️ Deleting logo: ${logoId} for user: ${userId}`);
+      
+      // First, get the logo metadata to find the GCP file path
+      const logoRef = this.firestore.collection('user_logos').doc(logoId);
+      const logoDoc = await logoRef.get();
+      
+      if (!logoDoc.exists) {
+        return { success: false, error: 'Logo not found' };
+      }
+      
+      const logoData = logoDoc.data();
+      
+      // Verify the logo belongs to the user
+      if (logoData.userId !== userId) {
+        return { success: false, error: 'Unauthorized: Logo does not belong to user' };
+      }
+      
+      // Delete from GCP Cloud Storage
+      try {
+        const gcpUrl = logoData.gcpUrl;
+        if (gcpUrl && gcpUrl.startsWith('gs://')) {
+          const bucketName = gcpUrl.split('/')[2];
+          const fileName = gcpUrl.split('/').slice(3).join('/');
+          
+          const bucket = this.storage.bucket(bucketName);
+          const file = bucket.file(fileName);
+          
+          await file.delete();
+          console.log(`✅ Deleted logo file from GCP: ${fileName}`);
+        }
+      } catch (gcpError) {
+        console.error('❌ Error deleting logo from GCP (non-blocking):', gcpError);
+        // Continue with Firestore deletion even if GCP deletion fails
+      }
+      
+      // Mark as inactive in Firestore (soft delete)
+      await logoRef.update({
+        isActive: false,
+        deletedAt: new Date().toISOString()
+      });
+      
+      console.log(`✅ Logo marked as deleted: ${logoId}`);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error deleting logo:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = GCPClient;

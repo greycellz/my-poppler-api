@@ -1377,6 +1377,163 @@ app.post('/upload-file', upload.single('file'), async (req, res) => {
   }
 })
 
+// ============== LOGO ENDPOINTS ==============
+
+// Upload logo endpoint
+app.post('/upload-logo', upload.single('file'), async (req, res) => {
+  try {
+    const { userId, displayName } = req.body
+    const file = req.file
+    
+    if (!file || !userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: file or userId'
+      })
+    }
+
+    console.log(`🖼️ Logo upload request: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)}MB) for user: ${userId}`)
+
+    // Generate unique filename with user context
+    const timestamp = Date.now()
+    const fileExtension = path.extname(file.originalname)
+    const logoId = `logo_${timestamp}_${crypto.randomBytes(8).toString('hex')}`
+    const fileName = `${userId}/logos/${logoId}${fileExtension}`
+    
+    // Upload to GCP Cloud Storage
+    const uploadResult = await gcpClient.uploadFile(
+      file.path, 
+      `user-logos/${fileName}`,
+      'chatterforms-uploads-us-central1'
+    )
+
+    // Clean up local file
+    if (fs.existsSync(file.path)) {
+      fs.unlinkSync(file.path)
+      console.log(`🧹 Cleaned up local file: ${file.path}`)
+    }
+
+    // Store logo metadata in Firestore
+    const logoData = {
+      id: logoId,
+      userId: userId,
+      fileName: file.originalname,
+      displayName: displayName || file.originalname,
+      fileSize: file.size,
+      fileType: file.mimetype,
+      gcpUrl: uploadResult.url,
+      publicUrl: uploadResult.publicUrl,
+      uploadedAt: new Date().toISOString(),
+      isActive: true
+    }
+
+    await gcpClient.storeLogoMetadata(logoData)
+
+    console.log(`✅ Logo uploaded successfully: ${logoId}`)
+    console.log(`🔗 GCP URL: ${uploadResult.publicUrl}`)
+    
+    res.json({
+      success: true,
+      logo: {
+        id: logoId,
+        url: uploadResult.publicUrl,
+        displayName: displayName || file.originalname,
+        position: 'center',
+        height: 150,
+        uploadedAt: logoData.uploadedAt
+      }
+    })
+
+  } catch (error) {
+    console.error('❌ Logo upload error:', error)
+    
+    // Clean up local file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path)
+      console.log(`🧹 Cleaned up local file after error: ${req.file.path}`)
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Logo upload failed',
+      details: error.message
+    })
+  }
+})
+
+// Get user logos endpoint
+app.get('/user-logos/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    console.log(`🖼️ Getting logos for user: ${userId}`)
+
+    const logos = await gcpClient.getUserLogos(userId)
+    
+    res.json({
+      success: true,
+      logos: logos
+    })
+
+  } catch (error) {
+    console.error('❌ Get user logos error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user logos',
+      details: error.message
+    })
+  }
+})
+
+// Delete logo endpoint
+app.delete('/delete-logo/:logoId', async (req, res) => {
+  try {
+    const { logoId } = req.params
+    const { userId } = req.body
+    
+    if (!logoId || !userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Logo ID and User ID are required'
+      })
+    }
+
+    console.log(`🗑️ Deleting logo: ${logoId} for user: ${userId}`)
+
+    // Delete logo from GCP and Firestore
+    const result = await gcpClient.deleteLogo(logoId, userId)
+    
+    if (!result.success) {
+      return res.status(404).json({
+        success: false,
+        error: result.error || 'Logo not found or deletion failed'
+      })
+    }
+
+    console.log(`✅ Logo deleted successfully: ${logoId}`)
+    
+    res.json({
+      success: true,
+      message: 'Logo deleted successfully'
+    })
+
+  } catch (error) {
+    console.error('❌ Delete logo error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete logo',
+      details: error.message
+    })
+  }
+})
+
 // ============== DEBUG ENDPOINTS ==============
 
 // Debug endpoint to check payment fields for a form
