@@ -3821,6 +3821,223 @@ app.get('/api/calendly/bookings/:submissionId', async (req, res) => {
   }
 });
 
+// ============== ONBOARDING API ENDPOINTS ==============
+
+/**
+ * Initialize onboarding progress for a user
+ */
+app.post('/api/onboarding/initialize', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    console.log(`🎯 Initializing onboarding for user: ${userId}`);
+    
+    const progress = await gcpClient.initializeOnboardingProgress(userId);
+    
+    res.json({
+      success: true,
+      progress
+    });
+
+  } catch (error) {
+    console.error('❌ Error initializing onboarding:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initialize onboarding'
+    });
+  }
+});
+
+/**
+ * Get user's onboarding progress
+ */
+app.get('/api/onboarding/progress/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    console.log(`📊 Getting onboarding progress for user: ${userId}`);
+    
+    const progress = await gcpClient.getOnboardingProgress(userId);
+    
+    res.json({
+      success: true,
+      progress
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting onboarding progress:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get onboarding progress'
+    });
+  }
+});
+
+/**
+ * Update onboarding progress when a task is completed
+ */
+app.post('/api/onboarding/complete-task', async (req, res) => {
+  try {
+    const { userId, taskId, taskName, level, reward } = req.body;
+    
+    if (!userId || !taskId || !taskName || !level) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userId, taskId, taskName, level'
+      });
+    }
+
+    console.log(`🎯 Completing task ${taskId} for user: ${userId}`);
+    
+    const progress = await gcpClient.updateOnboardingProgress(
+      userId, 
+      taskId, 
+      taskName, 
+      level, 
+      reward || `Task completed: ${taskName}`
+    );
+    
+    res.json({
+      success: true,
+      progress
+    });
+
+  } catch (error) {
+    console.error('❌ Error completing onboarding task:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to complete onboarding task'
+    });
+  }
+});
+
+/**
+ * Get help article by task ID
+ */
+app.get('/api/onboarding/help/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    
+    console.log(`📚 Getting help article for task: ${taskId}`);
+    
+    const helpArticle = await gcpClient.getHelpArticle(taskId);
+    
+    res.json({
+      success: true,
+      helpArticle
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting help article:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get help article'
+    });
+  }
+});
+
+/**
+ * Create or update help article
+ */
+app.post('/api/onboarding/help', async (req, res) => {
+  try {
+    const { taskId, title, content, steps, tips, related } = req.body;
+    
+    if (!taskId || !title || !content) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: taskId, title, content'
+      });
+    }
+
+    console.log(`📚 Upserting help article for task: ${taskId}`);
+    
+    await gcpClient.upsertHelpArticle(taskId, {
+      title,
+      content,
+      steps: steps || [],
+      tips: tips || [],
+      related: related || []
+    });
+    
+    res.json({
+      success: true,
+      message: 'Help article saved successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error saving help article:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save help article'
+    });
+  }
+});
+
+/**
+ * Get onboarding analytics for a user
+ */
+app.get('/api/onboarding/analytics/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    console.log(`📊 Getting onboarding analytics for user: ${userId}`);
+    
+    const analytics = await gcpClient.getOnboardingAnalytics(userId);
+    
+    res.json({
+      success: true,
+      analytics
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting onboarding analytics:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get onboarding analytics'
+    });
+  }
+});
+
+/**
+ * Log onboarding event (for analytics)
+ */
+app.post('/api/onboarding/log-event', async (req, res) => {
+  try {
+    const { userId, event, taskId, level, metadata } = req.body;
+    
+    if (!userId || !event) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userId, event'
+      });
+    }
+
+    console.log(`📊 Logging onboarding event: ${event} for user: ${userId}`);
+    
+    await gcpClient.logOnboardingEvent(userId, event, taskId, level, metadata || {});
+    
+    res.json({
+      success: true,
+      message: 'Event logged successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error logging onboarding event:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to log onboarding event'
+    });
+  }
+});
+
 // ============== SERVER STARTUP ==============
 
 app.listen(PORT, () => {
@@ -3847,6 +4064,11 @@ app.listen(PORT, () => {
   console.log(`📧 Form Published Email: POST ${BASE_URL}/api/emails/send-form-published`);
   console.log(`📧 Form Submission Email: POST ${BASE_URL}/api/emails/send-form-submission`);
   console.log(`📧 Form Deleted Email: POST ${BASE_URL}/api/emails/send-form-deleted`);
+  console.log(`🎯 Onboarding Initialize: POST ${BASE_URL}/api/onboarding/initialize`);
+  console.log(`📊 Onboarding Progress: GET ${BASE_URL}/api/onboarding/progress/:userId`);
+  console.log(`✅ Complete Task: POST ${BASE_URL}/api/onboarding/complete-task`);
+  console.log(`📚 Help Article: GET ${BASE_URL}/api/onboarding/help/:taskId`);
+  console.log(`📈 Onboarding Analytics: GET ${BASE_URL}/api/onboarding/analytics/:userId`);
   console.log(`🏥 Health: GET ${BASE_URL}/health`);
   
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {

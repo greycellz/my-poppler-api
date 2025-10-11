@@ -1955,6 +1955,292 @@ class GCPClient {
     }
   }
 
+  // ============== ONBOARDING SYSTEM FUNCTIONS ==============
+
+  /**
+   * Initialize onboarding progress for a new user
+   */
+  async initializeOnboardingProgress(userId) {
+    try {
+      console.log(`🎯 Initializing onboarding progress for user: ${userId}`);
+      
+      const onboardingProgress = {
+        currentLevel: 1,
+        completedTasks: [],
+        totalProgress: 0,
+        achievements: [],
+        lastUpdated: new Date(),
+        startedAt: new Date()
+      };
+
+      await this.firestore
+        .collection('users')
+        .doc(userId)
+        .update({
+          onboardingProgress
+        });
+
+      console.log(`✅ Onboarding progress initialized for user: ${userId}`);
+      return onboardingProgress;
+    } catch (error) {
+      console.error(`❌ Failed to initialize onboarding progress for user: ${userId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's onboarding progress
+   */
+  async getOnboardingProgress(userId) {
+    try {
+      console.log(`📊 Getting onboarding progress for user: ${userId}`);
+      
+      const userDoc = await this.firestore
+        .collection('users')
+        .doc(userId)
+        .get();
+
+      if (!userDoc.exists) {
+        throw new Error('User not found');
+      }
+
+      const userData = userDoc.data();
+      const progress = userData.onboardingProgress || null;
+
+      console.log(`✅ Retrieved onboarding progress for user: ${userId}`);
+      return progress;
+    } catch (error) {
+      console.error(`❌ Failed to get onboarding progress for user: ${userId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update onboarding progress when a task is completed
+   */
+  async updateOnboardingProgress(userId, taskId, taskName, level, reward) {
+    try {
+      console.log(`🎯 Updating onboarding progress for user: ${userId}, task: ${taskId}`);
+      
+      const userDoc = await this.firestore
+        .collection('users')
+        .doc(userId)
+        .get();
+
+      if (!userDoc.exists) {
+        throw new Error('User not found');
+      }
+
+      const userData = userDoc.data();
+      let progress = userData.onboardingProgress;
+
+      // Initialize progress if it doesn't exist
+      if (!progress) {
+        progress = {
+          currentLevel: 1,
+          completedTasks: [],
+          totalProgress: 0,
+          achievements: [],
+          lastUpdated: new Date(),
+          startedAt: new Date()
+        };
+      }
+
+      // Check if task is already completed
+      if (progress.completedTasks.includes(taskId)) {
+        console.log(`⚠️ Task ${taskId} already completed for user: ${userId}`);
+        return progress;
+      }
+
+      // Add completed task
+      progress.completedTasks.push(taskId);
+      
+      // Add achievement
+      const achievement = {
+        id: taskId,
+        level: level,
+        task: taskName,
+        completedAt: new Date(),
+        reward: reward
+      };
+      progress.achievements.push(achievement);
+
+      // Check if user should level up
+      const tasksPerLevel = {
+        1: ['chat-with-ai', 'publish-form', 'submit-form'],
+        2: ['add-delete-fields', 'global-settings', 'change-field-names', 'upload-logo', 'republish'],
+        3: ['customize-fields', 'move-fields', 'add-fields-preview', 'delete-fields-preview'],
+        4: ['go-to-workspace', 'check-submissions', 'clone-form', 'delete-form'],
+        5: ['setup-calendly', 'setup-esignature', 'setup-stripe', 'setup-hipaa']
+      };
+
+      const currentLevelTasks = tasksPerLevel[progress.currentLevel] || [];
+      const completedInCurrentLevel = currentLevelTasks.filter(task => 
+        progress.completedTasks.includes(task)
+      );
+
+      // Level up if user completed at least one task in current level
+      if (completedInCurrentLevel.length > 0 && progress.currentLevel < 5) {
+        progress.currentLevel = Math.min(progress.currentLevel + 1, 5);
+        console.log(`🎉 User ${userId} leveled up to level ${progress.currentLevel}!`);
+      }
+
+      // Calculate total progress (0-100)
+      const totalTasks = Object.values(tasksPerLevel).flat().length;
+      progress.totalProgress = Math.round((progress.completedTasks.length / totalTasks) * 100);
+
+      // Mark as completed if all levels done
+      if (progress.currentLevel === 5 && progress.totalProgress >= 100) {
+        progress.completedAt = new Date();
+        console.log(`🏆 User ${userId} completed all onboarding levels!`);
+      }
+
+      progress.lastUpdated = new Date();
+
+      // Update user document
+      await this.firestore
+        .collection('users')
+        .doc(userId)
+        .update({
+          onboardingProgress: progress
+        });
+
+      // Log analytics event
+      await this.logOnboardingEvent(userId, 'task_completed', taskId, level);
+
+      console.log(`✅ Onboarding progress updated for user: ${userId}`);
+      return progress;
+    } catch (error) {
+      console.error(`❌ Failed to update onboarding progress for user: ${userId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Log onboarding analytics events
+   */
+  async logOnboardingEvent(userId, event, taskId = null, level = null, metadata = {}) {
+    try {
+      const analyticsRef = this.firestore.collection('onboarding_analytics').doc();
+      
+      await analyticsRef.set({
+        userId,
+        event,
+        taskId,
+        level,
+        timestamp: new Date(),
+        metadata: {
+          ...metadata,
+          deviceType: metadata.deviceType || 'desktop'
+        }
+      });
+
+      console.log(`📊 Logged onboarding event: ${event} for user: ${userId}`);
+    } catch (error) {
+      console.error(`❌ Failed to log onboarding event for user: ${userId}`, error);
+      // Don't throw error for analytics logging failures
+    }
+  }
+
+  /**
+   * Get help article by task ID
+   */
+  async getHelpArticle(taskId) {
+    try {
+      console.log(`📚 Getting help article for task: ${taskId}`);
+      
+      const snapshot = await this.firestore
+        .collection('help_articles')
+        .where('task', '==', taskId)
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) {
+        return null;
+      }
+
+      const doc = snapshot.docs[0];
+      const helpData = doc.data();
+
+      console.log(`✅ Retrieved help article for task: ${taskId}`);
+      return helpData;
+    } catch (error) {
+      console.error(`❌ Failed to get help article for task: ${taskId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create or update help article
+   */
+  async upsertHelpArticle(taskId, helpData) {
+    try {
+      console.log(`📚 Upserting help article for task: ${taskId}`);
+      
+      // Check if article exists
+      const snapshot = await this.firestore
+        .collection('help_articles')
+        .where('task', '==', taskId)
+        .limit(1)
+        .get();
+
+      const articleData = {
+        task: taskId,
+        title: helpData.title,
+        content: helpData.content,
+        steps: helpData.steps || [],
+        tips: helpData.tips || [],
+        related: helpData.related || [],
+        lastUpdated: new Date(),
+        version: 1
+      };
+
+      if (snapshot.empty) {
+        // Create new article
+        const articleRef = this.firestore.collection('help_articles').doc();
+        await articleRef.set({
+          id: articleRef.id,
+          ...articleData
+        });
+        console.log(`✅ Created help article for task: ${taskId}`);
+      } else {
+        // Update existing article
+        const doc = snapshot.docs[0];
+        await doc.ref.update({
+          ...articleData,
+          version: (doc.data().version || 1) + 1
+        });
+        console.log(`✅ Updated help article for task: ${taskId}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to upsert help article for task: ${taskId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get onboarding analytics for a user
+   */
+  async getOnboardingAnalytics(userId) {
+    try {
+      console.log(`📊 Getting onboarding analytics for user: ${userId}`);
+      
+      const snapshot = await this.firestore
+        .collection('onboarding_analytics')
+        .where('userId', '==', userId)
+        .orderBy('timestamp', 'desc')
+        .get();
+
+      const analytics = snapshot.docs.map(doc => doc.data());
+
+      console.log(`✅ Retrieved ${analytics.length} analytics events for user: ${userId}`);
+      return analytics;
+    } catch (error) {
+      console.error(`❌ Failed to get onboarding analytics for user: ${userId}`, error);
+      throw error;
+    }
+  }
+
   /**
    * Update form metadata
    */
