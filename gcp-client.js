@@ -2231,10 +2231,11 @@ class GCPClient {
       const snapshot = await this.firestore
         .collection('onboarding_analytics')
         .where('userId', '==', userId)
-        .orderBy('timestamp', 'desc')
         .get();
 
-      const analytics = snapshot.docs.map(doc => doc.data());
+      const analytics = snapshot.docs
+        .map(doc => doc.data())
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Sort in memory
 
       console.log(`✅ Retrieved ${analytics.length} analytics events for user: ${userId}`);
       return analytics;
