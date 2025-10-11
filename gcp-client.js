@@ -1976,9 +1976,9 @@ class GCPClient {
       await this.firestore
         .collection('users')
         .doc(userId)
-        .update({
+        .set({
           onboardingProgress
-        });
+        }, { merge: true });
 
       console.log(`✅ Onboarding progress initialized for user: ${userId}`);
       return onboardingProgress;
@@ -2001,7 +2001,9 @@ class GCPClient {
         .get();
 
       if (!userDoc.exists) {
-        throw new Error('User not found');
+        // Return null for non-existent users instead of throwing error
+        console.log(`⚠️ User not found: ${userId}, returning null`);
+        return null;
       }
 
       const userData = userDoc.data();
@@ -2027,12 +2029,13 @@ class GCPClient {
         .doc(userId)
         .get();
 
-      if (!userDoc.exists) {
-        throw new Error('User not found');
+      let userData = {};
+      let progress = null;
+      
+      if (userDoc.exists) {
+        userData = userDoc.data();
+        progress = userData.onboardingProgress;
       }
-
-      const userData = userDoc.data();
-      let progress = userData.onboardingProgress;
 
       // Initialize progress if it doesn't exist
       if (!progress) {
@@ -2101,9 +2104,9 @@ class GCPClient {
       await this.firestore
         .collection('users')
         .doc(userId)
-        .update({
+        .set({
           onboardingProgress: progress
-        });
+        }, { merge: true });
 
       // Log analytics event
       await this.logOnboardingEvent(userId, 'task_completed', taskId, level);
