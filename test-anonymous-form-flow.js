@@ -208,8 +208,8 @@ async function testFormMigration() {
   
   // Test migration
   const migrationData = {
-    realUserId: userResult.userId,
-    anonymousUserId: formResult.anonymousSessionId
+    tempUserId: formResult.anonymousSessionId,
+    realUserId: userResult.userId
   };
   
   const response = await axios.post(`${RAILWAY_URL}/api/forms/migrate-anonymous`, migrationData);
@@ -330,8 +330,8 @@ async function testRaceConditionHandling() {
   
   // Start migration
   const migrationPromise = axios.post(`${RAILWAY_URL}/api/forms/migrate-anonymous`, {
-    realUserId: user.userId,
-    anonymousUserId: formResult.anonymousSessionId
+    tempUserId: formResult.anonymousSessionId,
+    realUserId: user.userId
   });
   
   // Try to create another form with the same session (should not interfere)

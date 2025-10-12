@@ -2310,6 +2310,7 @@ class GCPClient {
       snapshot.docs.forEach(doc => {
         batch.update(doc.ref, {
           userId,
+          user_id: userId, // Also set user_id for compatibility
           isAnonymous: false,
           anonymousSessionId: null,
           migratedAt: new Date(),
