@@ -2331,7 +2331,7 @@ app.post('/api/forms/migrate-anonymous', async (req, res) => {
     console.log(`🔄 Migrating forms from ${tempUserId} to ${realUserId}`);
     
     const gcpClient = new GCPClient();
-    const result = await gcpClient.migrateAnonymousFormsToUser(tempUserId, realUserId);
+    const result = await gcpClient.migrateAnonymousForms(realUserId, tempUserId);
 
     res.json({
       success: true,

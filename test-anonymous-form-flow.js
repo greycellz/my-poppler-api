@@ -15,8 +15,12 @@ const axios = require('axios');
 
 // Configuration
 const RAILWAY_URL = process.env.NEXT_PUBLIC_RAILWAY_URL || 'https://my-poppler-api-dev.up.railway.app';
-const TEST_USER_EMAIL = `test_${Date.now()}@example.com`;
 const TEST_USER_PASSWORD = 'TestPassword123!';
+
+// Generate unique email for each test
+function generateTestEmail() {
+  return `test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}@example.com`;
+}
 
 // Test data
 const TEST_FORM_DATA = {
@@ -64,8 +68,14 @@ async function runTest(testName, testFunction) {
   try {
     await testFunction();
     logTest(testName, true);
+    
+    // Add delay between tests to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 1000));
   } catch (error) {
     logTest(testName, false, error);
+    
+    // Add delay even on failure
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
 
@@ -149,7 +159,7 @@ async function testAnonymousFormCreation() {
  */
 async function testUserSignup() {
   const signupData = {
-    email: TEST_USER_EMAIL,
+    email: generateTestEmail(),
     password: TEST_USER_PASSWORD,
     firstName: 'Test',
     lastName: 'User'
@@ -165,13 +175,24 @@ async function testUserSignup() {
     throw new Error('Expected success: true');
   }
   
-  if (!response.data.data || !response.data.data.userId) {
+  // Handle different response structures
+  let userId, token;
+  
+  if (response.data.data && response.data.data.userId) {
+    // New response structure
+    userId = response.data.data.userId;
+    token = response.data.data.token;
+  } else if (response.data.userId) {
+    // Alternative response structure
+    userId = response.data.userId;
+    token = response.data.token;
+  } else {
     throw new Error('Expected userId in response data');
   }
   
   return {
-    userId: response.data.data.userId,
-    token: response.data.data.token
+    userId,
+    token
   };
 }
 
