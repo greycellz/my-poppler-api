@@ -3821,6 +3821,111 @@ app.get('/api/calendly/bookings/:submissionId', async (req, res) => {
   }
 });
 
+// ============== ANONYMOUS FORM STORAGE ENDPOINT ==============
+
+/**
+ * Store anonymous form with full response data for migration
+ */
+app.post('/store-anonymous-form', async (req, res) => {
+  try {
+    const { formData, userId, metadata } = req.body;
+
+    if (!formData) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form data is required'
+      });
+    }
+
+    console.log('📝 Storing anonymous form structure in GCP...');
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Use the form ID from the form data, or generate a new one
+    const formId = formData.id || formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Store form structure
+    console.log(`📝 Attempting to store anonymous form in Firestore: ${formId}`);
+    console.log(`📝 Form data:`, JSON.stringify(formData, null, 2));
+    
+    const result = await gcpClient.storeFormStructure(
+      formId,
+      formData,
+      userId || 'anonymous',
+      {
+        ...metadata,
+        source: 'railway-backend-anonymous',
+        isHipaa: metadata?.isHipaa || false,
+        isPublished: metadata?.isPublished || false,
+        userAgent: req.get('User-Agent'),
+        ipAddress: req.ip || req.connection.remoteAddress
+      }
+    );
+
+    console.log(`✅ Anonymous form structure stored: ${formId}`);
+    console.log(`✅ Storage result:`, JSON.stringify(result, null, 2));
+
+    // Return the FULL response from GCP client for migration purposes
+    res.json({
+      success: true,
+      formId: result.formId,
+      userId: result.userId,
+      isAnonymous: result.isAnonymous,
+      anonymousSessionId: result.anonymousSessionId,
+      isUpdate: result.isUpdate,
+      message: 'Anonymous form structure stored successfully',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Anonymous form storage error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Anonymous form storage failed',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== ANONYMOUS SESSION ENDPOINT ==============
+
+/**
+ * Create anonymous session for anonymous users
+ */
+app.post('/api/auth/anonymous-session', async (req, res) => {
+  try {
+    console.log('🎯 Creating anonymous session...');
+    
+    // Generate a unique session ID
+    const sessionId = `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create anonymous session in Firestore
+    await gcpClient.createAnonymousSession(
+      sessionId,
+      req.get('User-Agent') || 'unknown',
+      req.ip || req.connection.remoteAddress || 'unknown'
+    );
+    
+    console.log(`✅ Anonymous session created: ${sessionId}`);
+    
+    res.json({
+      success: true,
+      sessionId,
+      message: 'Anonymous session created successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating anonymous session:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create anonymous session'
+    });
+  }
+});
+
 // ============== ONBOARDING API ENDPOINTS ==============
 
 /**

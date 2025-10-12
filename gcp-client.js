@@ -1964,6 +1964,10 @@ class GCPClient {
     try {
       console.log(`🎯 Initializing onboarding progress for user: ${userId}`);
       
+      // Check if user already has forms
+      const existingForms = await this.getFormsByUserId(userId);
+      console.log(`🔍 Found ${existingForms.length} existing forms for user: ${userId}`);
+      
       const onboardingProgress = {
         currentLevel: 1,
         completedTasks: [],
@@ -1973,6 +1977,25 @@ class GCPClient {
         startedAt: new Date()
       };
 
+      // If user already has forms, automatically complete the "create-form" task
+      if (existingForms.length > 0) {
+        console.log(`✅ User already has forms, auto-completing create-form task`);
+        onboardingProgress.completedTasks.push('create-form');
+        
+        // Add achievement for creating a form
+        onboardingProgress.achievements.push({
+          id: `create-form-${Date.now()}`,
+          level: 1,
+          task: 'create-form',
+          completedAt: new Date(),
+          reward: 'Form Creator Badge'
+        });
+        
+        // Recalculate progress (1 out of 20 tasks = 5%)
+        onboardingProgress.totalProgress = Math.round((1 / 20) * 100);
+        onboardingProgress.lastUpdated = new Date();
+      }
+
       await this.firestore
         .collection('users')
         .doc(userId)
@@ -1980,7 +2003,7 @@ class GCPClient {
           onboardingProgress
         }, { merge: true });
 
-      console.log(`✅ Onboarding progress initialized for user: ${userId}`);
+      console.log(`✅ Onboarding progress initialized for user: ${userId} with ${onboardingProgress.completedTasks.length} completed tasks`);
       return onboardingProgress;
     } catch (error) {
       console.error(`❌ Failed to initialize onboarding progress for user: ${userId}`, error);
