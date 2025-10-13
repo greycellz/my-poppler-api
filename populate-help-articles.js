@@ -41,24 +41,26 @@ const helpArticles = {
       'Keep the form URL for sharing',
       'You can republish anytime to update changes'
     ],
-    related: ['submit-form', 'republish']
+    related: ['submit-and-check-submissions', 'republish']
   },
 
-  'submit-form': {
-    title: 'Testing Your Form',
-    content: 'Test your published form to ensure it works correctly.',
+  'submit-and-check-submissions': {
+    title: 'Submit Form and Check Submissions',
+    content: 'Test your published form and view the submission data in your workspace.',
     steps: [
       'Open your published form in a new tab',
-      'Fill out all the required fields',
-      'Submit the form',
-      'Check that the submission was received'
+      'Fill out all the required fields and submit',
+      'Go to your workspace dashboard',
+      'Click on your form to view submissions',
+      'Review the submitted data and analytics'
     ],
     tips: [
       'Test with different types of data',
-      'Try submitting with missing required fields',
-      'Verify all field types work correctly'
+      'Check submission timestamps and user info',
+      'Use the analytics to understand form performance',
+      'Export submission data if needed'
     ],
-    related: ['publish-form', 'check-submissions']
+    related: ['publish-form', 'go-to-workspace']
   },
 
   'add-delete-fields': {

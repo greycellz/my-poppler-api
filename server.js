@@ -869,6 +869,10 @@ app.post('/store-form', async (req, res) => {
     res.json({
       success: true,
       formId,
+      userId: userId || 'anonymous',
+      isAnonymous: !userId || userId === 'anonymous',
+      isUpdate: metadata?.isEdit || false,
+      isLLMUpdate: metadata?.isLLMUpdate || false,
       message: 'Form structure stored successfully',
       timestamp: new Date().toISOString()
     });

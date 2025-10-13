@@ -479,6 +479,40 @@ class GCPClient {
           });
           
           console.log(`📊 Form submission count updated: ${formId} (${newSubmissionCount} total)`);
+          
+          // Check if this is the first submission for onboarding
+          if (newSubmissionCount === 1) {
+            console.log(`🎯 First submission detected for form: ${formId}`);
+            
+            // Get form owner to update their onboarding progress
+            const formOwnerId = formData.user_id;
+            if (formOwnerId && formOwnerId !== 'anonymous') {
+              try {
+                console.log(`🎯 Updating onboarding progress for first submission: ${formOwnerId}`);
+                
+                // Update onboarding progress for first submission
+                await this.updateOnboardingProgress(
+                  formOwnerId,
+                  'submit-and-check-submissions',
+                  'Submit form and check submissions',
+                  4,
+                  '📝 First submission received!'
+                );
+                
+                // Update user flags to mark first submission found
+                await this.updateUserOnboardingFlags(formOwnerId, {
+                  isFirstSubmissionFound: true
+                });
+                
+                console.log(`✅ Onboarding progress updated for first submission: ${formOwnerId}`);
+              } catch (onboardingError) {
+                console.error(`❌ Failed to update onboarding progress for first submission: ${formOwnerId}`, onboardingError);
+                // Don't fail the submission if onboarding update fails
+              }
+            } else {
+              console.log(`🔍 Skipping onboarding update for anonymous form: ${formId}`);
+            }
+          }
         }
       } catch (error) {
         console.warn(`⚠️ Could not update form submission count for ${formId}:`, error.message);
@@ -2093,10 +2127,10 @@ class GCPClient {
 
       // Check if user should level up
       const tasksPerLevel = {
-        1: ['chat-with-ai', 'publish-form', 'submit-form'],
-        2: ['add-delete-fields', 'global-settings', 'change-field-names', 'upload-logo', 'republish'],
+        1: ['create-form', 'publish-form'],
+        2: ['ai-modify-fields', 'global-settings', 'change-field-names', 'upload-logo', 'republish'],
         3: ['customize-fields', 'move-fields', 'add-fields-preview', 'delete-fields-preview'],
-        4: ['go-to-workspace', 'check-submissions', 'clone-form', 'delete-form'],
+        4: ['go-to-workspace', 'submit-and-check-submissions', 'clone-form', 'delete-form'],
         5: ['setup-calendly', 'setup-esignature', 'setup-stripe', 'setup-hipaa']
       };
 
