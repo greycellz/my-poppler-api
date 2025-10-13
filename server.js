@@ -837,6 +837,7 @@ app.post('/store-form', async (req, res) => {
     }
 
     console.log('📝 Storing form structure in GCP...');
+    console.log('🔍 Received metadata:', JSON.stringify(metadata, null, 2));
     
     // Initialize GCP client
     const GCPClient = require('./gcp-client');
@@ -866,7 +867,7 @@ app.post('/store-form', async (req, res) => {
     console.log(`✅ Form structure stored: ${formId}`);
     console.log(`✅ Storage result:`, JSON.stringify(result, null, 2));
 
-    res.json({
+    const responseData = {
       success: true,
       formId,
       userId: userId || 'anonymous',
@@ -875,7 +876,10 @@ app.post('/store-form', async (req, res) => {
       isLLMUpdate: metadata?.isLLMUpdate || false,
       message: 'Form structure stored successfully',
       timestamp: new Date().toISOString()
-    });
+    };
+    
+    console.log('🔍 Sending response:', JSON.stringify(responseData, null, 2));
+    res.json(responseData);
 
   } catch (error) {
     console.error('❌ Form storage error:', error);
