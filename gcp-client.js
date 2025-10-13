@@ -2139,8 +2139,8 @@ class GCPClient {
         progress.completedTasks.includes(task)
       );
 
-      // Level up if user completed at least one task in current level
-      if (completedInCurrentLevel.length > 0 && progress.currentLevel < 5) {
+      // Level up if user completed ALL tasks in current level
+      if (completedInCurrentLevel.length === currentLevelTasks.length && progress.currentLevel < 5) {
         progress.currentLevel = Math.min(progress.currentLevel + 1, 5);
         console.log(`🎉 User ${userId} leveled up to level ${progress.currentLevel}!`);
       }
