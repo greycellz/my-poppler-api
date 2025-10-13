@@ -2096,13 +2096,36 @@ class GCPClient {
       // Cap at level 5
       correctLevel = Math.min(correctLevel, 5);
       
+      // Check if onboarding should be marked as completed
+      const allTasks = Object.values(tasksPerLevel).flat();
+      const allTasksCompleted = allTasks.every(taskId => progress.completedTasks.includes(taskId));
+      
       const oldLevel = progress.currentLevel;
       
+      // Check if we need to update completion status
+      let needsUpdate = false;
+      
       if (oldLevel !== correctLevel) {
-        console.log(`🔧 Correcting level from ${oldLevel} to ${correctLevel} for user: ${userId}`);
-        
-        // Update the level
         progress.currentLevel = correctLevel;
+        needsUpdate = true;
+        console.log(`🔧 Correcting level from ${oldLevel} to ${correctLevel} for user: ${userId}`);
+      }
+      
+      // Remove completedAt if not all tasks are completed
+      if (progress.completedAt && !allTasksCompleted) {
+        delete progress.completedAt;
+        needsUpdate = true;
+        console.log(`🔧 Removed incorrect completedAt flag for user ${userId}`);
+      }
+      
+      // Add completedAt if all tasks are completed but flag is missing
+      if (!progress.completedAt && allTasksCompleted) {
+        progress.completedAt = new Date();
+        needsUpdate = true;
+        console.log(`🔧 Added completedAt flag for user ${userId} - all tasks completed`);
+      }
+      
+      if (needsUpdate) {
         progress.lastUpdated = new Date();
         
         // Recalculate total progress
@@ -2114,16 +2137,17 @@ class GCPClient {
           onboardingProgress: progress
         });
         
-        console.log(`✅ Onboarding level corrected for user: ${userId} from ${oldLevel} to ${correctLevel}`);
+        console.log(`✅ Onboarding corrected for user: ${userId} - level: ${correctLevel}, completed: ${allTasksCompleted}`);
         
         return {
           success: true,
           oldLevel,
           newLevel: correctLevel,
-          message: `Level corrected from ${oldLevel} to ${correctLevel}`
+          isCompleted: allTasksCompleted,
+          message: `Level corrected from ${oldLevel} to ${correctLevel}, completion status: ${allTasksCompleted}`
         };
       } else {
-        console.log(`✅ Level already correct (${correctLevel}) for user: ${userId}`);
+        console.log(`✅ Onboarding already correct for user: ${userId} - level: ${correctLevel}, completed: ${allTasksCompleted}`);
         return {
           success: true,
           oldLevel,
@@ -2241,10 +2265,14 @@ class GCPClient {
       const totalTasks = Object.values(tasksPerLevel).flat().length;
       progress.totalProgress = Math.round((progress.completedTasks.length / totalTasks) * 100);
 
-      // Mark as completed if all levels done
-      if (progress.currentLevel === 5 && progress.totalProgress >= 100) {
+      // Mark as completed if all tasks in all levels are done
+      const allTasks = Object.values(tasksPerLevel).flat();
+      const allTaskIds = allTasks.map(task => task.id);
+      const allTasksCompleted = allTaskIds.every(taskId => progress.completedTasks.includes(taskId));
+      
+      if (allTasksCompleted) {
         progress.completedAt = new Date();
-        console.log(`🏆 User ${userId} completed all onboarding levels!`);
+        console.log(`🏆 User ${userId} completed all onboarding levels! All ${allTasks.length} tasks completed.`);
       }
 
       progress.lastUpdated = new Date();
