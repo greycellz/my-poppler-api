@@ -4120,6 +4120,38 @@ app.get('/api/onboarding/analytics/:userId', async (req, res) => {
 });
 
 /**
+ * Correct user's onboarding level based on actual completed tasks
+ */
+app.post('/api/onboarding/correct-level', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    console.log(`🔧 Correcting onboarding level for user: ${userId}`);
+    
+    const result = await gcpClient.correctOnboardingLevel(userId);
+    
+    res.json({
+      success: true,
+      ...result
+    });
+
+  } catch (error) {
+    console.error('❌ Error correcting onboarding level:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to correct onboarding level'
+    });
+  }
+});
+
+/**
  * Log onboarding event (for analytics)
  */
 app.post('/api/onboarding/log-event', async (req, res) => {

@@ -2046,6 +2046,98 @@ class GCPClient {
   }
 
   /**
+   * Correct user's onboarding level based on actual completed tasks
+   */
+  async correctOnboardingLevel(userId) {
+    try {
+      console.log(`🔧 Correcting onboarding level for user: ${userId}`);
+      
+      const userRef = this.firestore.collection('users').doc(userId);
+      const userDoc = await userRef.get();
+      
+      if (!userDoc.exists) {
+        throw new Error(`User ${userId} not found`);
+      }
+      
+      const userData = userDoc.data();
+      const progress = userData.onboardingProgress;
+      
+      if (!progress) {
+        console.log(`ℹ️ No onboarding progress found for user: ${userId}`);
+        return { success: true, message: 'No onboarding progress to correct' };
+      }
+      
+      // Define tasks per level
+      const tasksPerLevel = {
+        1: ['create-form', 'publish-form'],
+        2: ['ai-modify-fields', 'global-settings', 'change-field-names', 'upload-logo', 'republish'],
+        3: ['customize-fields', 'move-fields', 'add-fields-preview', 'delete-fields-preview'],
+        4: ['go-to-workspace', 'submit-and-check-submissions', 'clone-form', 'delete-form'],
+        5: ['setup-calendly', 'setup-esignature', 'setup-stripe', 'setup-hipaa']
+      };
+      
+      // Calculate correct level based on completed tasks
+      let correctLevel = 1;
+      for (let level = 1; level <= 5; level++) {
+        const levelTasks = tasksPerLevel[level];
+        const completedInLevel = levelTasks.filter(task => 
+          progress.completedTasks.includes(task)
+        );
+        
+        // If all tasks in this level are completed, user can be at next level
+        if (completedInLevel.length === levelTasks.length) {
+          correctLevel = level + 1;
+        } else {
+          // If not all tasks completed, user should stay at this level
+          break;
+        }
+      }
+      
+      // Cap at level 5
+      correctLevel = Math.min(correctLevel, 5);
+      
+      const oldLevel = progress.currentLevel;
+      
+      if (oldLevel !== correctLevel) {
+        console.log(`🔧 Correcting level from ${oldLevel} to ${correctLevel} for user: ${userId}`);
+        
+        // Update the level
+        progress.currentLevel = correctLevel;
+        progress.lastUpdated = new Date();
+        
+        // Recalculate total progress
+        const totalTasks = Object.values(tasksPerLevel).flat().length;
+        progress.totalProgress = Math.round((progress.completedTasks.length / totalTasks) * 100);
+        
+        // Save corrected progress
+        await userRef.update({
+          onboardingProgress: progress
+        });
+        
+        console.log(`✅ Onboarding level corrected for user: ${userId} from ${oldLevel} to ${correctLevel}`);
+        
+        return {
+          success: true,
+          oldLevel,
+          newLevel: correctLevel,
+          message: `Level corrected from ${oldLevel} to ${correctLevel}`
+        };
+      } else {
+        console.log(`✅ Level already correct (${correctLevel}) for user: ${userId}`);
+        return {
+          success: true,
+          oldLevel,
+          newLevel: correctLevel,
+          message: 'Level was already correct'
+        };
+      }
+    } catch (error) {
+      console.error(`❌ Failed to correct onboarding level for user: ${userId}`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Get user's onboarding progress
    */
   async getOnboardingProgress(userId) {
