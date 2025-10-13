@@ -2169,6 +2169,47 @@ class GCPClient {
   }
 
   /**
+   * Update user onboarding flags
+   */
+  async updateUserOnboardingFlags(userId, flags) {
+    try {
+      console.log(`🏁 Updating onboarding flags for user: ${userId}`, flags);
+      
+      const userRef = this.firestore.collection('users').doc(userId);
+      const userDoc = await userRef.get();
+      
+      if (!userDoc.exists) {
+        throw new Error(`User ${userId} not found`);
+      }
+      
+      const currentData = userDoc.data();
+      const currentFlags = currentData.onboardingFlags || {};
+      
+      // Merge new flags with existing flags
+      const updatedFlags = {
+        ...currentFlags,
+        ...flags
+      };
+      
+      // Update user document with new flags
+      await userRef.update({
+        onboardingFlags: updatedFlags,
+        updatedAt: new Date()
+      });
+      
+      console.log(`✅ Onboarding flags updated for user: ${userId}`, updatedFlags);
+      
+      return {
+        success: true,
+        flags: updatedFlags
+      };
+    } catch (error) {
+      console.error(`❌ Failed to update onboarding flags for user: ${userId}`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Get help article by task ID
    */
   async getHelpArticle(taskId) {

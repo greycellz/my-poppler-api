@@ -116,8 +116,8 @@ async function verifyFormMigration(formId, anonymousSessionId, userId) {
   // 1. Verify form details show correct ownership
   const formDetails = await getFormDetails(formId);
   
-  if (formDetails.userId !== userId) {
-    throw new Error(`Form userId mismatch: expected ${userId}, got ${formDetails.userId}`);
+  if (formDetails.user_id !== userId) {
+    throw new Error(`Form user_id mismatch: expected ${userId}, got ${formDetails.user_id}`);
   }
   
   if (formDetails.isAnonymous !== false) {
@@ -132,7 +132,7 @@ async function verifyFormMigration(formId, anonymousSessionId, userId) {
     throw new Error('Form should have migratedAt timestamp');
   }
   
-  console.log(`✅ Form details verified: userId=${formDetails.userId}, isAnonymous=${formDetails.isAnonymous}`);
+  console.log(`✅ Form details verified: user_id=${formDetails.user_id}, isAnonymous=${formDetails.isAnonymous}`);
   
   // 2. Verify form appears in user's form list
   const userForms = await getUserForms(userId);
@@ -185,13 +185,14 @@ async function testRobustMigration() {
     
     console.log('🔍 Initial form details:', {
       userId: initialFormDetails.userId,
+      user_id: initialFormDetails.user_id,
       isAnonymous: initialFormDetails.isAnonymous,
       anonymousSessionId: initialFormDetails.anonymousSessionId,
       expectedUserId: `temp_${anonymousSessionId}`
     });
     
-    if (initialFormDetails.userId !== `temp_${anonymousSessionId}`) {
-      throw new Error(`Initial form userId incorrect: expected temp_${anonymousSessionId}, got ${initialFormDetails.userId}`);
+    if (initialFormDetails.user_id !== `temp_${anonymousSessionId}`) {
+      throw new Error(`Initial form user_id incorrect: expected temp_${anonymousSessionId}, got ${initialFormDetails.user_id}`);
     }
     
     if (initialFormDetails.isAnonymous !== true) {
@@ -237,7 +238,7 @@ async function testRobustMigration() {
     const finalFormDetails = await getFormDetails(formId);
     
     const validationChecks = [
-      { name: 'Form belongs to user', check: finalFormDetails.userId === userId },
+      { name: 'Form belongs to user', check: finalFormDetails.user_id === userId },
       { name: 'Form is not anonymous', check: finalFormDetails.isAnonymous === false },
       { name: 'Anonymous session cleared', check: finalFormDetails.anonymousSessionId === null },
       { name: 'Migration timestamp set', check: !!finalFormDetails.migratedAt },
@@ -258,7 +259,7 @@ async function testRobustMigration() {
     console.log(`   - Anonymous Session: ${anonymousSessionId}`);
     console.log(`   - User ID: ${userId}`);
     console.log(`   - Migration Result: ${migrationResult.migratedForms} forms migrated`);
-    console.log(`   - Final Form State: userId=${finalFormDetails.userId}, isAnonymous=${finalFormDetails.isAnonymous}`);
+    console.log(`   - Final Form State: user_id=${finalFormDetails.user_id}, isAnonymous=${finalFormDetails.isAnonymous}`);
     console.log(`   - User Form Count: ${userForms.length}`);
     
     return {

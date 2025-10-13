@@ -4143,6 +4143,38 @@ app.post('/api/onboarding/log-event', async (req, res) => {
   }
 });
 
+/**
+ * Update user onboarding flags
+ */
+app.post('/api/user/update-onboarding-flags', async (req, res) => {
+  try {
+    const { userId, flags } = req.body;
+    
+    if (!userId || !flags) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and flags are required'
+      });
+    }
+
+    console.log(`🏁 Updating onboarding flags for user: ${userId}`, flags);
+    
+    const result = await gcpClient.updateUserOnboardingFlags(userId, flags);
+    
+    res.json({
+      success: true,
+      ...result
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating user onboarding flags:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update user onboarding flags'
+    });
+  }
+});
+
 // ============== SERVER STARTUP ==============
 
 app.listen(PORT, () => {
