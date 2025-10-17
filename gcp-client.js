@@ -3492,6 +3492,120 @@ class GCPClient {
       throw error;
     }
   }
+
+  /**
+   * Store form image metadata in Firestore
+   */
+  async storeFormImageMetadata(imageData) {
+    try {
+      console.log(`🖼️ Storing form image metadata: ${imageData.id}`);
+      
+      const imageRef = this.firestore.collection('form_images').doc(imageData.id);
+      await imageRef.set(imageData);
+      
+      console.log(`✅ Form image metadata stored: ${imageData.id}`);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error storing form image metadata:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get form images from Firestore
+   */
+  async getFormImages(formId, fieldId) {
+    try {
+      console.log(`🖼️ Getting form images for form: ${formId}, field: ${fieldId}`);
+      
+      const imagesSnapshot = await this.firestore
+        .collection('form_images')
+        .where('formId', '==', formId)
+        .where('fieldId', '==', fieldId)
+        .get();
+      
+      const images = [];
+      imagesSnapshot.forEach(doc => {
+        const data = doc.data();
+        // Filter active images in memory
+        if (data.isActive !== false && data.type === 'form_image') {
+          // Use backend proxy URL to avoid CORS issues
+          const rawBase = process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app';
+          const baseUrl = rawBase.startsWith('http') ? rawBase : `https://${rawBase}`;
+          const backendUrl = `${baseUrl}/api/files/form-image/${formId}/${fieldId}/${data.id}`;
+          images.push({
+            id: data.id,
+            url: backendUrl,
+            fileName: data.fileName,
+            fileSize: data.fileSize,
+            fileType: data.fileType,
+            position: 'center', // Default position
+            height: 200, // Default height
+            uploadedAt: data.uploadedAt
+          });
+        }
+      });
+      
+      // Sort by uploadedAt in memory
+      images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+      
+      console.log(`✅ Found ${images.length} form images for form: ${formId}, field: ${fieldId}`);
+      return images;
+    } catch (error) {
+      console.error('❌ Error getting form images:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete form image from GCP and Firestore
+   */
+  async deleteFormImage(imageId, userId) {
+    try {
+      console.log(`🗑️ Deleting form image: ${imageId} for user: ${userId}`);
+      
+      // First, get the image metadata to find the GCP file path
+      const imageRef = this.firestore.collection('form_images').doc(imageId);
+      const imageDoc = await imageRef.get();
+      
+      if (!imageDoc.exists) {
+        return { success: false, error: 'Form image not found' };
+      }
+      
+      const imageData = imageDoc.data();
+      
+      // Verify the image belongs to the user
+      if (imageData.userId !== userId) {
+        return { success: false, error: 'Unauthorized: Image does not belong to user' };
+      }
+      
+      // Delete from GCP Storage if gcpUrl exists
+      if (imageData.gcpUrl && imageData.gcpUrl.startsWith('gs://')) {
+        const bucketName = imageData.gcpUrl.split('/')[2];
+        const fileName = imageData.gcpUrl.split('/').slice(3).join('/');
+        
+        const bucket = this.storage.bucket(bucketName);
+        const file = bucket.file(fileName);
+        
+        try {
+          await file.delete();
+          console.log(`✅ Deleted form image file from GCP: ${fileName}`);
+        } catch (gcpError) {
+          console.warn(`⚠️ Could not delete form image file from GCP: ${gcpError.message}`);
+          // Continue with Firestore deletion even if GCP deletion fails
+        }
+      }
+      
+      // Delete from Firestore
+      await imageRef.delete();
+      console.log(`✅ Deleted form image metadata from Firestore: ${imageId}`);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error deleting form image:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = GCPClient;

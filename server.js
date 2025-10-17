@@ -1613,6 +1613,187 @@ app.delete('/admin/delete-all-logos/:userId', async (req, res) => {
   }
 })
 
+// ============== FORM IMAGE ENDPOINTS ==============
+
+// Upload form image endpoint
+app.post('/upload-form-image', upload.single('file'), async (req, res) => {
+  try {
+    const { formId, fieldId, userId } = req.body
+    const file = req.file
+    
+    if (!file || !formId || !fieldId || !userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: file, formId, fieldId, or userId'
+      })
+    }
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
+    if (!allowedTypes.includes(file.mimetype)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid file type. Only JPG, PNG, GIF, and WebP images are allowed.'
+      })
+    }
+
+    console.log(`🖼️ Form image upload request: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)}MB) for form: ${formId}, field: ${fieldId}, user: ${userId}`)
+
+    // Check image limit (10 images maximum per field)
+    const existingImages = await gcpClient.getFormImages(formId, fieldId)
+    if (existingImages.length >= 10) {
+      return res.status(400).json({
+        success: false,
+        error: 'Maximum of 10 images allowed per field. Please delete an existing image before uploading a new one.'
+      })
+    }
+
+    // Generate unique filename with form and field context
+    const timestamp = Date.now()
+    const fileExtension = path.extname(file.originalname)
+    const imageId = `img_${timestamp}_${crypto.randomBytes(8).toString('hex')}`
+    const fileName = `${formId}/${fieldId}/${imageId}${fileExtension}`
+    
+    // Upload to GCP Cloud Storage
+    const uploadResult = await gcpClient.uploadFile(
+      file.path, 
+      `form-images/${fileName}`,
+      'chatterforms-uploads-us-central1'
+    )
+
+    // Clean up local file
+    if (fs.existsSync(file.path)) {
+      fs.unlinkSync(file.path)
+      console.log(`🧹 Cleaned up local file: ${file.path}`)
+    }
+
+    // Store image metadata in Firestore
+    const imageData = {
+      id: imageId,
+      formId: formId,
+      fieldId: fieldId,
+      userId: userId,
+      fileName: file.originalname,
+      fileSize: file.size,
+      fileType: file.mimetype,
+      gcpUrl: uploadResult.url,
+      publicUrl: uploadResult.publicUrl,
+      uploadedAt: new Date().toISOString(),
+      isActive: true,
+      type: 'form_image' // Tag to distinguish from logos
+    }
+
+    await gcpClient.storeFormImageMetadata(imageData)
+
+    console.log(`✅ Form image uploaded successfully: ${imageId}`)
+    console.log(`🔗 GCP URL: ${uploadResult.publicUrl}`)
+    
+    // Use backend proxy URL to avoid CORS issues
+    const rawBase = process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app';
+    const baseUrl = rawBase.startsWith('http') ? rawBase : `https://${rawBase}`;
+    const backendUrl = `${baseUrl}/api/files/form-image/${formId}/${fieldId}/${imageId}`;
+
+    res.json({
+      success: true,
+      image: {
+        id: imageId,
+        url: backendUrl,
+        fileName: file.originalname,
+        fileSize: file.size,
+        fileType: file.mimetype,
+        position: 'center',
+        height: 200,
+        uploadedAt: imageData.uploadedAt
+      }
+    })
+
+  } catch (error) {
+    console.error('❌ Form image upload error:', error)
+    
+    // Clean up local file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path)
+      console.log(`🧹 Cleaned up local file after error: ${req.file.path}`)
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Form image upload failed',
+      details: error.message
+    })
+  }
+})
+
+// Get form images endpoint
+app.get('/form-images/:formId/:fieldId', async (req, res) => {
+  try {
+    const { formId, fieldId } = req.params
+    
+    if (!formId || !fieldId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID and Field ID are required'
+      })
+    }
+
+    console.log(`🖼️ Getting form images for form: ${formId}, field: ${fieldId}`)
+
+    const images = await gcpClient.getFormImages(formId, fieldId)
+
+    res.json({
+      success: true,
+      images: images
+    })
+
+  } catch (error) {
+    console.error('❌ Error getting form images:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get form images',
+      details: error.message
+    })
+  }
+})
+
+// Delete form image endpoint
+app.delete('/form-image/:imageId', async (req, res) => {
+  try {
+    const { imageId } = req.params
+    const { userId } = req.body
+    
+    if (!imageId || !userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Image ID and User ID are required'
+      })
+    }
+
+    console.log(`🗑️ Deleting form image: ${imageId} for user: ${userId}`)
+
+    const result = await gcpClient.deleteFormImage(imageId, userId)
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Form image deleted successfully'
+      })
+    } else {
+      res.status(404).json({
+        success: false,
+        error: result.error || 'Form image not found'
+      })
+    }
+
+  } catch (error) {
+    console.error('❌ Error deleting form image:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete form image',
+      details: error.message
+    })
+  }
+})
+
 // ============== FILE SERVING ENDPOINTS ==============
 
 // Serve logo files through backend to avoid CORS issues
@@ -1693,6 +1874,89 @@ app.get('/api/files/logo/:userId/:logoId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to serve logo file',
+      details: error.message
+    })
+  }
+})
+
+// Serve form image files through backend to avoid CORS issues
+app.get('/api/files/form-image/:formId/:fieldId/:imageId', async (req, res) => {
+  try {
+    const { formId, fieldId, imageId } = req.params
+    
+    if (!formId || !fieldId || !imageId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID, Field ID, and Image ID are required'
+      })
+    }
+
+    console.log(`🖼️ Serving form image file: ${imageId} for form: ${formId}, field: ${fieldId}`)
+
+    // Get image metadata from Firestore
+    const imageRef = gcpClient.firestore.collection('form_images').doc(imageId)
+    const imageDoc = await imageRef.get()
+    
+    if (!imageDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form image not found'
+      })
+    }
+    
+    const imageData = imageDoc.data()
+    
+    // Verify the image belongs to the form and field
+    if (imageData.formId !== formId || imageData.fieldId !== fieldId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized: Image does not belong to this form/field'
+      })
+    }
+    
+    // Get the file from GCP Storage
+    const gcpUrl = imageData.gcpUrl
+    if (gcpUrl && gcpUrl.startsWith('gs://')) {
+      const bucketName = gcpUrl.split('/')[2]
+      const fileName = gcpUrl.split('/').slice(3).join('/')
+      
+      const bucket = gcpClient.storage.bucket(bucketName)
+      const file = bucket.file(fileName)
+      
+      // Check if file exists
+      const [exists] = await file.exists()
+      if (!exists) {
+        return res.status(404).json({
+          success: false,
+          error: 'Form image file not found in storage'
+        })
+      }
+      
+      // Set appropriate headers
+      res.set({
+        'Content-Type': imageData.fileType || 'image/png',
+        'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
+        'Access-Control-Allow-Origin': '*', // Allow CORS
+        'Access-Control-Allow-Methods': 'GET',
+        'Access-Control-Allow-Headers': 'Content-Type'
+      })
+      
+      // Stream the file
+      file.createReadStream().pipe(res)
+      
+      console.log(`✅ Form image file served: ${fileName}`)
+    } else {
+      return res.status(404).json({
+        success: false,
+        error: 'Invalid form image file path'
+      })
+    }
+
+  } catch (error) {
+    console.error('❌ Error serving form image file:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to serve form image file',
       details: error.message
     })
   }
