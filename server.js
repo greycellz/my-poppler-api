@@ -1648,6 +1648,9 @@ app.post('/upload-form-image', upload.single('file'), async (req, res) => {
       })
     }
 
+    // Get the next sequence number for this field
+    const nextSequence = existingImages.length
+
     // Generate unique filename with form and field context
     const timestamp = Date.now()
     const fileExtension = path.extname(file.originalname)
@@ -1666,10 +1669,6 @@ app.post('/upload-form-image', upload.single('file'), async (req, res) => {
       fs.unlinkSync(file.path)
       console.log(`🧹 Cleaned up local file: ${file.path}`)
     }
-
-    // Get the next sequence number for this field
-    const existingImages = await gcpClient.getFormImages(formId, fieldId)
-    const nextSequence = existingImages.length
 
     // Store image metadata in Firestore
     const imageData = {
