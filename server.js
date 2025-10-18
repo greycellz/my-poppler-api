@@ -1815,6 +1815,25 @@ app.put('/form-images/:formId/:fieldId/sequence', async (req, res) => {
     console.log(`🔄 Updating image sequence for form: ${formId}, field: ${fieldId}`)
     console.log('🔄 Images to update:', images.map(img => ({ id: img.id, fileName: img.fileName, sequence: img.sequence })))
 
+    // Validate that all image IDs exist in Firestore before updating
+    console.log('🔍 Validating image IDs exist in database...')
+    const validationPromises = images.map(async (image) => {
+      try {
+        const doc = await gcpClient.firestore.collection('form_images').doc(image.id).get()
+        if (!doc.exists) {
+          throw new Error(`Image ${image.id} not found in database`)
+        }
+        console.log(`✅ Image ${image.id} validated`)
+        return true
+      } catch (error) {
+        console.error(`❌ Validation failed for image ${image.id}:`, error.message)
+        throw error
+      }
+    })
+    
+    await Promise.all(validationPromises)
+    console.log('✅ All image IDs validated successfully')
+
     // Update sequence for each image using the provided sequence number
     const updatePromises = images.map((image) => 
       gcpClient.updateImageSequence(image.id, image.sequence)
