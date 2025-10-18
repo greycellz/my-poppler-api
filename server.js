@@ -1667,6 +1667,10 @@ app.post('/upload-form-image', upload.single('file'), async (req, res) => {
       console.log(`🧹 Cleaned up local file: ${file.path}`)
     }
 
+    // Get the next sequence number for this field
+    const existingImages = await gcpClient.getFormImages(formId, fieldId)
+    const nextSequence = existingImages.length
+
     // Store image metadata in Firestore
     const imageData = {
       id: imageId,
@@ -1679,6 +1683,7 @@ app.post('/upload-form-image', upload.single('file'), async (req, res) => {
       gcpUrl: uploadResult.url,
       publicUrl: uploadResult.publicUrl,
       uploadedAt: new Date().toISOString(),
+      sequence: nextSequence,
       isActive: true,
       type: 'form_image' // Tag to distinguish from logos
     }
@@ -1703,6 +1708,7 @@ app.post('/upload-form-image', upload.single('file'), async (req, res) => {
         fileType: file.mimetype,
         position: 'center',
         height: 200,
+        sequence: nextSequence,
         uploadedAt: imageData.uploadedAt
       }
     })
@@ -1789,6 +1795,43 @@ app.delete('/form-image/:imageId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to delete form image',
+      details: error.message
+    })
+  }
+})
+
+// Update image sequence endpoint
+app.put('/form-images/:formId/:fieldId/sequence', async (req, res) => {
+  try {
+    const { formId, fieldId } = req.params
+    const { images } = req.body
+    
+    if (!formId || !fieldId || !images || !Array.isArray(images)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID, Field ID, and images array are required'
+      })
+    }
+
+    console.log(`🔄 Updating image sequence for form: ${formId}, field: ${fieldId}`)
+
+    // Update sequence for each image
+    const updatePromises = images.map((image, index) => 
+      gcpClient.updateImageSequence(image.id, index)
+    )
+
+    await Promise.all(updatePromises)
+
+    res.json({
+      success: true,
+      message: 'Image sequence updated successfully'
+    })
+
+  } catch (error) {
+    console.error('❌ Error updating image sequence:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update image sequence',
       details: error.message
     })
   }

@@ -3606,6 +3606,24 @@ class GCPClient {
       throw error;
     }
   }
+
+  async updateImageSequence(imageId, sequence) {
+    try {
+      console.log(`🔄 Updating image sequence: ${imageId} to sequence ${sequence}`);
+      
+      const imageRef = this.firestore.collection('form_images').doc(imageId);
+      await imageRef.update({
+        sequence: sequence,
+        updatedAt: new Date().toISOString()
+      });
+      
+      console.log(`✅ Updated image sequence: ${imageId} to ${sequence}`);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error updating image sequence:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = GCPClient;
