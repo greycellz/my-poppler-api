@@ -1813,10 +1813,11 @@ app.put('/form-images/:formId/:fieldId/sequence', async (req, res) => {
     }
 
     console.log(`🔄 Updating image sequence for form: ${formId}, field: ${fieldId}`)
+    console.log('🔄 Images to update:', images.map(img => ({ id: img.id, fileName: img.fileName, sequence: img.sequence })))
 
-    // Update sequence for each image
-    const updatePromises = images.map((image, index) => 
-      gcpClient.updateImageSequence(image.id, index)
+    // Update sequence for each image using the provided sequence number
+    const updatePromises = images.map((image) => 
+      gcpClient.updateImageSequence(image.id, image.sequence)
     )
 
     await Promise.all(updatePromises)
