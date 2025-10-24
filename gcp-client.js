@@ -417,6 +417,52 @@ class GCPClient {
         }
       });
 
+      // Validate new field types (richtext, number, rating)
+      const validationErrors = [];
+      Object.keys(processedFormData).forEach(fieldId => {
+        const fieldData = processedFormData[fieldId];
+        if (fieldData && typeof fieldData === 'object' && fieldData.type) {
+          const fieldType = fieldData.type;
+          const value = fieldData.value;
+
+          // Number field validation
+          if (fieldType === 'number' && value !== undefined && value !== null && value !== '') {
+            const numValue = Number(value);
+            if (isNaN(numValue)) {
+              validationErrors.push(`${fieldId}: must be a valid number`);
+            } else {
+              // Check min/max constraints if they exist
+              if (fieldData.min !== undefined && numValue < fieldData.min) {
+                validationErrors.push(`${fieldId}: must be at least ${fieldData.min}`);
+              }
+              if (fieldData.max !== undefined && numValue > fieldData.max) {
+                validationErrors.push(`${fieldId}: must be at most ${fieldData.max}`);
+              }
+            }
+          }
+
+          // Rating field validation
+          if (fieldType === 'rating' && value !== undefined && value !== null && value !== '') {
+            const ratingValue = Number(value);
+            if (isNaN(ratingValue)) {
+              validationErrors.push(`${fieldId}: must be a valid number`);
+            } else {
+              const maxRating = fieldData.max || 5;
+              if (ratingValue < 0 || ratingValue > maxRating) {
+                validationErrors.push(`${fieldId}: must be between 0 and ${maxRating}`);
+              }
+            }
+          }
+
+          // Rich text field - no validation needed (read-only display field)
+        }
+      });
+
+      if (validationErrors.length > 0) {
+        console.error('❌ Form validation errors:', validationErrors);
+        throw new Error(`Form validation failed: ${validationErrors.join(', ')}`);
+      }
+
       // Diagnostics: measure Firestore payload size/shape before write
       let diagnostics = { keysCount: 0, bytes: 0 };
       try {
