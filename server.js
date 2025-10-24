@@ -1618,7 +1618,7 @@ app.delete('/admin/delete-all-logos/:userId', async (req, res) => {
 // Upload form image endpoint
 app.post('/upload-form-image', upload.single('file'), async (req, res) => {
   try {
-    const { formId, fieldId, userId } = req.body
+    const { formId, fieldId, userId, sequence } = req.body
     const file = req.file
     
     if (!file || !formId || !fieldId || !userId) {
@@ -1637,7 +1637,7 @@ app.post('/upload-form-image', upload.single('file'), async (req, res) => {
       })
     }
 
-    console.log(`🖼️ Form image upload request: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)}MB) for form: ${formId}, field: ${fieldId}, user: ${userId}`)
+    console.log(`🖼️ Form image upload request: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)}MB) for form: ${formId}, field: ${fieldId}, user: ${userId}, sequence: ${sequence}`)
 
     // Check image limit (10 images maximum per field)
     const existingImages = await gcpClient.getFormImages(formId, fieldId)
@@ -1648,8 +1648,9 @@ app.post('/upload-form-image', upload.single('file'), async (req, res) => {
       })
     }
 
-    // Get the next sequence number for this field
-    const nextSequence = existingImages.length
+    // Use provided sequence or fallback to next available sequence
+    const nextSequence = sequence !== undefined ? parseInt(sequence) : existingImages.length
+    console.log(`🔄 Sequence handling: provided=${sequence}, parsed=${nextSequence}, existingCount=${existingImages.length}`)
 
     // Generate unique filename with form and field context
     const timestamp = Date.now()
