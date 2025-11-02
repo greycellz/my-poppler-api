@@ -278,6 +278,21 @@ router.get('/session', authenticateToken, async (req, res) => {
       })
     }
 
+    // Helper to convert Firestore Timestamp to ISO string
+    const convertTimestamp = (timestamp) => {
+      if (!timestamp) return null
+      if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+        return timestamp.toDate().toISOString()
+      }
+      if (timestamp instanceof Date) {
+        return timestamp.toISOString()
+      }
+      if (typeof timestamp === 'string') {
+        return timestamp
+      }
+      return null
+    }
+
     res.json({
       success: true,
       data: {
@@ -287,7 +302,9 @@ router.get('/session', authenticateToken, async (req, res) => {
           name: user.name,
           emailVerified: user.emailVerified,
           plan: user.plan,
-          status: user.status
+          status: user.status,
+          createdAt: convertTimestamp(user.createdAt),
+          lastLoginAt: convertTimestamp(user.lastLoginAt)
         }
       }
     })

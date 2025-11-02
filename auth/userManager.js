@@ -104,6 +104,21 @@ const authenticateUser = async (email, password) => {
     // Generate JWT token
     const token = generateToken(user.id, user.email)
 
+    // Helper to convert Firestore Timestamp to ISO string
+    const convertTimestamp = (timestamp) => {
+      if (!timestamp) return null
+      if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+        return timestamp.toDate().toISOString()
+      }
+      if (timestamp instanceof Date) {
+        return timestamp.toISOString()
+      }
+      if (typeof timestamp === 'string') {
+        return timestamp
+      }
+      return null
+    }
+
     return {
       success: true,
       user: {
@@ -114,7 +129,9 @@ const authenticateUser = async (email, password) => {
         name: user.name,
         emailVerified: user.emailVerified,
         plan: user.plan,
-        status: user.status
+        status: user.status,
+        createdAt: convertTimestamp(user.createdAt),
+        lastLoginAt: convertTimestamp(user.lastLoginAt)
       },
       token
     }
