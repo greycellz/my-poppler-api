@@ -209,14 +209,20 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       });
     }
 
-    // Get active subscriptions
+    // Get subscriptions (including trialing status)
+    // CRITICAL FIX: Query must include 'trialing' status to support trial subscriptions
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
-      status: 'active',
-      limit: 1
+      status: 'all',  // Include all statuses to get 'trialing' subscriptions
+      limit: 10  // Get more to filter
     });
 
-    if (subscriptions.data.length === 0) {
+    // Find active, trialing, or past_due subscription
+    const subscription = subscriptions.data.find(sub => 
+      sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due'
+    );
+
+    if (!subscription) {
       return res.json({
         plan: 'free',
         status: 'active',
@@ -224,7 +230,10 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       });
     }
 
-    const subscription = subscriptions.data[0];
+    // Check if subscription is in trial
+    const isTrial = subscription.status === 'trialing';
+    const trialEnd = subscription.trial_end; // Unix timestamp
+    const isTrialEndingSoon = trialEnd && (trialEnd - Date.now() / 1000) < 3 * 24 * 60 * 60; // 3 days
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
     const scheduledPlanId = subscription.metadata.scheduledPlanId;
@@ -294,6 +303,9 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       currentPeriodEnd: subscription.current_period_end,
       hipaaEnabled: effectivePlan === 'pro' || effectivePlan === 'enterprise',
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      isTrial: isTrial,  // Add trial status
+      trialEnd: trialEnd,  // Add trial end date
+      trialEndingSoon: isTrialEndingSoon,  // Add trial ending soon flag
       scheduledChange: hasScheduledChange ? {
         newPlan: scheduledPlanId,
         newInterval: scheduledInterval,
@@ -328,20 +340,24 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'No subscription found' });
     }
 
-    // Get active subscription
+    // Get subscription (including trialing status)
+    // CRITICAL FIX: Query must include 'trialing' status to support trial subscriptions
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
-      status: 'active',
-      limit: 1
+      status: 'all',  // Include all statuses to get 'trialing' subscriptions
+      limit: 10  // Get more to filter
     });
 
-    if (subscriptions.data.length === 0) {
+    // Find active, trialing, or past_due subscription
+    const subscription = subscriptions.data.find(sub => 
+      sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due'
+    );
+
+    if (!subscription) {
       return res.status(400).json({ error: 'No active subscription found' });
     }
-
-    const subscription = subscriptions.data[0];
     
-    // Cancel the subscription at the end of the current period
+    // Cancel the subscription at the end of the current period (or trial end)
     // This allows users to keep their features until the period ends
     const canceledSubscription = await stripe.subscriptions.update(subscription.id, {
       cancel_at_period_end: true
@@ -381,18 +397,22 @@ router.post('/resume-subscription', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'No subscription found' });
     }
 
-    // Get active subscription
+    // Get subscription (including trialing status)
+    // CRITICAL FIX: Query must include 'trialing' status to support trial subscriptions
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
-      status: 'active',
-      limit: 1
+      status: 'all',  // Include all statuses to get 'trialing' subscriptions
+      limit: 10  // Get more to filter
     });
 
-    if (subscriptions.data.length === 0) {
+    // Find active, trialing, or past_due subscription
+    const subscription = subscriptions.data.find(sub => 
+      sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due'
+    );
+
+    if (!subscription) {
       return res.status(400).json({ error: 'No active subscription found' });
     }
-
-    const subscription = subscriptions.data[0];
 
     // Check if subscription is actually pending cancellation
     if (!subscription.cancel_at_period_end) {
@@ -443,18 +463,23 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'No subscription found' });
     }
 
-    // Get active subscription
+    // Get subscription (including trialing status)
+    // CRITICAL FIX: Query must include 'trialing' status to support trial subscriptions
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
-      status: 'active',
-      limit: 1
+      status: 'all',  // Include all statuses to get 'trialing' subscriptions
+      limit: 10  // Get more to filter
     });
 
-    if (subscriptions.data.length === 0) {
+    // Find active, trialing, or past_due subscription
+    const subscription = subscriptions.data.find(sub => 
+      sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due'
+    );
+
+    if (!subscription) {
       return res.status(400).json({ error: 'No active subscription found' });
     }
 
-    const subscription = subscriptions.data[0];
     const currentPlanId = subscription.metadata.planId;
     const scheduledPlanId = subscription.metadata.scheduledPlanId;
     const newPriceId = PRICE_IDS[newPlanId][interval];
@@ -633,18 +658,23 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: `Plan ${currentPlanId} does not support ${newInterval} billing` });
     }
 
-    // Get active subscription
+    // Get subscription (including trialing status)
+    // CRITICAL FIX: Query must include 'trialing' status to support trial subscriptions
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
-      status: 'active',
-      limit: 1
+      status: 'all',  // Include all statuses to get 'trialing' subscriptions
+      limit: 10  // Get more to filter
     });
 
-    if (subscriptions.data.length === 0) {
+    // Find active, trialing, or past_due subscription
+    const subscription = subscriptions.data.find(sub => 
+      sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due'
+    );
+
+    if (!subscription) {
       return res.status(400).json({ error: 'No active subscription found' });
     }
 
-    const subscription = subscriptions.data[0];
     const subscriptionPlanId = subscription.metadata.planId;
     const scheduledPlanId = subscription.metadata.scheduledPlanId;
     
