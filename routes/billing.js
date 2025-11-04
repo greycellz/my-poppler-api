@@ -679,6 +679,16 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
           ]
         });
         
+        // Step 3: Also update subscription metadata so scheduled change is detected
+        await stripe.subscriptions.update(subscription.id, {
+          metadata: {
+            ...subscription.metadata,
+            scheduledPlanId: newPlanId,
+            scheduledInterval: interval,
+            scheduledChangeDate: trialEnd
+          }
+        });
+        
         const actionType = isDowngrade ? 'downgrade' : 'upgrade';
         res.json({ 
           success: true, 
