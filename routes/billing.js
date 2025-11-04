@@ -145,6 +145,30 @@ router.post('/create-trial-checkout-session', authenticateToken, async (req, res
     let customerId = req.user.stripeCustomerId;
     console.log('🔍 Trial checkout debug - existing customerId:', customerId);
     
+    // PHASE 8: Check for existing trialing subscriptions (prevent trial abuse)
+    // Query Stripe for any existing trialing subscriptions before allowing new trial
+    if (customerId) {
+      const existingSubscriptions = await stripe.subscriptions.list({
+        customer: customerId,
+        status: 'all',  // Get all statuses to find trialing subscriptions
+        limit: 10
+      });
+
+      // Check if user has any trialing subscription (even if canceled_at_period_end)
+      const hasTrialingSubscription = existingSubscriptions.data.some(sub => 
+        sub.status === 'trialing'
+      );
+
+      if (hasTrialingSubscription) {
+        return res.status(400).json({ 
+          error: 'You already have an active trial. You can start a new trial after your current trial ends.' 
+        });
+      }
+    }
+    
+    // NOTE: One trial per customer (not per plan)
+    // User can only have ONE trial subscription total, regardless of plan
+    
     if (!customerId) {
       console.log('🔍 Trial checkout debug - creating new Stripe customer...');
       const customer = await stripe.customers.create({
@@ -619,24 +643,11 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     if (isInTrial) {
       // Create subscription schedule for trial end
       // This works for both upgrades and downgrades during trial
+      // NOTE: Cannot set phases when using from_subscription - must create then update
       try {
+        // Step 1: Create schedule from subscription (without phases)
         const schedule = await stripe.subscriptionSchedules.create({
           from_subscription: subscription.id,
-          phases: [
-            {
-              items: [{
-                price: subscription.items.data[0].price.id, // Keep current price during trial
-                quantity: 1,
-              }],
-              end_date: trialEnd,  // ← Use trial_end, not current_period_end
-            },
-            {
-              items: [{
-                price: newPriceId, // New price starts after trial ends
-                quantity: 1,
-              }],
-            }
-          ],
           metadata: {
             userId: userId,
             planId: subscription.metadata.planId,
@@ -644,6 +655,27 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
             scheduledPlanId: newPlanId,
             scheduledInterval: interval,
           }
+        });
+        
+        // Step 2: Update schedule with phases
+        await stripe.subscriptionSchedules.update(schedule.id, {
+          phases: [
+            {
+              items: [{
+                price: subscription.items.data[0].price.id, // Keep current price during trial
+                quantity: 1,
+              }],
+              start_date: subscription.current_period_start, // Start from current period start
+              end_date: trialEnd,  // ← Use trial_end, not current_period_end
+            },
+            {
+              items: [{
+                price: newPriceId, // New price starts after trial ends
+                quantity: 1,
+              }],
+              start_date: trialEnd, // Start after trial ends
+            }
+          ]
         });
         
         const actionType = isDowngrade ? 'downgrade' : 'upgrade';
@@ -665,24 +697,11 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     // For non-trial subscriptions, use existing logic
     if (isDowngrade) {
       // For downgrades, use Stripe's subscription schedules for true end-of-period changes
+      // NOTE: Cannot set phases when using from_subscription - must create then update
       try {
+        // Step 1: Create schedule from subscription (without phases)
         const schedule = await stripe.subscriptionSchedules.create({
           from_subscription: subscription.id,
-          phases: [
-            {
-              items: [{
-                price: subscription.items.data[0].price.id, // Keep current price
-                quantity: 1,
-              }],
-              end_date: subscription.current_period_end,
-            },
-            {
-              items: [{
-                price: newPriceId, // New price starts after current period
-                quantity: 1,
-              }],
-            }
-          ],
           metadata: {
             userId: userId,
             planId: subscription.metadata.planId,
@@ -690,6 +709,27 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
             scheduledPlanId: newPlanId,
             scheduledInterval: interval,
           }
+        });
+        
+        // Step 2: Update schedule with phases
+        await stripe.subscriptionSchedules.update(schedule.id, {
+          phases: [
+            {
+              items: [{
+                price: subscription.items.data[0].price.id, // Keep current price
+                quantity: 1,
+              }],
+              start_date: subscription.current_period_start, // Start from current period start
+              end_date: subscription.current_period_end,
+            },
+            {
+              items: [{
+                price: newPriceId, // New price starts after current period
+                quantity: 1,
+              }],
+              start_date: subscription.current_period_end, // Start after current period
+            }
+          ]
         });
 
         res.json({ 
