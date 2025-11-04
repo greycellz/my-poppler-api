@@ -131,7 +131,9 @@ router.post('/create-trial-checkout-session', authenticateToken, async (req, res
     const userData = userDoc.data();
     
     // Check if user has had a paid subscription (not eligible for trial)
-    if (userData.hasHadPaidSubscription) {
+    // Note: If hasHadPaidSubscription is undefined/null/false, user is eligible for trial
+    // The field will be set to true when trial converts to paid (via webhook in Phase 4)
+    if (userData.hasHadPaidSubscription === true) {
       return res.status(400).json({ 
         error: 'Not eligible for trial. You have previously had a paid subscription.' 
       });
