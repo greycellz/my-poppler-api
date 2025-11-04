@@ -645,20 +645,21 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       // This works for both upgrades and downgrades during trial
       // NOTE: Cannot set phases when using from_subscription - must create then update
       try {
-        // Step 1: Create schedule from subscription (without phases)
+        // Step 1: Create schedule from subscription (without phases or metadata)
+        // NOTE: Stripe doesn't allow setting metadata or phases when from_subscription is set
         const schedule = await stripe.subscriptionSchedules.create({
-          from_subscription: subscription.id,
+          from_subscription: subscription.id
+        });
+        
+        // Step 2: Update schedule with phases and metadata
+        await stripe.subscriptionSchedules.update(schedule.id, {
           metadata: {
             userId: userId,
             planId: subscription.metadata.planId,
             interval: subscription.metadata.interval,
             scheduledPlanId: newPlanId,
             scheduledInterval: interval,
-          }
-        });
-        
-        // Step 2: Update schedule with phases
-        await stripe.subscriptionSchedules.update(schedule.id, {
+          },
           phases: [
             {
               items: [{
@@ -699,20 +700,21 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       // For downgrades, use Stripe's subscription schedules for true end-of-period changes
       // NOTE: Cannot set phases when using from_subscription - must create then update
       try {
-        // Step 1: Create schedule from subscription (without phases)
+        // Step 1: Create schedule from subscription (without phases or metadata)
+        // NOTE: Stripe doesn't allow setting metadata or phases when from_subscription is set
         const schedule = await stripe.subscriptionSchedules.create({
-          from_subscription: subscription.id,
+          from_subscription: subscription.id
+        });
+        
+        // Step 2: Update schedule with phases and metadata
+        await stripe.subscriptionSchedules.update(schedule.id, {
           metadata: {
             userId: userId,
             planId: subscription.metadata.planId,
             interval: subscription.metadata.interval,
             scheduledPlanId: newPlanId,
             scheduledInterval: interval,
-          }
-        });
-        
-        // Step 2: Update schedule with phases
-        await stripe.subscriptionSchedules.update(schedule.id, {
+          },
           phases: [
             {
               items: [{
