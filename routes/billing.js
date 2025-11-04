@@ -590,21 +590,79 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     const scheduledPlanId = subscription.metadata.scheduledPlanId;
     const newPriceId = PRICE_IDS[newPlanId][interval];
     
+    // Check if subscription is in trial
+    const isInTrial = subscription.status === 'trialing';
+    const trialEnd = subscription.trial_end;
+    
     console.log('🔍 Change plan debug - current plan:', currentPlanId);
     console.log('🔍 Change plan debug - scheduled plan:', scheduledPlanId);
     console.log('🔍 Change plan debug - new plan:', newPlanId);
+    console.log('🔍 Change plan debug - is in trial:', isInTrial);
     
     // Determine effective plan for upgrade calculations
     const effectivePlanId = scheduledPlanId || currentPlanId;
     
-    // For downgrades, use subscription schedules to change at end of period
-    // For upgrades, use immediate change with proration
-    const isDowngrade = (effectivePlanId === 'pro' && newPlanId === 'basic') || 
-                       (effectivePlanId === 'enterprise' && (newPlanId === 'pro' || newPlanId === 'basic'));
+    // Determine if this is a downgrade
+    const currentPlanIndex = ['basic', 'pro', 'enterprise'].indexOf(effectivePlanId);
+    const newPlanIndex = ['basic', 'pro', 'enterprise'].indexOf(newPlanId);
+    const isDowngrade = newPlanIndex < currentPlanIndex;
     
     console.log('🔍 Change plan debug - effective plan:', effectivePlanId);
     console.log('🔍 Change plan debug - is downgrade:', isDowngrade);
     
+    // DOWNGRADES DURING TRIAL ARE ALLOWED
+    // User can downgrade to free or any lesser plan during trial
+    // The downgrade will take effect at trial end (30 days)
+    // User keeps current plan benefits until trial end
+    
+    // If in trial (upgrade OR downgrade), use subscription schedule with trial_end
+    if (isInTrial) {
+      // Create subscription schedule for trial end
+      // This works for both upgrades and downgrades during trial
+      try {
+        const schedule = await stripe.subscriptionSchedules.create({
+          from_subscription: subscription.id,
+          phases: [
+            {
+              items: [{
+                price: subscription.items.data[0].price.id, // Keep current price during trial
+                quantity: 1,
+              }],
+              end_date: trialEnd,  // ← Use trial_end, not current_period_end
+            },
+            {
+              items: [{
+                price: newPriceId, // New price starts after trial ends
+                quantity: 1,
+              }],
+            }
+          ],
+          metadata: {
+            userId: userId,
+            planId: subscription.metadata.planId,
+            interval: subscription.metadata.interval,
+            scheduledPlanId: newPlanId,
+            scheduledInterval: interval,
+          }
+        });
+        
+        const actionType = isDowngrade ? 'downgrade' : 'upgrade';
+        res.json({ 
+          success: true, 
+          message: `Plan ${actionType} scheduled for end of trial period`,
+          scheduleId: schedule.id,
+          newPlan: newPlanId,
+          interval: interval,
+          effectiveDate: trialEnd
+        });
+        return;
+      } catch (scheduleError) {
+        console.error('Subscription schedule error during trial:', scheduleError);
+        return res.status(500).json({ error: 'Failed to schedule plan change for trial' });
+      }
+    }
+    
+    // For non-trial subscriptions, use existing logic
     if (isDowngrade) {
       // For downgrades, use Stripe's subscription schedules for true end-of-period changes
       try {
@@ -783,6 +841,15 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
 
     const subscriptionPlanId = subscription.metadata.planId;
     const scheduledPlanId = subscription.metadata.scheduledPlanId;
+    
+    // Check if subscription is in trial
+    const isInTrial = subscription.status === 'trialing';
+    
+    if (isInTrial) {
+      return res.status(400).json({ 
+        error: 'Interval changes are not available during trial period. You can change your billing interval after your trial ends.' 
+      });
+    }
     
     // For interval changes, always use the current plan (not scheduled plan)
     // The scheduled plan only affects future billing, not current upgrades

@@ -167,6 +167,19 @@ async function handleSubscriptionUpdated(subscription) {
       updateData.currentPeriodEnd = subscription.current_period_end;
     }
 
+    // Track trial-to-paid conversion
+    // Check if subscription was trialing and is now active
+    const wasTrialing = subscription.previous_attributes?.status === 'trialing';
+    const isNowActive = subscription.status === 'active';
+    
+    if (wasTrialing && isNowActive) {
+      // Trial converted to paid subscription
+      updateData.hasHadPaidSubscription = true;
+      updateData.trialConvertedAt = new Date().toISOString();
+      
+      console.log(`✅ Trial converted to paid for subscription ${subscription.id} (user ${userId})`);
+    }
+
     await gcpClient.firestore.collection('users').doc(userId).update(updateData);
 
     console.log(`✅ User ${userId} subscription updated: ${planId} (${interval}) - Status: ${subscription.status}`);
@@ -235,27 +248,75 @@ async function handlePaymentFailed(invoice) {
   try {
     console.log(`💳 Processing payment failed: ${invoice.id}`);
     
-    if (invoice.subscription) {
-      const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
-      const userId = subscription.metadata.userId;
-
-      if (userId) {
-        // Update user's payment status
-        const GCPClient = require('./gcp-client');
-        const gcpClient = new GCPClient();
-        
-        await gcpClient.firestore.collection('users').doc(userId).update({
-          paymentFailed: true,
-          lastPaymentFailure: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-
-        console.log(`⚠️ Payment failure recorded for user ${userId}`);
-        
-        // TODO: Send email notification about failed payment
-        // This would integrate with your email service (SendGrid, etc.)
-      }
+    const subscription = invoice.subscription;
+    if (!subscription) {
+      console.log('⚠️ No subscription associated with failed invoice');
+      return;
     }
+
+    // Retrieve full subscription object to get metadata
+    const fullSubscription = typeof subscription === 'string' 
+      ? await stripe.subscriptions.retrieve(subscription)
+      : subscription;
+    
+    const userId = fullSubscription.metadata.userId;
+    if (!userId) {
+      console.error('❌ No userId in subscription metadata');
+      return;
+    }
+
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Get current user data to check existing failure tracking
+    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userData = userDoc.exists ? userDoc.data() : {};
+    
+    // Track payment failure
+    const failureCount = (userData.paymentFailureCount || 0) + 1;
+    const now = new Date().toISOString();
+    const firstFailureTime = userData.paymentFailedAt 
+      ? new Date(userData.paymentFailedAt).getTime()
+      : Date.now();
+    
+    // Update failure tracking
+    const updateData = {
+      paymentFailedAt: userData.paymentFailedAt || now, // Keep first failure time
+      paymentFailureCount: failureCount,
+      lastPaymentFailure: now,
+      paymentFailed: true,
+      updatedAt: now
+    };
+    
+    await gcpClient.firestore.collection('users').doc(userId).update(updateData);
+    
+    // Check if this is after grace period (7 days)
+    const daysSinceFirstFailure = (Date.now() - firstFailureTime) / (1000 * 60 * 60 * 24);
+    
+    if (daysSinceFirstFailure >= 7) {
+      // Grace period ended, downgrade to free
+      await gcpClient.firestore.collection('users').doc(userId).update({
+        plan: 'free',
+        planId: 'free',
+        downgradedAt: now,
+        downgradeReason: 'payment_failed_after_grace_period',
+        updatedAt: now
+      });
+      
+      console.log(`⚠️ Downgrading user ${userId} to free plan after payment failure grace period (${daysSinceFirstFailure.toFixed(1)} days)`);
+    } else {
+      const daysRemaining = 7 - daysSinceFirstFailure;
+      console.log(`⚠️ Payment failed for subscription ${fullSubscription.id}. Grace period: ${daysRemaining.toFixed(1)} days remaining`);
+    }
+    
+    // Optional: Send email notification (future enhancement)
+    // await emailService.sendPaymentFailedEmail(userId, {
+    //   amount: invoice.amount_due,
+    //   dueDate: invoice.due_date,
+    //   invoiceUrl: invoice.hosted_invoice_url,
+    //   daysRemaining: Math.ceil(7 - daysSinceFirstFailure)
+    // });
+    
   } catch (error) {
     console.error('❌ Error handling payment failed:', error);
   }
@@ -266,12 +327,29 @@ async function handleTrialWillEnd(subscription) {
     console.log(`⏰ Processing trial will end: ${subscription.id}`);
     
     const userId = subscription.metadata.userId;
-
-    if (userId) {
-      // TODO: Send email notification about trial ending
-      // This would integrate with your email service (SendGrid, etc.)
-      console.log(`📧 Trial ending notification needed for user ${userId}`);
+    const trialEnd = subscription.trial_end;
+    
+    if (!userId) {
+      console.error('❌ No userId in subscription metadata');
+      return;
     }
+    
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Update Firestore to track trial ending
+    // Convert Unix timestamp to ISO string for Firestore
+    const trialEndDate = trialEnd ? new Date(trialEnd * 1000).toISOString() : null;
+    
+    await gcpClient.firestore.collection('users').doc(userId).update({
+      trialEndingAt: trialEndDate,
+      updatedAt: new Date().toISOString()
+    });
+    
+    console.log(`✅ Trial ending tracked for user ${userId} (trial ends: ${trialEndDate})`);
+    
+    // Optional: Send email notification (future enhancement)
+    // await emailService.sendTrialEndingEmail(userId, trialEnd);
   } catch (error) {
     console.error('❌ Error handling trial will end:', error);
   }
