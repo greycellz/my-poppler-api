@@ -104,6 +104,110 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
   }
 });
 
+// Create trial checkout session (separate endpoint for easy rollback)
+router.post('/create-trial-checkout-session', authenticateToken, async (req, res) => {
+  try {
+    const { planId, interval = 'monthly' } = req.body;
+    const userId = req.user.userId;
+    
+    console.log('🔍 Trial checkout debug - userId:', userId);
+    console.log('🔍 Trial checkout debug - planId:', planId);
+    console.log('🔍 Trial checkout debug - interval:', interval);
+
+    // Validate plan and interval
+    if (!PRICE_IDS[planId] || !PRICE_IDS[planId][interval]) {
+      return res.status(400).json({ error: 'Invalid plan or interval' });
+    }
+
+    // Check trial eligibility
+    const GCPClient = require('../gcp-client');
+    const gcpClient = new GCPClient();
+    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const userData = userDoc.data();
+    
+    // Check if user has had a paid subscription (not eligible for trial)
+    if (userData.hasHadPaidSubscription) {
+      return res.status(400).json({ 
+        error: 'Not eligible for trial. You have previously had a paid subscription.' 
+      });
+    }
+
+    const priceId = PRICE_IDS[planId][interval];
+    
+    // Get or create Stripe customer
+    let customerId = req.user.stripeCustomerId;
+    console.log('🔍 Trial checkout debug - existing customerId:', customerId);
+    
+    if (!customerId) {
+      console.log('🔍 Trial checkout debug - creating new Stripe customer...');
+      const customer = await stripe.customers.create({
+        email: req.user.email,
+        name: req.user.name,
+        metadata: {
+          userId: userId
+        }
+      });
+      customerId = customer.id;
+      console.log('🔍 Trial checkout debug - created customerId:', customerId);
+      
+      // Update user with Stripe customer ID
+      if (!userId || userId.trim() === '') {
+        throw new Error('Invalid userId: ' + userId);
+      }
+      
+      await gcpClient.firestore.collection('users').doc(userId).update({
+        stripeCustomerId: customerId
+      });
+      console.log('🔍 Trial checkout debug - user document updated successfully');
+    }
+
+    // Create checkout session WITH trial period
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      payment_method_types: ['card'],  // Payment method required for automatic billing
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      mode: 'subscription',
+      subscription_data: {
+        trial_period_days: 30,  // 30-day free trial
+        trial_settings: {
+          end_behavior: {
+            missing_payment_method: 'cancel'  // Fallback if somehow no payment method (shouldn't happen)
+          }
+        },
+        metadata: {
+          userId: userId,
+          planId: planId,
+          interval: interval
+        }
+      },
+      success_url: `${process.env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL}/pricing?canceled=true`,
+      metadata: {
+        userId: userId,
+        planId: planId,
+        interval: interval,
+        isTrial: 'true'  // Mark as trial for tracking
+      }
+    });
+
+    console.log('🔍 Trial checkout debug - session created:', session.id);
+    res.json({ sessionUrl: session.url });
+  } catch (error) {
+    console.error('Trial checkout session error:', error);
+    res.status(500).json({ error: 'Failed to create trial checkout session' });
+  }
+});
+
 // Get checkout session details (for success page)
 router.get('/checkout-session', authenticateToken, async (req, res) => {
   try {
