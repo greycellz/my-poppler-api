@@ -165,6 +165,64 @@ class EmailService {
       return { success: false, error: error.message };
     }
   }
+
+  async sendPasswordResetEmail(userEmail, resetToken) {
+    try {
+      // Skip if no email provided
+      if (!userEmail || userEmail.trim() === '') {
+        console.log('📧 Skipping password reset email - no user email provided');
+        return { success: true, skipped: true, reason: 'No user email provided' };
+      }
+
+      console.log(`📧 Sending password reset email to: ${userEmail}`);
+      
+      const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+      const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
+      
+      const data = await this.mg.messages.create(this.domain, {
+        from: this.fromEmail,
+        to: [userEmail],
+        subject: 'Reset Your ChatterForms Password',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #6366f1;">Reset Your Password</h2>
+            <p>You requested to reset your password for your ChatterForms account.</p>
+            <p>Click the button below to reset your password. This link will expire in 1 hour.</p>
+            <p style="margin: 20px 0;">
+              <a href="${resetUrl}" 
+                 style="display: inline-block; padding: 12px 24px; background: #6366f1; color: white; text-decoration: none; border-radius: 6px; margin: 20px 0;">
+                Reset Password
+              </a>
+            </p>
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="color: #666; word-break: break-all; background: #f3f4f6; padding: 10px; border-radius: 5px;">${resetUrl}</p>
+            <p style="color: #999; font-size: 12px; margin-top: 30px;">
+              If you didn't request this password reset, please ignore this email. Your password will remain unchanged.
+            </p>
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
+            <p style="color: #6b7280; font-size: 12px;">This email was sent from ChatterForms</p>
+          </div>
+        `,
+        text: `
+          Reset Your ChatterForms Password
+          
+          You requested to reset your password for your ChatterForms account.
+          
+          Click the link below to reset your password. This link will expire in 1 hour.
+          
+          ${resetUrl}
+          
+          If you didn't request this password reset, please ignore this email. Your password will remain unchanged.
+        `
+      });
+      
+      console.log('✅ Password reset email sent successfully:', data.id);
+      return { success: true, messageId: data.id, data };
+    } catch (error) {
+      console.error('❌ Error sending password reset email:', error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 module.exports = new EmailService();

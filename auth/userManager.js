@@ -213,6 +213,16 @@ const requestPasswordReset = async (email) => {
     const resetToken = generateRandomToken(32)
     await gcpClient.storePasswordResetToken(user.id, email, resetToken)
 
+    // Send password reset email
+    const emailService = require('../email-service')
+    try {
+      await emailService.sendPasswordResetEmail(email, resetToken)
+    } catch (emailError) {
+      console.error('Failed to send password reset email:', emailError)
+      // Don't fail the request if email fails - token is still stored
+      // User can still use the reset token if they have it
+    }
+
     return {
       success: true,
       message: 'If the email exists, a reset link has been sent'
