@@ -223,6 +223,64 @@ class EmailService {
       return { success: false, error: error.message };
     }
   }
+
+  async sendVerificationEmail(userEmail, verificationToken) {
+    try {
+      // Skip if no email provided
+      if (!userEmail || userEmail.trim() === '') {
+        console.log('📧 Skipping verification email - no user email provided');
+        return { success: true, skipped: true, reason: 'No user email provided' };
+      }
+
+      console.log(`📧 Sending verification email to: ${userEmail}`);
+      
+      const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+      const verifyUrl = `${frontendUrl}/verify-email?token=${verificationToken}`;
+      
+      const data = await this.mg.messages.create(this.domain, {
+        from: this.fromEmail,
+        to: [userEmail],
+        subject: 'Verify Your ChatterForms Email Address',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #6366f1;">Welcome to ChatterForms!</h2>
+            <p>Thank you for creating an account. Please verify your email address to complete your registration.</p>
+            <p>Click the button below to verify your email. This link will expire in 24 hours.</p>
+            <p style="margin: 20px 0;">
+              <a href="${verifyUrl}" 
+                 style="display: inline-block; padding: 12px 24px; background: #6366f1; color: white; text-decoration: none; border-radius: 6px; margin: 20px 0;">
+                Verify Email Address
+              </a>
+            </p>
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="color: #666; word-break: break-all; background: #f3f4f6; padding: 10px; border-radius: 5px;">${verifyUrl}</p>
+            <p style="color: #999; font-size: 12px; margin-top: 30px;">
+              If you didn't create an account with ChatterForms, please ignore this email.
+            </p>
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
+            <p style="color: #6b7280; font-size: 12px;">This email was sent from ChatterForms</p>
+          </div>
+        `,
+        text: `
+          Welcome to ChatterForms!
+          
+          Thank you for creating an account. Please verify your email address to complete your registration.
+          
+          Click the link below to verify your email. This link will expire in 24 hours.
+          
+          ${verifyUrl}
+          
+          If you didn't create an account with ChatterForms, please ignore this email.
+        `
+      });
+      
+      console.log('✅ Verification email sent successfully:', data.id);
+      return { success: true, messageId: data.id, data };
+    } catch (error) {
+      console.error('❌ Error sending verification email:', error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 module.exports = new EmailService();

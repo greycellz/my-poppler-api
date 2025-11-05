@@ -57,6 +57,21 @@ const createUser = async (email, password, firstName, lastName) => {
     const verificationToken = generateRandomToken(32)
     await gcpClient.storeEmailVerificationToken(userId, email, verificationToken)
 
+    // Send verification email (fail-soft - don't block signup if email fails)
+    const emailService = require('../email-service')
+    try {
+      const emailResult = await emailService.sendVerificationEmail(email, verificationToken)
+      if (!emailResult.success && !emailResult.skipped) {
+        console.error('Failed to send verification email:', emailResult.error)
+        // Don't fail the request if email fails - token is still stored
+        // User can still use the verification token if they request a resend
+      }
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError)
+      // Don't fail the request if email fails - token is still stored
+      // User can still use the verification token if they request a resend
+    }
+
     // Generate JWT token for immediate login (needed for form migration)
     const token = generateToken(userId, email)
 
@@ -234,6 +249,49 @@ const requestPasswordReset = async (email) => {
 }
 
 /**
+ * Resend verification email
+ */
+const resendVerificationEmail = async (email) => {
+  try {
+    const user = await getUserByEmail(email)
+    if (!user) {
+      // Don't reveal if user exists or not
+      return { success: true, message: 'If the email exists and is unverified, a verification link has been sent' }
+    }
+
+    // Check if already verified
+    if (user.emailVerified) {
+      return { success: true, message: 'Email is already verified' }
+    }
+
+    // Generate new verification token
+    const verificationToken = generateRandomToken(32)
+    await gcpClient.storeEmailVerificationToken(user.id, email, verificationToken)
+
+    // Send verification email
+    const emailService = require('../email-service')
+    try {
+      const emailResult = await emailService.sendVerificationEmail(email, verificationToken)
+      if (!emailResult.success && !emailResult.skipped) {
+        console.error('Failed to send verification email:', emailResult.error)
+        // Don't fail the request if email fails - token is still stored
+      }
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError)
+      // Don't fail the request if email fails - token is still stored
+    }
+
+    return {
+      success: true,
+      message: 'If the email exists and is unverified, a verification link has been sent'
+    }
+  } catch (error) {
+    console.error('Resend verification email error:', error)
+    throw error
+  }
+}
+
+/**
  * Reset password with token
  */
 const resetPassword = async (token, newPassword) => {
@@ -297,6 +355,7 @@ module.exports = {
   getUserByEmail,
   getUserById,
   verifyEmail,
+  resendVerificationEmail,
   requestPasswordReset,
   resetPassword,
   migrateAnonymousForms

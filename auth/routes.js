@@ -1,6 +1,6 @@
 const express = require('express')
 const { body } = require('express-validator')
-const { authenticateToken, authRateLimiter, signupRateLimiter, passwordResetRateLimiter } = require('./middleware')
+const { authenticateToken, authRateLimiter, signupRateLimiter, passwordResetRateLimiter, resendVerificationRateLimiter } = require('./middleware')
 const { validateRequest } = require('./utils')
 const userManager = require('./userManager')
 
@@ -132,6 +132,39 @@ router.post('/verify-email',
       })
     } catch (error) {
       console.error('Email verification error:', error)
+      res.status(400).json({
+        success: false,
+        error: error.message
+      })
+    }
+  }
+)
+
+/**
+ * POST /auth/resend-verification
+ * Resend verification email
+ */
+router.post('/resend-verification',
+  resendVerificationRateLimiter,
+  [
+    body('email')
+      .isEmail()
+      .normalizeEmail()
+      .withMessage('Please provide a valid email address')
+  ],
+  validateRequest,
+  async (req, res) => {
+    try {
+      const { email } = req.body
+
+      const result = await userManager.resendVerificationEmail(email)
+
+      res.json({
+        success: true,
+        message: result.message
+      })
+    } catch (error) {
+      console.error('Resend verification error:', error)
       res.status(400).json({
         success: false,
         error: error.message

@@ -93,6 +93,12 @@ const passwordResetRateLimiter = createRateLimiter(
   'Too many password reset attempts, please try again in 1 hour'
 )
 
+const resendVerificationRateLimiter = createRateLimiter(
+  60 * 60 * 1000, // 1 hour
+  3, // 3 resend attempts
+  'Too many verification email requests, please try again in 1 hour'
+)
+
 /**
  * Check if user is authenticated
  */
@@ -132,5 +138,6 @@ module.exports = {
   authRateLimiter,
   signupRateLimiter,
   passwordResetRateLimiter,
+  resendVerificationRateLimiter,
   checkAnonymousLimits
 }
