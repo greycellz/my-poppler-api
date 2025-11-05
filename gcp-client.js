@@ -1606,14 +1606,46 @@ class GCPClient {
 
   /**
    * Get user by email
+   * @param {string} email - Email address (can be normalized or exact)
+   * @param {boolean} useNormalized - If true, query by normalizedEmail field
    */
-  async getUserByEmail(email) {
+  async getUserByEmail(email, useNormalized = false) {
     try {
-      const snapshot = await this.firestore
-        .collection('users')
-        .where('email', '==', email.toLowerCase())
-        .limit(1)
-        .get();
+      const lookupEmail = email.toLowerCase().trim()
+      
+      let snapshot
+      if (useNormalized) {
+        // Query by normalizedEmail field (for duplicate checking)
+        snapshot = await this.firestore
+          .collection('users')
+          .where('normalizedEmail', '==', lookupEmail)
+          .limit(1)
+          .get();
+      } else {
+        // Query by exact email (for login - try exact first, then normalized)
+        snapshot = await this.firestore
+          .collection('users')
+          .where('email', '==', lookupEmail)
+          .limit(1)
+          .get();
+        
+        // If not found and it's Gmail, try normalized lookup
+        if (snapshot.empty && lookupEmail.includes('@gmail.com')) {
+          // Use validator library for consistent normalization
+          const validator = require('validator')
+          const normalizedEmail = validator.normalizeEmail(lookupEmail, {
+            gmail_lowercase: true,
+            gmail_remove_dots: true,
+            gmail_remove_subaddress: true
+          }) || lookupEmail
+          
+          snapshot = await this.firestore
+            .collection('users')
+            .where('normalizedEmail', '==', normalizedEmail)
+            .limit(1)
+            .get();
+        }
+      }
 
       if (snapshot.empty) {
         return null;

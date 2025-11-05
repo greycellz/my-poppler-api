@@ -6,10 +6,36 @@ const {
   isValidEmail,
   validatePasswordStrength 
 } = require('./utils')
+const validator = require('validator')
 
 // Import GCP client (we'll use the existing one)
 const GCPClient = require('../gcp-client')
 const gcpClient = new GCPClient()
+
+/**
+ * Normalize email for duplicate checking and lookups
+ * Uses standard validator library (same as express-validator uses internally)
+ * For Gmail: removes dots, removes +aliases, handles @googlemail.com
+ * For other providers: applies provider-specific normalization
+ * This prevents abuse by creating multiple accounts with the same underlying email
+ */
+const normalizeEmailForLookup = (email) => {
+  const trimmedEmail = email.toLowerCase().trim()
+  
+  // Use validator.normalizeEmail() - standard library normalization
+  // This handles Gmail, Outlook, Yahoo, iCloud, and other providers
+  const normalized = validator.normalizeEmail(trimmedEmail, {
+    gmail_lowercase: true,
+    gmail_remove_dots: true,
+    gmail_remove_subaddress: true,
+    outlookdotcom_lowercase: true,
+    yahoo_lowercase: true,
+    icloud_lowercase: true
+  })
+  
+  // validator.normalizeEmail() returns false for invalid emails, so fallback to lowercase
+  return normalized || trimmedEmail
+}
 
 /**
  * Create a new user
@@ -26,8 +52,9 @@ const createUser = async (email, password, firstName, lastName) => {
       throw new Error(`Password validation failed: ${passwordValidation.errors.join(', ')}`)
     }
 
-    // Check if user already exists
-    const existingUser = await getUserByEmail(email)
+    // Check if user already exists using normalized email (prevents Gmail abuse)
+    const normalizedEmail = normalizeEmailForLookup(email)
+    const existingUser = await getUserByEmail(normalizedEmail, true) // true = use normalized lookup
     if (existingUser) {
       throw new Error('User with this email already exists')
     }
@@ -36,8 +63,10 @@ const createUser = async (email, password, firstName, lastName) => {
     const passwordHash = await hashPassword(password)
 
     // Create user document
+    // Store exact email (for display) and normalized email (for duplicate checking)
     const userData = {
-      email: email.toLowerCase(),
+      email: email.toLowerCase().trim(), // Store exact email (lowercased) for display
+      normalizedEmail: normalizeEmailForLookup(email), // Store normalized for duplicate checking
       passwordHash,
       firstName,
       lastName,
@@ -158,10 +187,13 @@ const authenticateUser = async (email, password) => {
 
 /**
  * Get user by email
+ * @param {string} email - Email address
+ * @param {boolean} useNormalized - If true, query by normalizedEmail field (for duplicate checks)
  */
-const getUserByEmail = async (email) => {
+const getUserByEmail = async (email, useNormalized = false) => {
   try {
-    return await gcpClient.getUserByEmail(email.toLowerCase())
+    const lookupEmail = useNormalized ? normalizeEmailForLookup(email) : email.toLowerCase().trim()
+    return await gcpClient.getUserByEmail(lookupEmail, useNormalized)
   } catch (error) {
     console.error('Get user by email error:', error)
     return null

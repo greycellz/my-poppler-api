@@ -15,7 +15,6 @@ router.post('/signup',
   [
     body('email')
       .isEmail()
-      .normalizeEmail()
       .withMessage('Please provide a valid email address'),
     body('password')
       .isLength({ min: 8 })
@@ -74,7 +73,6 @@ router.post('/login',
   [
     body('email')
       .isEmail()
-      .normalizeEmail()
       .withMessage('Please provide a valid email address'),
     body('password')
       .notEmpty()
@@ -149,7 +147,6 @@ router.post('/resend-verification',
   [
     body('email')
       .isEmail()
-      .normalizeEmail()
       .withMessage('Please provide a valid email address')
   ],
   validateRequest,
@@ -182,7 +179,6 @@ router.post('/request-reset',
   [
     body('email')
       .isEmail()
-      .normalizeEmail()
       .withMessage('Please provide a valid email address')
   ],
   validateRequest,
