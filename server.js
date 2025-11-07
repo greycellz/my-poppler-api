@@ -48,16 +48,32 @@ app.post('/api/billing/webhook', express.raw({type: 'application/json'}), async 
   const sig = req.headers['stripe-signature'];
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  // Enhanced logging for webhook debugging
+  console.log('🔍 Webhook Debug - Endpoint: /api/billing/webhook');
+  console.log('🔍 Webhook Debug - Signature header present:', !!sig);
+  console.log('🔍 Webhook Debug - Webhook secret configured:', !!endpointSecret);
+  console.log('🔍 Webhook Debug - Request body type:', typeof req.body);
+  console.log('🔍 Webhook Debug - Request body length:', req.body?.length || 0);
+
   let event;
 
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
   } catch (err) {
     console.error('❌ Webhook signature verification failed:', err.message);
+    console.error('🔍 Webhook Debug - Error details:', {
+      endpoint: '/api/billing/webhook',
+      hasSignature: !!sig,
+      hasSecret: !!endpointSecret,
+      bodyType: typeof req.body,
+      bodyLength: req.body?.length || 0,
+      errorType: err.constructor.name
+    });
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   console.log(`🔔 Received Stripe webhook: ${event.type}`);
+  console.log(`🔍 Webhook Debug - Event ID: ${event.id}`);
 
   try {
     switch (event.type) {
@@ -3851,6 +3867,13 @@ app.post('/api/stripe/webhook', express.raw({type: 'application/json'}), async (
     const sig = req.headers['stripe-signature'];
     const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+    // Enhanced logging for webhook debugging
+    console.log('🔍 Webhook Debug - Endpoint: /api/stripe/webhook');
+    console.log('🔍 Webhook Debug - Signature header present:', !!sig);
+    console.log('🔍 Webhook Debug - Webhook secret configured:', !!endpointSecret);
+    console.log('🔍 Webhook Debug - Request body type:', typeof req.body);
+    console.log('🔍 Webhook Debug - Request body length:', req.body?.length || 0);
+
     if (!endpointSecret) {
       console.error('❌ Stripe webhook secret not configured');
       return res.status(400).json({ error: 'Webhook secret not configured' });
@@ -3861,10 +3884,19 @@ app.post('/api/stripe/webhook', express.raw({type: 'application/json'}), async (
       event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
     } catch (err) {
       console.error('❌ Webhook signature verification failed:', err.message);
+      console.error('🔍 Webhook Debug - Error details:', {
+        endpoint: '/api/stripe/webhook',
+        hasSignature: !!sig,
+        hasSecret: !!endpointSecret,
+        bodyType: typeof req.body,
+        bodyLength: req.body?.length || 0,
+        errorType: err.constructor.name
+      });
       return res.status(400).json({ error: `Webhook Error: ${err.message}` });
     }
 
     console.log(`🔔 Stripe webhook received: ${event.type}`);
+    console.log(`🔍 Webhook Debug - Event ID: ${event.id}`);
 
     // Handle the event
     switch (event.type) {

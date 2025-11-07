@@ -1009,8 +1009,9 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
 
   // Monthly -> Annual (upgrade): charge immediately, start a new annual period today
   if (currentInterval === 'monthly' && newInterval === 'annual') {
-    // First, check if there's an active subscription schedule and cancel it
+    // First, check if there's an active subscription schedule and release it
     // This ensures proration is calculated from the actual current plan, not scheduled plan
+    // Using release() instead of cancel() to avoid canceling the subscription
     console.log('🔍 Checking for subscription schedules for subscription:', subscription.id);
     try {
       // Check subscription.schedule property first
@@ -1030,14 +1031,20 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
       }
       
       if (scheduleId) {
-        console.log('🔍 Found active subscription schedule:', scheduleId, 'canceling it before interval upgrade');
-        await stripe.subscriptionSchedules.cancel(scheduleId);
-        console.log('🔍 Subscription schedule canceled successfully');
+        console.log('🔍 Found active subscription schedule:', scheduleId, 'releasing it before interval upgrade');
+        await stripe.subscriptionSchedules.release(scheduleId);
+        console.log('🔍 Subscription schedule released successfully');
+        
+        // Retrieve the subscription again to get its current state after schedule release
+        subscription = await stripe.subscriptions.retrieve(subscription.id);
       } else {
         console.log('🔍 No subscription schedules found');
       }
     } catch (scheduleError) {
-      console.log('🔍 Error checking/canceling subscription schedule:', scheduleError.message);
+      console.error('🔍 Error releasing subscription schedule:', scheduleError.message);
+      return res.status(500).json({ 
+        error: 'Failed to update subscription. Please try again or contact support.' 
+      });
     }
 
     const updateParams = {
@@ -1102,34 +1109,22 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     }
     
     if (hasSchedule && scheduleId) {
-      // Subscription is managed by a schedule - cancel the schedule first
-      console.log('🔍 Subscription has schedule:', scheduleId, 'canceling schedule before annual->monthly change');
+      // Subscription is managed by a schedule - release the schedule first
+      // Using release() instead of cancel() to avoid canceling the subscription
+      console.log('🔍 Subscription has schedule:', scheduleId, 'releasing schedule before annual->monthly change');
       
       try {
-        // Cancel the schedule - this allows the subscription to be updated directly
-        await stripe.subscriptionSchedules.cancel(scheduleId);
-        console.log('🔍 Subscription schedule canceled successfully, proceeding with direct update');
+        // Release the schedule - this detaches it from the subscription without canceling
+        await stripe.subscriptionSchedules.release(scheduleId);
+        console.log('🔍 Subscription schedule released successfully, proceeding with direct update');
         
-        // Retrieve the subscription again to get its current state after schedule cancellation
-        const refreshedSubscription = await stripe.subscriptions.retrieve(subscription.id);
-        subscription = refreshedSubscription;
-      } catch (scheduleCancelError) {
-        console.error('🔍 Error canceling subscription schedule:', scheduleCancelError.message);
-        
-        // If cancel fails, try releasing the schedule
-        try {
-          await stripe.subscriptionSchedules.release(scheduleId);
-          console.log('🔍 Released subscription from schedule, proceeding with direct update');
-          
-          // Retrieve the subscription again to get its current state after schedule release
-          const refreshedSubscription = await stripe.subscriptions.retrieve(subscription.id);
-          subscription = refreshedSubscription;
-        } catch (releaseError) {
-          console.error('🔍 Error releasing schedule:', releaseError.message);
-          return res.status(500).json({ 
-            error: 'Failed to update subscription. Please try again or contact support.' 
-          });
-        }
+        // Retrieve the subscription again to get its current state after schedule release
+        subscription = await stripe.subscriptions.retrieve(subscription.id);
+      } catch (releaseError) {
+        console.error('🔍 Error releasing subscription schedule:', releaseError.message);
+        return res.status(500).json({ 
+          error: 'Failed to update subscription. Please try again or contact support.' 
+        });
       }
     }
     
