@@ -978,6 +978,14 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     const subscriptionPlanId = subscription.metadata.planId;
     const scheduledPlanId = subscription.metadata.scheduledPlanId;
     
+    // Enhanced logging for debugging
+    console.log('🔍 Change interval debug - subscription status:', subscription.status);
+    console.log('🔍 Change interval debug - subscription id:', subscription.id);
+    console.log('🔍 Change interval debug - has trial_end:', !!subscription.trial_end);
+    console.log('🔍 Change interval debug - trial_end value:', subscription.trial_end);
+    console.log('🔍 Change interval debug - current_period_end:', subscription.current_period_end);
+    console.log('🔍 Change interval debug - subscription schedule:', subscription.schedule);
+    
     // Validate that the plan supports the new interval using subscription metadata (not Firestore)
     // This ensures we use the actual subscription plan, not potentially out-of-sync Firestore data
     if (!subscriptionPlanId) {
@@ -988,28 +996,154 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: `Plan ${subscriptionPlanId} does not support ${newInterval} billing` });
     }
     
-    // Check if subscription is in trial
-    const isInTrial = subscription.status === 'trialing';
-    
-    if (isInTrial) {
-      return res.status(400).json({ 
-        error: 'Interval changes are not available during trial period. You can change your billing interval after your trial ends.' 
-      });
-    }
-    
     // For interval changes, always use the current plan (not scheduled plan)
     // The scheduled plan only affects future billing, not current upgrades
     const effectivePlanId = subscriptionPlanId;
     const newPriceId = PRICE_IDS[effectivePlanId][newInterval];
     
-  // Determine current interval from subscription
-  const currentInterval = subscription.metadata?.interval || subscription.items.data[0]?.price?.recurring?.interval || 'monthly'
+    // Determine current interval from subscription
+    const currentInterval = subscription.metadata?.interval || subscription.items.data[0]?.price?.recurring?.interval || 'monthly'
 
-  console.log('🔍 Change interval debug - subscription plan:', subscriptionPlanId)
-  console.log('🔍 Change interval debug - scheduled plan:', scheduledPlanId)
-  console.log('🔍 Change interval debug - effective plan:', effectivePlanId)
-  console.log('🔍 Change interval debug - current interval:', currentInterval)
-  console.log('🔍 Change interval debug - new interval:', newInterval)
+    console.log('🔍 Change interval debug - subscription plan:', subscriptionPlanId)
+    console.log('🔍 Change interval debug - scheduled plan:', scheduledPlanId)
+    console.log('🔍 Change interval debug - effective plan:', effectivePlanId)
+    console.log('🔍 Change interval debug - current interval:', currentInterval)
+    console.log('🔍 Change interval debug - new interval:', newInterval)
+    
+    // Check if subscription is in trial
+    const isInTrial = subscription.status === 'trialing';
+    const trialEnd = subscription.trial_end;
+    
+    console.log('🔍 Change interval debug - isInTrial:', isInTrial)
+    console.log('🔍 Change interval debug - trialEnd:', trialEnd)
+    
+    // Determine if this is an upgrade or downgrade
+    // Monthly → Annual = upgrade (better value, immediate change)
+    // Annual → Monthly = downgrade (worse value, schedule for trial end)
+    const isIntervalUpgrade = currentInterval === 'monthly' && newInterval === 'annual';
+    const isIntervalDowngrade = currentInterval === 'annual' && newInterval === 'monthly';
+    
+    // Handle interval changes during trial
+    if (isInTrial) {
+      if (isIntervalUpgrade) {
+        // Monthly → Annual during trial: Immediate upgrade (better deal)
+        // User gets annual benefits immediately, proration applies
+        console.log('🔍 Trial interval change - Monthly→Annual upgrade, applying immediately');
+        
+        // Check for existing schedule and release it first
+        let scheduleId = subscription.schedule;
+        if (!scheduleId) {
+          try {
+            const schedules = await stripe.subscriptionSchedules.list({
+              customer: subscription.customer,
+              limit: 10
+            });
+            const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+            if (matchingSchedule) {
+              scheduleId = matchingSchedule.id;
+            }
+          } catch (listError) {
+            console.log('🔍 Could not list schedules:', listError.message);
+          }
+        }
+        
+        if (scheduleId) {
+          console.log('🔍 Found schedule during trial upgrade, releasing it');
+          await stripe.subscriptionSchedules.release(scheduleId);
+          subscription = await stripe.subscriptions.retrieve(subscription.id);
+        }
+        
+        // Immediate upgrade with proration
+        const updateParams = {
+          items: [{
+            id: subscription.items.data[0].id,
+            price: newPriceId,
+          }],
+          proration_behavior: 'always_invoice', // Charge proration immediately
+          billing_cycle_anchor: 'now', // Reset period to start today
+          metadata: {
+            userId: userId,
+            planId: effectivePlanId,
+            interval: 'annual',
+            scheduledPlanId: null,
+            scheduledInterval: null,
+            scheduledChangeDate: null
+          }
+        };
+        
+        const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
+        
+        return res.json({
+          success: true,
+          message: 'Billing interval upgraded to annual immediately',
+          subscription: updatedSubscription,
+          newInterval: newInterval
+        });
+      } else if (isIntervalDowngrade) {
+        // Annual → Monthly during trial: Schedule for trial end (downgrade)
+        // User keeps annual benefits until trial ends, then switches to monthly
+        console.log('🔍 Trial interval change - Annual→Monthly downgrade, scheduling for trial end');
+        
+        try {
+          // Create subscription schedule for trial end
+          const schedule = await stripe.subscriptionSchedules.create({
+            from_subscription: subscription.id
+          });
+          
+          // Update schedule with phases
+          await stripe.subscriptionSchedules.update(schedule.id, {
+            metadata: {
+              userId: userId,
+              planId: subscription.metadata.planId,
+              interval: subscription.metadata.interval,
+              scheduledInterval: 'monthly',
+            },
+            phases: [
+              {
+                items: [{
+                  price: subscription.items.data[0].price.id, // Keep current annual price during trial
+                  quantity: 1,
+                }],
+                start_date: subscription.current_period_start,
+                end_date: trialEnd, // Keep annual until trial ends
+              },
+              {
+                items: [{
+                  price: newPriceId, // Switch to monthly after trial ends
+                  quantity: 1,
+                }],
+                start_date: trialEnd, // Start monthly after trial ends
+              }
+            ]
+          });
+          
+          // Update subscription metadata
+          await stripe.subscriptions.update(subscription.id, {
+            metadata: {
+              ...subscription.metadata,
+              scheduledInterval: 'monthly',
+              scheduledChangeDate: trialEnd
+            }
+          });
+          
+          return res.json({
+            success: true,
+            message: 'Billing interval change to monthly scheduled for end of trial period',
+            scheduleId: schedule.id,
+            newInterval: newInterval,
+            effectiveDate: trialEnd
+          });
+        } catch (scheduleError) {
+          console.error('Subscription schedule error during trial interval downgrade:', scheduleError);
+          return res.status(500).json({ error: 'Failed to schedule interval change for trial' });
+        }
+      } else {
+        // Same interval (shouldn't happen, but handle gracefully)
+        return res.status(400).json({ 
+          error: 'No interval change needed' 
+        });
+      }
+    }
 
   // Monthly -> Annual (upgrade): charge immediately, start a new annual period today
   if (currentInterval === 'monthly' && newInterval === 'annual') {
