@@ -487,18 +487,73 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'No active subscription found' });
     }
     
-    // Cancel the subscription at the end of the current period (or trial end)
-    // This allows users to keep their features until the period ends
-    const canceledSubscription = await stripe.subscriptions.update(subscription.id, {
-      cancel_at_period_end: true
-    });
+    // Check if subscription has an active schedule (created during plan changes in trial)
+    // If schedule exists, we must cancel the schedule instead of the subscription directly
+    let canceledSubscription;
+    let cancellationDate;
+    let hasSchedule = false;
+    
+    try {
+      const schedules = await stripe.subscriptionSchedules.list({
+        subscription: subscription.id,
+        limit: 1
+      });
+      
+      if (schedules.data.length > 0) {
+        const schedule = schedules.data[0];
+        hasSchedule = true;
+        console.log('🔍 Found active subscription schedule:', schedule.id, 'canceling schedule instead of subscription');
+        
+        // Cancel the schedule - this removes the schedule but subscription continues
+        // We also need to explicitly set cancel_at_period_end on the subscription
+        await stripe.subscriptionSchedules.cancel(schedule.id);
+        console.log('✅ Subscription schedule canceled successfully');
+        
+        // Explicitly set cancel_at_period_end on subscription to ensure it's canceled at period end
+        canceledSubscription = await stripe.subscriptions.update(subscription.id, {
+          cancel_at_period_end: true
+        });
+        
+        // Determine cancellation date: trial_end if in trial, otherwise current_period_end
+        cancellationDate = subscription.status === 'trialing' 
+          ? subscription.trial_end 
+          : subscription.current_period_end;
+      } else {
+        // No schedule exists - cancel subscription directly
+        console.log('🔍 No subscription schedule found, canceling subscription directly');
+        canceledSubscription = await stripe.subscriptions.update(subscription.id, {
+          cancel_at_period_end: true
+        });
+        
+        // Determine cancellation date: trial_end if in trial, otherwise current_period_end
+        cancellationDate = subscription.status === 'trialing' 
+          ? subscription.trial_end 
+          : subscription.current_period_end;
+      }
+    } catch (scheduleError) {
+      console.error('🔍 Error checking/canceling subscription schedule:', scheduleError.message);
+      // Fallback: try to cancel subscription directly if schedule check fails
+      console.log('🔍 Falling back to direct subscription cancellation');
+      canceledSubscription = await stripe.subscriptions.update(subscription.id, {
+        cancel_at_period_end: true
+      });
+      cancellationDate = subscription.status === 'trialing' 
+        ? subscription.trial_end 
+        : subscription.current_period_end;
+    }
+
+    const cancellationMessage = subscription.status === 'trialing'
+      ? 'Subscription will be canceled at the end of your trial period'
+      : 'Subscription will be canceled at the end of your current billing period';
 
     res.json({ 
       success: true, 
-      message: 'Subscription will be canceled at the end of your current billing period',
+      message: cancellationMessage,
       subscription: canceledSubscription,
       cancelAtPeriodEnd: true,
-      currentPeriodEnd: subscription.current_period_end
+      currentPeriodEnd: cancellationDate,  // Backward compatibility
+      cancellationDate: cancellationDate,  // New field (more descriptive)
+      canceledViaSchedule: hasSchedule
     });
   } catch (error) {
     console.error('Cancel subscription error:', error);
