@@ -1054,13 +1054,16 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
         }
         
         // Immediate upgrade with proration
+        // NOTE: During trial, we cannot set billing_cycle_anchor='now' because trial_end is in the future
+        // Instead, we change the price/interval and let trial_end remain as the anchor
+        // The trial will continue, and at trial_end, billing will start on the new annual interval
         const updateParams = {
           items: [{
             id: subscription.items.data[0].id,
             price: newPriceId,
           }],
-          proration_behavior: 'always_invoice', // Charge proration immediately
-          billing_cycle_anchor: 'now', // Reset period to start today
+          proration_behavior: 'always_invoice', // Charge proration immediately (for unused trial time)
+          // Do NOT set billing_cycle_anchor during trial - trial_end is the anchor
           metadata: {
             userId: userId,
             planId: effectivePlanId,
