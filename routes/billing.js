@@ -864,17 +864,25 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       // This ensures proration is calculated from the actual current plan, not scheduled plan
       console.log('🔍 Checking for subscription schedules for subscription:', subscription.id);
       try {
-        const schedules = await stripe.subscriptionSchedules.list({
-          subscription: subscription.id,
-          limit: 1
-        });
+        // Check subscription.schedule property first
+        let scheduleId = subscription.schedule;
         
-        console.log('🔍 Found', schedules.data.length, 'subscription schedules');
+        // If not found, list schedules by customer
+        if (!scheduleId) {
+          const schedules = await stripe.subscriptionSchedules.list({
+            customer: subscription.customer,
+            limit: 10
+          });
+          
+          const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+          if (matchingSchedule) {
+            scheduleId = matchingSchedule.id;
+          }
+        }
         
-        if (schedules.data.length > 0) {
-          const schedule = schedules.data[0];
-          console.log('🔍 Found active subscription schedule:', schedule.id, 'canceling it before upgrade');
-          await stripe.subscriptionSchedules.cancel(schedule.id);
+        if (scheduleId) {
+          console.log('🔍 Found active subscription schedule:', scheduleId, 'canceling it before upgrade');
+          await stripe.subscriptionSchedules.cancel(scheduleId);
           console.log('🔍 Subscription schedule canceled successfully');
         } else {
           console.log('🔍 No subscription schedules found');
@@ -1005,17 +1013,25 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     // This ensures proration is calculated from the actual current plan, not scheduled plan
     console.log('🔍 Checking for subscription schedules for subscription:', subscription.id);
     try {
-      const schedules = await stripe.subscriptionSchedules.list({
-        subscription: subscription.id,
-        limit: 1
-      });
+      // Check subscription.schedule property first
+      let scheduleId = subscription.schedule;
       
-      console.log('🔍 Found', schedules.data.length, 'subscription schedules');
+      // If not found, list schedules by customer
+      if (!scheduleId) {
+        const schedules = await stripe.subscriptionSchedules.list({
+          customer: subscription.customer,
+          limit: 10
+        });
+        
+        const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+        if (matchingSchedule) {
+          scheduleId = matchingSchedule.id;
+        }
+      }
       
-      if (schedules.data.length > 0) {
-        const schedule = schedules.data[0];
-        console.log('🔍 Found active subscription schedule:', schedule.id, 'canceling it before interval upgrade');
-        await stripe.subscriptionSchedules.cancel(schedule.id);
+      if (scheduleId) {
+        console.log('🔍 Found active subscription schedule:', scheduleId, 'canceling it before interval upgrade');
+        await stripe.subscriptionSchedules.cancel(scheduleId);
         console.log('🔍 Subscription schedule canceled successfully');
       } else {
         console.log('🔍 No subscription schedules found');
@@ -1061,6 +1077,63 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
 
   // Annual -> Monthly (downgrade): defer to end of current period, no proration
   if (currentInterval === 'annual' && newInterval === 'monthly') {
+    // Check if subscription is managed by a schedule
+    let scheduleId = subscription.schedule;
+    let hasSchedule = false;
+    
+    // If not found directly, list schedules by customer
+    if (!scheduleId) {
+      try {
+        const schedules = await stripe.subscriptionSchedules.list({
+          customer: subscription.customer,
+          limit: 10
+        });
+        
+        const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+        if (matchingSchedule) {
+          scheduleId = matchingSchedule.id;
+          hasSchedule = true;
+        }
+      } catch (listError) {
+        console.log('🔍 Could not list schedules, will try direct update:', listError.message);
+      }
+    } else {
+      hasSchedule = true;
+    }
+    
+    if (hasSchedule && scheduleId) {
+      // Subscription is managed by a schedule - cancel the schedule first
+      console.log('🔍 Subscription has schedule:', scheduleId, 'canceling schedule before annual->monthly change');
+      
+      try {
+        // Cancel the schedule - this allows the subscription to be updated directly
+        await stripe.subscriptionSchedules.cancel(scheduleId);
+        console.log('🔍 Subscription schedule canceled successfully, proceeding with direct update');
+        
+        // Retrieve the subscription again to get its current state after schedule cancellation
+        const refreshedSubscription = await stripe.subscriptions.retrieve(subscription.id);
+        subscription = refreshedSubscription;
+      } catch (scheduleCancelError) {
+        console.error('🔍 Error canceling subscription schedule:', scheduleCancelError.message);
+        
+        // If cancel fails, try releasing the schedule
+        try {
+          await stripe.subscriptionSchedules.release(scheduleId);
+          console.log('🔍 Released subscription from schedule, proceeding with direct update');
+          
+          // Retrieve the subscription again to get its current state after schedule release
+          const refreshedSubscription = await stripe.subscriptions.retrieve(subscription.id);
+          subscription = refreshedSubscription;
+        } catch (releaseError) {
+          console.error('🔍 Error releasing schedule:', releaseError.message);
+          return res.status(500).json({ 
+            error: 'Failed to update subscription. Please try again or contact support.' 
+          });
+        }
+      }
+    }
+    
+    // No schedule or schedule was released - update subscription directly
     const updateParams = {
       items: [{
         id: subscription.items.data[0].id,
