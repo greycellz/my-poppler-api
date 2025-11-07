@@ -953,18 +953,12 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     
     const userData = userDoc.data();
     const customerId = userData.stripeCustomerId;
-    const currentPlanId = userData.planId || 'basic';
 
     if (!customerId) {
       return res.status(400).json({ error: 'No subscription found' });
     }
 
-    // Validate that the plan supports the new interval
-    if (!PRICE_IDS[currentPlanId] || !PRICE_IDS[currentPlanId][newInterval]) {
-      return res.status(400).json({ error: `Plan ${currentPlanId} does not support ${newInterval} billing` });
-    }
-
-    // Get subscription (including trialing status)
+    // Get subscription (including trialing status) FIRST
     // CRITICAL FIX: Query must include 'trialing' status to support trial subscriptions
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
@@ -983,6 +977,16 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
 
     const subscriptionPlanId = subscription.metadata.planId;
     const scheduledPlanId = subscription.metadata.scheduledPlanId;
+    
+    // Validate that the plan supports the new interval using subscription metadata (not Firestore)
+    // This ensures we use the actual subscription plan, not potentially out-of-sync Firestore data
+    if (!subscriptionPlanId) {
+      return res.status(400).json({ error: 'Subscription plan not found in metadata' });
+    }
+    
+    if (!PRICE_IDS[subscriptionPlanId] || !PRICE_IDS[subscriptionPlanId][newInterval]) {
+      return res.status(400).json({ error: `Plan ${subscriptionPlanId} does not support ${newInterval} billing` });
+    }
     
     // Check if subscription is in trial
     const isInTrial = subscription.status === 'trialing';
