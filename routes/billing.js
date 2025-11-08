@@ -381,10 +381,24 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     let hasScheduledChange = false;
     
     if (scheduledPlanId && scheduledPlanId !== planId) {
-      // There's a scheduled change - user keeps current plan until period ends
+      // There's a scheduled change
       hasScheduledChange = true;
       console.log('🔍 Subscription debug - scheduled change detected via metadata');
-      console.log('🔍 Subscription debug - effective plan:', effectivePlan, effectiveInterval);
+      
+      // During trial, if it's an upgrade, show the scheduled plan as effective plan
+      // This gives users immediate feedback that their upgrade is registered
+      // For non-trial or downgrades, user keeps current plan until period ends
+      const isUpgrade = ['basic', 'pro', 'enterprise'].indexOf(scheduledPlanId) > ['basic', 'pro', 'enterprise'].indexOf(planId);
+      
+      if (isTrial && isUpgrade) {
+        // Trial upgrade: Show scheduled plan as effective (user sees what they're upgrading to)
+        effectivePlan = scheduledPlanId;
+        effectiveInterval = scheduledInterval || interval;
+        console.log('🔍 Subscription debug - trial upgrade detected, showing scheduled plan as effective:', effectivePlan, effectiveInterval);
+      } else {
+        // Non-trial or downgrade: User keeps current plan until period ends
+        console.log('🔍 Subscription debug - scheduled change (non-trial or downgrade), keeping current plan:', effectivePlan, effectiveInterval);
+      }
     } else {
       // Check if there's a mismatch between current price and metadata plan
       // This happens when proration_behavior: 'none' is used
