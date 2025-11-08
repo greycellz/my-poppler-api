@@ -967,7 +967,8 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     });
 
     // Find active, trialing, or past_due subscription
-    const subscription = subscriptions.data.find(sub => 
+    // Use let instead of const because we may need to reassign after releasing schedules
+    let subscription = subscriptions.data.find(sub => 
       sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due'
     );
 
