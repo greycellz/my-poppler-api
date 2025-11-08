@@ -366,8 +366,8 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     const isTrialEndingSoon = trialEnd && (trialEnd - Date.now() / 1000) < 3 * 24 * 60 * 60; // 3 days
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
-    const scheduledPlanId = subscription.metadata.scheduledPlanId;
-    const scheduledInterval = subscription.metadata.scheduledInterval;
+    let scheduledPlanId = subscription.metadata.scheduledPlanId;
+    let scheduledInterval = subscription.metadata.scheduledInterval;
     
     console.log('🔍 Subscription debug - metadata planId:', planId);
     console.log('🔍 Subscription debug - metadata interval:', interval);
