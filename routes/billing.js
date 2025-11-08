@@ -385,19 +385,25 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       hasScheduledChange = true;
       console.log('🔍 Subscription debug - scheduled change detected via metadata');
       
-      // During trial, if it's an upgrade, show the scheduled plan as effective plan
-      // This gives users immediate feedback that their upgrade is registered
-      // For non-trial or downgrades, user keeps current plan until period ends
-      const isUpgrade = ['basic', 'pro', 'enterprise'].indexOf(scheduledPlanId) > ['basic', 'pro', 'enterprise'].indexOf(planId);
+      // Determine if this is an upgrade or downgrade
+      const planHierarchy = ['basic', 'pro', 'enterprise'];
+      const isUpgrade = planHierarchy.indexOf(scheduledPlanId) > planHierarchy.indexOf(planId);
+      const isDowngrade = planHierarchy.indexOf(scheduledPlanId) < planHierarchy.indexOf(planId);
       
-      if (isTrial && isUpgrade) {
-        // Trial upgrade: Show scheduled plan as effective (user sees what they're upgrading to)
+      // For upgrades (trial or active), show scheduled plan as effective plan
+      // This gives users immediate feedback that their upgrade is registered
+      // For downgrades, user keeps current plan until period ends
+      if (isUpgrade) {
+        // Upgrade: Show scheduled plan as effective (user sees what they're upgrading to)
         effectivePlan = scheduledPlanId;
         effectiveInterval = scheduledInterval || interval;
-        console.log('🔍 Subscription debug - trial upgrade detected, showing scheduled plan as effective:', effectivePlan, effectiveInterval);
+        console.log('🔍 Subscription debug - upgrade detected, showing scheduled plan as effective:', effectivePlan, effectiveInterval);
+      } else if (isDowngrade) {
+        // Downgrade: User keeps current plan until period ends
+        console.log('🔍 Subscription debug - downgrade detected, keeping current plan until period ends:', effectivePlan, effectiveInterval);
       } else {
-        // Non-trial or downgrade: User keeps current plan until period ends
-        console.log('🔍 Subscription debug - scheduled change (non-trial or downgrade), keeping current plan:', effectivePlan, effectiveInterval);
+        // Same plan (shouldn't happen, but handle gracefully)
+        console.log('🔍 Subscription debug - scheduled change to same plan, keeping current plan:', effectivePlan, effectiveInterval);
       }
     } else {
       // Check if there's a mismatch between current price and metadata plan
@@ -730,74 +736,122 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     console.log('🔍 Change plan debug - effective plan:', effectivePlanId);
     console.log('🔍 Change plan debug - is downgrade:', isDowngrade);
     
-    // DOWNGRADES DURING TRIAL ARE ALLOWED
-    // User can downgrade to free or any lesser plan during trial
-    // The downgrade will take effect at trial end (30 days)
-    // User keeps current plan benefits until trial end
-    
-    // If in trial (upgrade OR downgrade), use subscription schedule with trial_end
+    // TRIAL UPGRADES: Immediate upgrade with features unlocked instantly
+    // TRIAL DOWNGRADES: Schedule for trial end (user keeps current features until trial ends)
     if (isInTrial) {
-      // Create subscription schedule for trial end
-      // This works for both upgrades and downgrades during trial
-      // NOTE: Cannot set phases when using from_subscription - must create then update
-      try {
-        // Step 1: Create schedule from subscription (without phases or metadata)
-        // NOTE: Stripe doesn't allow setting metadata or phases when from_subscription is set
-        const schedule = await stripe.subscriptionSchedules.create({
-          from_subscription: subscription.id
-        });
+      if (isDowngrade) {
+        // Downgrade during trial: Schedule for trial end
+        // User keeps current plan benefits until trial ends
+        try {
+          const schedule = await stripe.subscriptionSchedules.create({
+            from_subscription: subscription.id
+          });
+          
+          await stripe.subscriptionSchedules.update(schedule.id, {
+            metadata: {
+              userId: userId,
+              planId: subscription.metadata.planId,
+              interval: subscription.metadata.interval,
+              scheduledPlanId: newPlanId,
+              scheduledInterval: interval,
+            },
+            phases: [
+              {
+                items: [{
+                  price: subscription.items.data[0].price.id, // Keep current price during trial
+                  quantity: 1,
+                }],
+                start_date: subscription.current_period_start,
+                end_date: trialEnd,  // Keep current plan until trial ends
+              },
+              {
+                items: [{
+                  price: newPriceId, // New price starts after trial ends
+                  quantity: 1,
+                }],
+                start_date: trialEnd, // Start after trial ends
+              }
+            ]
+          });
+          
+          await stripe.subscriptions.update(subscription.id, {
+            metadata: {
+              ...subscription.metadata,
+              scheduledPlanId: newPlanId,
+              scheduledInterval: interval,
+              scheduledChangeDate: trialEnd
+            }
+          });
+          
+          res.json({ 
+            success: true, 
+            message: 'Plan downgrade scheduled for end of trial period',
+            scheduleId: schedule.id,
+            newPlan: newPlanId,
+            interval: interval,
+            effectiveDate: trialEnd
+          });
+          return;
+        } catch (scheduleError) {
+          console.error('Subscription schedule error during trial downgrade:', scheduleError);
+          return res.status(500).json({ error: 'Failed to schedule plan downgrade for trial' });
+        }
+      } else {
+        // Upgrade during trial: Immediate upgrade with Pro features unlocked instantly
+        // Update subscription items to Pro price immediately, keep trial_end unchanged
+        console.log('🔍 Trial upgrade - applying immediately, keeping trial_end unchanged');
         
-        // Step 2: Update schedule with phases and metadata
-        await stripe.subscriptionSchedules.update(schedule.id, {
+        // First, check if there's an active subscription schedule and release it
+        let scheduleId = subscription.schedule;
+        if (!scheduleId) {
+          try {
+            const schedules = await stripe.subscriptionSchedules.list({
+              customer: subscription.customer,
+              limit: 10
+            });
+            const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+            if (matchingSchedule) {
+              scheduleId = matchingSchedule.id;
+            }
+          } catch (listError) {
+            console.log('🔍 Could not list schedules:', listError.message);
+          }
+        }
+        
+        if (scheduleId) {
+          console.log('🔍 Found schedule during trial upgrade, releasing it');
+          await stripe.subscriptionSchedules.release(scheduleId);
+          subscription = await stripe.subscriptions.retrieve(subscription.id);
+        }
+        
+        // Immediate upgrade: Update items to Pro price, keep trial_end unchanged
+        const updateParams = {
+          items: [{
+            id: subscription.items.data[0].id,
+            price: newPriceId, // Pro price
+          }],
+          trial_end: trialEnd, // Keep trial_end unchanged
+          proration_behavior: 'none', // No proration during trial - nothing has been paid yet
           metadata: {
             userId: userId,
-            planId: subscription.metadata.planId,
-            interval: subscription.metadata.interval,
-            scheduledPlanId: newPlanId,
-            scheduledInterval: interval,
-          },
-          phases: [
-            {
-              items: [{
-                price: subscription.items.data[0].price.id, // Keep current price during trial
-                quantity: 1,
-              }],
-              start_date: subscription.current_period_start, // Start from current period start
-              end_date: trialEnd,  // ← Use trial_end, not current_period_end
-            },
-            {
-              items: [{
-                price: newPriceId, // New price starts after trial ends
-                quantity: 1,
-              }],
-              start_date: trialEnd, // Start after trial ends
-            }
-          ]
-        });
-        
-        // Step 3: Also update subscription metadata so scheduled change is detected
-        await stripe.subscriptions.update(subscription.id, {
-          metadata: {
-            ...subscription.metadata,
-            scheduledPlanId: newPlanId,
-            scheduledInterval: interval,
-            scheduledChangeDate: trialEnd
+            planId: newPlanId, // Update to Pro immediately
+            interval: interval,
+            scheduledPlanId: null, // Clear any scheduled changes
+            scheduledInterval: null,
+            scheduledChangeDate: null
           }
-        });
+        };
         
-        const actionType = isDowngrade ? 'downgrade' : 'upgrade';
-        res.json({ 
-          success: true, 
-          message: `Plan ${actionType} scheduled for end of trial period`,
-          scheduleId: schedule.id,
+        const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
+        
+        res.json({
+          success: true,
+          message: 'Plan upgraded to Pro immediately. Pro features are now active.',
+          subscription: updatedSubscription,
           newPlan: newPlanId,
-          interval: interval,
-          effectiveDate: trialEnd
+          interval: interval
         });
         return;
-      } catch (scheduleError) {
-        console.error('Subscription schedule error during trial:', scheduleError);
-        return res.status(500).json({ error: 'Failed to schedule plan change for trial' });
       }
     }
     
