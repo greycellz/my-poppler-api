@@ -166,6 +166,41 @@ async function handleSubscriptionUpdated(subscription) {
       return;
     }
 
+    // CRITICAL: If subscription is canceled but still in trial, don't revert to free yet
+    // The subscription should remain active until trial ends
+    const now = Date.now() / 1000;
+    const isInTrial = subscription.status === 'trialing' || 
+                      (subscription.trial_end !== null && subscription.trial_end > now);
+    const isCanceled = subscription.status === 'canceled' || subscription.cancel_at_period_end;
+    
+    // If subscription is canceled but still in trial, keep the subscription active
+    // Don't revert to free until trial actually ends
+    if (isCanceled && isInTrial) {
+      console.log(`⚠️ Subscription ${subscription.id} is canceled but still in trial - keeping subscription active until trial ends`);
+      // Update subscription status but keep plan active
+      const GCPClient = require('./gcp-client');
+      const gcpClient = new GCPClient();
+      
+      const updateData = {
+        subscriptionId: subscription.id,
+        subscriptionStatus: 'trialing', // Keep as trialing even though canceled
+        planId: planId,
+        interval: interval,
+        cancelAtPeriodEnd: true, // Mark as canceled but still active
+        updatedAt: new Date().toISOString()
+      };
+
+      if (subscription.trial_end) {
+        updateData.currentPeriodEnd = subscription.trial_end;
+      } else if (subscription.current_period_end) {
+        updateData.currentPeriodEnd = subscription.current_period_end;
+      }
+
+      await gcpClient.firestore.collection('users').doc(userId).update(updateData);
+      console.log(`✅ User ${userId} subscription kept active during trial cancellation`);
+      return;
+    }
+
     // Update user document with new subscription info
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
@@ -185,7 +220,11 @@ async function handleSubscriptionUpdated(subscription) {
 
     // Track trial-to-paid conversion
     // Check if subscription was trialing and is now active
-    const wasTrialing = subscription.previous_attributes?.status === 'trialing';
+    // CRITICAL: Check both previous status AND previous trial_end to catch all trial conversions
+    const previousTrialEnd = subscription.previous_attributes?.trial_end;
+    const previousStatus = subscription.previous_attributes?.status;
+    const wasTrialing = previousStatus === 'trialing' || 
+                        (previousTrialEnd !== null && previousTrialEnd !== undefined && previousTrialEnd > (Date.now() / 1000));
     const isNowActive = subscription.status === 'active';
     
     if (wasTrialing && isNowActive) {
@@ -212,6 +251,19 @@ async function handleSubscriptionDeleted(subscription) {
 
     if (!userId) {
       console.error('❌ No userId in subscription metadata');
+      return;
+    }
+
+    // CRITICAL: Check if subscription was in trial when deleted
+    // If it was canceled during trial, the deleted event should only fire after trial ends
+    // But if it fires prematurely, we should verify the subscription is actually deleted
+    const wasInTrial = subscription.trial_end && subscription.trial_end > (Date.now() / 1000);
+    
+    if (wasInTrial) {
+      console.log(`⚠️ Subscription ${subscription.id} was deleted but was in trial - this should not happen during trial cancellation`);
+      console.log(`⚠️ Trial end was: ${new Date(subscription.trial_end * 1000).toISOString()}`);
+      // Don't revert to free if subscription was in trial - wait for trial to actually end
+      // The subscription.updated event should handle the cancellation status
       return;
     }
 

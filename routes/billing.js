@@ -155,9 +155,14 @@ router.post('/create-trial-checkout-session', authenticateToken, async (req, res
       });
 
       // Check if user has any trialing subscription (even if canceled_at_period_end)
-      const hasTrialingSubscription = existingSubscriptions.data.some(sub => 
-        sub.status === 'trialing'
-      );
+      // CRITICAL: Must check both status AND trial_end because schedules can make status 'active' 
+      // even when trial_end is still in the future
+      const now = Date.now() / 1000;
+      const hasTrialingSubscription = existingSubscriptions.data.some(sub => {
+        const isInTrial = sub.status === 'trialing' || 
+                         (sub.trial_end !== null && sub.trial_end > now);
+        return isInTrial;
+      });
 
       if (hasTrialingSubscription) {
         return res.status(400).json({ 
@@ -361,9 +366,13 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     }
 
     // Check if subscription is in trial
-    const isTrial = subscription.status === 'trialing';
+    // CRITICAL: Must check both status AND trial_end because schedules can make status 'active' 
+    // even when trial_end is still in the future (Stripe shows "Trial ends Dec xxx" in this case)
+    const now = Date.now() / 1000;
+    const isTrial = subscription.status === 'trialing' || 
+                    (subscription.trial_end !== null && subscription.trial_end > now);
     const trialEnd = subscription.trial_end; // Unix timestamp
-    const isTrialEndingSoon = trialEnd && (trialEnd - Date.now() / 1000) < 3 * 24 * 60 * 60; // 3 days
+    const isTrialEndingSoon = trialEnd && (trialEnd - now) < 3 * 24 * 60 * 60; // 3 days
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
     let scheduledPlanId = subscription.metadata.scheduledPlanId;
@@ -379,11 +388,19 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     let effectivePlan = planId;
     let effectiveInterval = interval;
     let hasScheduledChange = false;
+    let isIntervalOnlyChange = false;
     
-    if (scheduledPlanId && scheduledPlanId !== planId) {
-      // There's a scheduled change
+    // Check for scheduled interval change (plan stays same, interval changes)
+    if (scheduledInterval && scheduledInterval !== interval && (!scheduledPlanId || scheduledPlanId === planId)) {
       hasScheduledChange = true;
-      console.log('🔍 Subscription debug - scheduled change detected via metadata');
+      isIntervalOnlyChange = true;
+      effectiveInterval = scheduledInterval;
+      scheduledPlanId = planId; // Ensure scheduledPlanId is set to current plan for interval-only changes
+      console.log('🔍 Subscription debug - scheduled interval change detected:', interval, '→', scheduledInterval);
+    } else if (scheduledPlanId && scheduledPlanId !== planId) {
+      // There's a scheduled plan change (with or without interval change)
+      hasScheduledChange = true;
+      console.log('🔍 Subscription debug - scheduled plan change detected via metadata');
       
       // Determine if this is an upgrade or downgrade
       const planHierarchy = ['basic', 'pro', 'enterprise'];
@@ -457,9 +474,10 @@ router.get('/subscription', authenticateToken, async (req, res) => {
       trialEnd: trialEnd,  // Add trial end date
       trialEndingSoon: isTrialEndingSoon,  // Add trial ending soon flag
       scheduledChange: hasScheduledChange ? {
-        newPlan: scheduledPlanId,
-        newInterval: scheduledInterval,
-        effectiveDate: subscription.current_period_end
+        newPlan: scheduledPlanId || planId, // Use current plan if only interval changes
+        newInterval: scheduledInterval || interval,
+        effectiveDate: subscription.current_period_end,
+        isIntervalOnly: isIntervalOnlyChange // Flag to indicate interval-only change
       } : null
     });
   } catch (error) {
@@ -545,11 +563,25 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
         await stripe.subscriptionSchedules.cancel(scheduleId);
         console.log('✅ Subscription schedule canceled successfully');
         
+        // CRITICAL: Preserve trial_end if subscription is in trial
+        // When canceling a schedule during trial, we must explicitly preserve trial_end
+        // to keep subscription in trialing status
+        const now = Date.now() / 1000;
+        const isInTrial = subscription.status === 'trialing' || 
+                          (subscription.trial_end !== null && subscription.trial_end > now);
+        
+        if (isInTrial && subscription.trial_end) {
+          console.log('🔍 Preserving trial_end after schedule cancellation during trial');
+          await stripe.subscriptions.update(subscription.id, {
+            trial_end: subscription.trial_end // ✅ EXPLICITLY PRESERVE trial_end
+          });
+        }
+        
         // Retrieve updated subscription to get the current state
         canceledSubscription = await stripe.subscriptions.retrieve(subscription.id);
         
         // Determine cancellation date: trial_end if in trial, otherwise current_period_end
-        cancellationDate = subscription.status === 'trialing' 
+        cancellationDate = isInTrial && subscription.trial_end
           ? subscription.trial_end 
           : subscription.current_period_end;
       } catch (scheduleCancelError) {
@@ -558,20 +590,46 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
         try {
           await stripe.subscriptionSchedules.release(scheduleId);
           console.log('✅ Released subscription from schedule, now canceling directly');
-          canceledSubscription = await stripe.subscriptions.update(subscription.id, {
+          
+          // CRITICAL: Preserve trial_end if subscription is in trial
+          const now = Date.now() / 1000;
+          const isInTrial = subscription.status === 'trialing' || 
+                            (subscription.trial_end !== null && subscription.trial_end > now);
+          
+          const cancelParams = {
             cancel_at_period_end: true
-          });
-          cancellationDate = subscription.status === 'trialing' 
+          };
+          
+          if (isInTrial && subscription.trial_end) {
+            cancelParams.trial_end = subscription.trial_end; // ✅ PRESERVE trial_end
+            console.log('🔍 Preserving trial_end during cancellation after schedule release');
+          }
+          
+          canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
+          cancellationDate = isInTrial && subscription.trial_end
             ? subscription.trial_end 
             : subscription.current_period_end;
         } catch (releaseError) {
           console.error('🔍 Error releasing schedule:', releaseError.message);
           // Last resort: try direct cancellation (may fail, but worth trying)
           console.log('🔍 Attempting direct cancellation as last resort');
-          canceledSubscription = await stripe.subscriptions.update(subscription.id, {
+          
+          // CRITICAL: Preserve trial_end if subscription is in trial
+          const now = Date.now() / 1000;
+          const isInTrial = subscription.status === 'trialing' || 
+                            (subscription.trial_end !== null && subscription.trial_end > now);
+          
+          const cancelParams = {
             cancel_at_period_end: true
-          });
-          cancellationDate = subscription.status === 'trialing' 
+          };
+          
+          if (isInTrial && subscription.trial_end) {
+            cancelParams.trial_end = subscription.trial_end; // ✅ PRESERVE trial_end
+            console.log('🔍 Preserving trial_end during direct cancellation');
+          }
+          
+          canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
+          cancellationDate = isInTrial && subscription.trial_end
             ? subscription.trial_end 
             : subscription.current_period_end;
         }
@@ -579,17 +637,35 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
     } else {
       // No schedule exists - cancel subscription directly
       console.log('🔍 No subscription schedule found, canceling subscription directly');
-      canceledSubscription = await stripe.subscriptions.update(subscription.id, {
+      
+      // CRITICAL: Preserve trial_end if subscription is in trial
+      const now = Date.now() / 1000;
+      const isInTrial = subscription.status === 'trialing' || 
+                        (subscription.trial_end !== null && subscription.trial_end > now);
+      
+      const cancelParams = {
         cancel_at_period_end: true
-      });
+      };
+      
+      if (isInTrial && subscription.trial_end) {
+        cancelParams.trial_end = subscription.trial_end; // ✅ PRESERVE trial_end
+        console.log('🔍 Preserving trial_end during direct cancellation (no schedule)');
+      }
+      
+      canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
       
       // Determine cancellation date: trial_end if in trial, otherwise current_period_end
-      cancellationDate = subscription.status === 'trialing' 
+      cancellationDate = isInTrial && subscription.trial_end
         ? subscription.trial_end 
         : subscription.current_period_end;
     }
 
-    const cancellationMessage = subscription.status === 'trialing'
+    // Use isInTrial (already calculated) instead of status check for accurate message
+    // This handles subscriptions with schedules that might have status 'active' but trial_end in future
+    const now = Date.now() / 1000;
+    const isInTrialForMessage = subscription.status === 'trialing' || 
+                                  (subscription.trial_end !== null && subscription.trial_end > now);
+    const cancellationMessage = isInTrialForMessage
       ? 'Subscription will be canceled at the end of your trial period'
       : 'Subscription will be canceled at the end of your current billing period';
 
@@ -1006,9 +1082,14 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         }
         
         if (scheduleId) {
-          console.log('🔍 Found active subscription schedule:', scheduleId, 'canceling it before upgrade');
-          await stripe.subscriptionSchedules.cancel(scheduleId);
-          console.log('🔍 Subscription schedule canceled successfully');
+          // Use release() instead of cancel() to avoid setting cancel_at_period_end on subscription
+          // We're immediately upgrading, so we just need to detach the schedule
+          console.log('🔍 Found active subscription schedule:', scheduleId, 'releasing it before upgrade');
+          await stripe.subscriptionSchedules.release(scheduleId);
+          console.log('🔍 Subscription schedule released successfully');
+          
+          // Retrieve subscription after schedule release to get current state
+          subscription = await stripe.subscriptions.retrieve(subscription.id);
         } else {
           console.log('🔍 No subscription schedules found');
         }
