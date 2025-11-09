@@ -168,9 +168,15 @@ async function handleSubscriptionUpdated(subscription) {
 
     // CRITICAL: If subscription is canceled but still in trial, don't revert to free yet
     // The subscription should remain active until trial ends
+    // CRITICAL: Also check if current_period_end > trial_end to detect ended trials
     const now = Date.now() / 1000;
-    const isInTrial = subscription.status === 'trialing' || 
-                      (subscription.trial_end !== null && subscription.trial_end > now);
+    const trialEnd = subscription.trial_end;
+    const hasTrialEnded = trialEnd !== null && 
+                          subscription.current_period_end > trialEnd;
+    const isInTrial = !hasTrialEnded && (
+      subscription.status === 'trialing' || 
+      (trialEnd !== null && trialEnd > now)
+    );
     const isCanceled = subscription.status === 'canceled' || subscription.cancel_at_period_end;
     
     // If subscription is canceled but still in trial, keep the subscription active
