@@ -391,12 +391,13 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     let isIntervalOnlyChange = false;
     
     // Check for scheduled interval change (plan stays same, interval changes)
+    // CRITICAL: Check metadata FIRST - it's the source of truth for scheduled changes
     if (scheduledInterval && scheduledInterval !== interval && (!scheduledPlanId || scheduledPlanId === planId)) {
       hasScheduledChange = true;
       isIntervalOnlyChange = true;
       effectiveInterval = scheduledInterval;
       scheduledPlanId = planId; // Ensure scheduledPlanId is set to current plan for interval-only changes
-      console.log('🔍 Subscription debug - scheduled interval change detected:', interval, '→', scheduledInterval);
+      console.log('🔍 Subscription debug - scheduled interval change detected via metadata:', interval, '→', scheduledInterval);
     } else if (scheduledPlanId && scheduledPlanId !== planId) {
       // There's a scheduled plan change (with or without interval change)
       hasScheduledChange = true;
@@ -422,9 +423,10 @@ router.get('/subscription', authenticateToken, async (req, res) => {
         // Same plan (shouldn't happen, but handle gracefully)
         console.log('🔍 Subscription debug - scheduled change to same plan, keeping current plan:', effectivePlan, effectiveInterval);
       }
-    } else {
-      // Check if there's a mismatch between current price and metadata plan
-      // This happens when proration_behavior: 'none' is used
+    } else if (!hasScheduledChange) {
+      // Only check price mismatch if we haven't already detected a scheduled change via metadata
+      // This prevents overwriting metadata-based scheduled changes with price-based detection
+      // Price mismatch check is a fallback for cases where metadata wasn't set correctly
       if (subscription.items.data.length > 0) {
         const currentItem = subscription.items.data[0];
         const currentPriceId = currentItem.price.id;
@@ -437,7 +439,7 @@ router.get('/subscription', authenticateToken, async (req, res) => {
           // The subscription item has been changed but billing hasn't started yet
           // User still has access to the original plan
           hasScheduledChange = true;
-          console.log('🔍 Subscription debug - scheduled change detected via price mismatch');
+          console.log('🔍 Subscription debug - scheduled change detected via price mismatch (fallback)');
           console.log('🔍 Subscription debug - effective plan:', effectivePlan, effectiveInterval);
           
           // Find what the current price represents (this is what they'll be billed for next period)
@@ -1278,6 +1280,7 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
                   }],
                   start_date: subscription.current_period_start,
                   end_date: trialEnd, // Keep monthly until trial ends
+                  // No proration during trial - nothing has been paid yet
                 },
                 {
                   items: [{
@@ -1285,8 +1288,12 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
                     quantity: 1,
                   }],
                   start_date: trialEnd, // Start annual after trial ends
+                  // No proration needed - this is a fresh start after trial
                 }
-              ]
+              ],
+              // CRITICAL: Prevent proration during trial by setting end_behavior
+              // This ensures no invoices are created until trial ends
+              end_behavior: 'none' // Don't cancel subscription when schedule ends
             });
           } else {
             // Create new schedule
@@ -1312,6 +1319,7 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
                 }],
                 start_date: subscription.current_period_start,
                 end_date: trialEnd, // Keep monthly until trial ends
+                // No proration during trial - nothing has been paid yet
               },
               {
                 items: [{
@@ -1319,21 +1327,26 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
                   quantity: 1,
                 }],
                 start_date: trialEnd, // Start annual after trial ends
+                // No proration needed - this is a fresh start after trial
               }
-            ]
+            ],
+            // CRITICAL: Prevent proration during trial by setting end_behavior
+            // This ensures no invoices are created until trial ends
+            end_behavior: 'none' // Don't cancel subscription when schedule ends
             });
             scheduleId = schedule.id;
           }
           
-          // Update subscription metadata immediately so UI shows annual
+          // Update subscription metadata to track scheduled change
           // CRITICAL: Preserve trial_end to keep subscription in trialing status
-          // This gives user immediate feedback that change is scheduled
+          // CRITICAL: Do NOT update interval metadata - keep it as current interval until trial ends
+          // Only update scheduledInterval to track the scheduled change
           await stripe.subscriptions.update(subscription.id, {
             trial_end: trialEnd, // ✅ EXPLICITLY PRESERVE trial_end to maintain trialing status
             metadata: {
               ...subscription.metadata,
-              interval: 'annual', // Update metadata for immediate UI feedback
-              scheduledInterval: 'annual',
+              // Keep interval as current (monthly) - don't change until trial ends
+              scheduledInterval: 'annual', // Track scheduled change
               scheduledChangeDate: trialEnd
             }
           });
