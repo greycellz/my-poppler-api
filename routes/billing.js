@@ -1393,10 +1393,20 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
   // Monthly -> Annual (upgrade): charge immediately, start a new annual period today
   if (currentInterval === 'monthly' && newInterval === 'annual') {
     // ✅ CRITICAL: Guard against trial subscriptions - this path should NOT execute during trial
-    if (subscription.trial_end && subscription.trial_end > Date.now() / 1000) {
+    // Use hasTrialEnded check (same as trial detection logic) to handle ended trials correctly
+    const trialEndForGuard = subscription.trial_end;
+    const hasTrialEndedForGuard = trialEndForGuard !== null && 
+                                   subscription.current_period_end > trialEndForGuard;
+    const isInTrialForGuard = !hasTrialEndedForGuard && (
+      subscription.status === 'trialing' || 
+      (trialEndForGuard !== null && trialEndForGuard > Date.now() / 1000)
+    );
+    
+    if (isInTrialForGuard) {
       console.error('❌ Attempted non-trial path for trial subscription - this should not happen!');
       console.error('🔍 Subscription trial_end:', subscription.trial_end);
       console.error('🔍 Current time:', Date.now() / 1000);
+      console.error('🔍 Has trial ended:', hasTrialEndedForGuard);
       return res.status(400).json({ 
         error: 'Cannot change interval during trial - use trial-specific path' 
       });
@@ -1478,10 +1488,20 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
   // Annual -> Monthly (downgrade): defer to end of current period, no proration
   if (currentInterval === 'annual' && newInterval === 'monthly') {
     // ✅ CRITICAL: Guard against trial subscriptions - this path should NOT execute during trial
-    if (subscription.trial_end && subscription.trial_end > Date.now() / 1000) {
+    // Use hasTrialEnded check (same as trial detection logic) to handle ended trials correctly
+    const trialEndForGuard = subscription.trial_end;
+    const hasTrialEndedForGuard = trialEndForGuard !== null && 
+                                   subscription.current_period_end > trialEndForGuard;
+    const isInTrialForGuard = !hasTrialEndedForGuard && (
+      subscription.status === 'trialing' || 
+      (trialEndForGuard !== null && trialEndForGuard > Date.now() / 1000)
+    );
+    
+    if (isInTrialForGuard) {
       console.error('❌ Attempted non-trial path for trial subscription - this should not happen!');
       console.error('🔍 Subscription trial_end:', subscription.trial_end);
       console.error('🔍 Current time:', Date.now() / 1000);
+      console.error('🔍 Has trial ended:', hasTrialEndedForGuard);
       return res.status(400).json({ 
         error: 'Cannot change interval during trial - use trial-specific path' 
       });
