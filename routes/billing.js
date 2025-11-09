@@ -368,11 +368,17 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     // Check if subscription is in trial
     // CRITICAL: Must check both status AND trial_end because schedules can make status 'active' 
     // even when trial_end is still in the future (Stripe shows "Trial ends Dec xxx" in this case)
+    // CRITICAL: Also check if current_period_end > trial_end to detect ended trials
+    // (Stripe may keep trial_end set even after trial ends, and server time may not match Stripe's simulated time)
     const now = Date.now() / 1000;
-    const isTrial = subscription.status === 'trialing' || 
-                    (subscription.trial_end !== null && subscription.trial_end > now);
     const trialEnd = subscription.trial_end; // Unix timestamp
-    const isTrialEndingSoon = trialEnd && (trialEnd - now) < 3 * 24 * 60 * 60; // 3 days
+    const hasTrialEnded = trialEnd !== null && 
+                          subscription.current_period_end > trialEnd; // Trial ended if billing period started after trial_end
+    const isTrial = !hasTrialEnded && (
+      subscription.status === 'trialing' || 
+      (trialEnd !== null && trialEnd > now)
+    );
+    const isTrialEndingSoon = trialEnd && !hasTrialEnded && (trialEnd - now) < 3 * 24 * 60 * 60; // 3 days
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
     let scheduledPlanId = subscription.metadata.scheduledPlanId;
