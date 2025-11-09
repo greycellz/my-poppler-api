@@ -818,119 +818,71 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     console.log('🔍 Change plan debug - effective plan:', effectivePlanId);
     console.log('🔍 Change plan debug - is downgrade:', isDowngrade);
     
-    // TRIAL UPGRADES: Immediate upgrade with features unlocked instantly
-    // TRIAL DOWNGRADES: Schedule for trial end (user keeps current features until trial ends)
+    // TRIAL CHANGES: Use direct updates (no schedules) to avoid proration previews
+    // At trial end, user is charged full amount of whatever plan/interval is set
     if (isInTrial) {
       if (isDowngrade) {
-        // Downgrade during trial: Schedule for trial end
-        // User keeps current plan benefits until trial ends
-        try {
-          // Check for existing schedule first (may exist from previous interval change)
-          let scheduleId = subscription.schedule;
-          if (!scheduleId) {
-            try {
-              const schedules = await stripe.subscriptionSchedules.list({
-                customer: subscription.customer,
-                limit: 10
-              });
-              const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
-              if (matchingSchedule) {
-                scheduleId = matchingSchedule.id;
-              }
-            } catch (listError) {
-              console.log('🔍 Could not list schedules:', listError.message);
+        // Downgrade during trial: Direct update (no schedule)
+        // User gets new plan features immediately, but no charge until trial ends
+        console.log('🔍 Trial downgrade - applying directly, no schedule to avoid proration preview');
+        
+        // First, release any existing schedule (from previous changes)
+        let scheduleId = subscription.schedule;
+        if (!scheduleId) {
+          try {
+            const schedules = await stripe.subscriptionSchedules.list({
+              customer: subscription.customer,
+              limit: 10
+            });
+            const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+            if (matchingSchedule) {
+              scheduleId = matchingSchedule.id;
             }
+          } catch (listError) {
+            console.log('🔍 Could not list schedules:', listError.message);
           }
-          
-          if (scheduleId) {
-            // Update existing schedule
-            console.log('🔍 Found existing schedule during trial downgrade, updating it:', scheduleId);
-            await stripe.subscriptionSchedules.update(scheduleId, {
-              metadata: {
-                userId: userId,
-                planId: subscription.metadata.planId,
-                interval: subscription.metadata.interval,
-                scheduledPlanId: newPlanId,
-                scheduledInterval: interval,
-              },
-              phases: [
-                {
-                  items: [{
-                    price: subscription.items.data[0].price.id, // Keep current price during trial
-                    quantity: 1,
-                  }],
-                  start_date: subscription.current_period_start,
-                  end_date: trialEnd,  // Keep current plan until trial ends
-                },
-                {
-                  items: [{
-                    price: newPriceId, // New price starts after trial ends
-                    quantity: 1,
-                  }],
-                  start_date: trialEnd, // Start after trial ends
-                }
-              ]
-            });
-          } else {
-            // Create new schedule
-            console.log('🔍 No existing schedule found, creating new schedule for trial downgrade');
-            const schedule = await stripe.subscriptionSchedules.create({
-              from_subscription: subscription.id
-            });
-            
-            await stripe.subscriptionSchedules.update(schedule.id, {
-              metadata: {
-                userId: userId,
-                planId: subscription.metadata.planId,
-                interval: subscription.metadata.interval,
-                scheduledPlanId: newPlanId,
-                scheduledInterval: interval,
-              },
-              phases: [
-                {
-                  items: [{
-                    price: subscription.items.data[0].price.id, // Keep current price during trial
-                    quantity: 1,
-                  }],
-                  start_date: subscription.current_period_start,
-                  end_date: trialEnd,  // Keep current plan until trial ends
-                },
-                {
-                  items: [{
-                    price: newPriceId, // New price starts after trial ends
-                    quantity: 1,
-                  }],
-                  start_date: trialEnd, // Start after trial ends
-                }
-              ]
-            });
-            scheduleId = schedule.id;
-          }
-          
-          // CRITICAL: Preserve trial_end to keep subscription in trialing status
-          await stripe.subscriptions.update(subscription.id, {
-            trial_end: trialEnd, // ✅ EXPLICITLY PRESERVE trial_end to maintain trialing status
-            metadata: {
-              ...subscription.metadata,
-              scheduledPlanId: newPlanId,
-              scheduledInterval: interval,
-              scheduledChangeDate: trialEnd
-            }
-          });
-          
-          res.json({ 
-            success: true, 
-            message: 'Plan downgrade scheduled for end of trial period',
-            scheduleId: scheduleId,
-            newPlan: newPlanId,
-            interval: interval,
-            effectiveDate: trialEnd
-          });
-          return;
-        } catch (scheduleError) {
-          console.error('Subscription schedule error during trial downgrade:', scheduleError);
-          return res.status(500).json({ error: 'Failed to schedule plan downgrade for trial' });
         }
+        
+        if (scheduleId) {
+          console.log('🔍 Found schedule during trial downgrade, releasing it');
+          await stripe.subscriptionSchedules.release(scheduleId);
+          subscription = await stripe.subscriptions.retrieve(subscription.id);
+        }
+        
+        // Direct update: Change to new plan immediately, preserve trial_end
+        const updateParams = {
+          items: [{
+            id: subscription.items.data[0].id,
+            price: newPriceId, // New plan price
+          }],
+          trial_end: trialEnd, // ✅ EXPLICITLY PRESERVE trial_end
+          proration_behavior: 'none', // ✅ No proration during trial
+          metadata: {
+            userId: userId,
+            planId: newPlanId, // Update to new plan immediately
+            interval: interval,
+            scheduledPlanId: null, // Clear scheduled changes
+            scheduledInterval: null,
+            scheduledChangeDate: null
+          }
+        };
+        
+        // If subscription is pending cancellation, cancel the cancellation
+        if (subscription.cancel_at_period_end) {
+          updateParams.cancel_at_period_end = false;
+          console.log('🔍 Trial downgrade from pending cancellation - canceling the cancellation');
+        }
+        
+        const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
+        
+        res.json({ 
+          success: true, 
+          message: 'Plan downgraded successfully. New plan features are now active.',
+          subscription: updatedSubscription,
+          newPlan: newPlanId,
+          interval: interval
+        });
+        return;
       } else {
         // Upgrade during trial: Immediate upgrade with Pro features unlocked instantly
         // Update subscription items to Pro price immediately, keep trial_end unchanged
@@ -1237,240 +1189,129 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     const isIntervalDowngrade = currentInterval === 'annual' && newInterval === 'monthly';
     
     // Handle interval changes during trial
+    // Use direct updates (no schedules) to avoid proration previews
+    // At trial end, user is charged full amount of whatever plan/interval is set
     if (isInTrial) {
       if (isIntervalUpgrade) {
-        // Monthly → Annual during trial: Schedule for trial end (consistent with plan changes)
-        // User keeps monthly benefits until trial ends, then switches to annual
-        // Using schedules ensures trial period is preserved and cancellation works correctly
-        console.log('🔍 Trial interval change - Monthly→Annual upgrade, scheduling for trial end');
+        // Monthly → Annual during trial: Direct update (no schedule)
+        // User gets annual plan immediately, but no charge until trial ends
+        console.log('🔍 Trial interval change - Monthly→Annual, applying directly, no schedule to avoid proration preview');
         
-        try {
-          // Check for existing schedule first (may exist from previous plan/interval change)
-          let scheduleId = subscription.schedule;
-          if (!scheduleId) {
-            try {
-              const schedules = await stripe.subscriptionSchedules.list({
-                customer: subscription.customer,
-                limit: 10
-              });
-              const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
-              if (matchingSchedule) {
-                scheduleId = matchingSchedule.id;
-              }
-            } catch (listError) {
-              console.log('🔍 Could not list schedules:', listError.message);
+        // First, release any existing schedule (from previous changes)
+        let scheduleId = subscription.schedule;
+        if (!scheduleId) {
+          try {
+            const schedules = await stripe.subscriptionSchedules.list({
+              customer: subscription.customer,
+              limit: 10
+            });
+            const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+            if (matchingSchedule) {
+              scheduleId = matchingSchedule.id;
             }
+          } catch (listError) {
+            console.log('🔍 Could not list schedules:', listError.message);
           }
-          
-          if (scheduleId) {
-            // Update existing schedule
-            console.log('🔍 Found existing schedule during trial interval upgrade, updating it:', scheduleId);
-            await stripe.subscriptionSchedules.update(scheduleId, {
-              metadata: {
-                userId: userId,
-                planId: subscription.metadata.planId,
-                interval: subscription.metadata.interval,
-                scheduledInterval: 'annual',
-              },
-              phases: [
-                {
-                  items: [{
-                    price: subscription.items.data[0].price.id, // Keep current monthly price during trial
-                    quantity: 1,
-                  }],
-                  start_date: subscription.current_period_start,
-                  end_date: trialEnd, // Keep monthly until trial ends
-                  // No proration during trial - nothing has been paid yet
-                },
-                {
-                  items: [{
-                    price: newPriceId, // Switch to annual after trial ends
-                    quantity: 1,
-                  }],
-                  start_date: trialEnd, // Start annual after trial ends
-                  // No proration needed - this is a fresh start after trial
-                }
-              ],
-              // CRITICAL: Prevent proration during trial by setting end_behavior
-              // This ensures no invoices are created until trial ends
-              end_behavior: 'none' // Don't cancel subscription when schedule ends
-            });
-          } else {
-            // Create new schedule
-            // NOTE: Cannot set phases when using from_subscription - must create then update
-            console.log('🔍 No existing schedule found, creating new schedule for trial interval upgrade');
-            const schedule = await stripe.subscriptionSchedules.create({
-              from_subscription: subscription.id
-            });
-            
-            // Update schedule with phases and metadata
-            await stripe.subscriptionSchedules.update(schedule.id, {
-            metadata: {
-              userId: userId,
-              planId: subscription.metadata.planId,
-              interval: subscription.metadata.interval,
-              scheduledInterval: 'annual',
-            },
-            phases: [
-              {
-                items: [{
-                  price: subscription.items.data[0].price.id, // Keep current monthly price during trial
-                  quantity: 1,
-                }],
-                start_date: subscription.current_period_start,
-                end_date: trialEnd, // Keep monthly until trial ends
-                // No proration during trial - nothing has been paid yet
-              },
-              {
-                items: [{
-                  price: newPriceId, // Switch to annual after trial ends
-                  quantity: 1,
-                }],
-                start_date: trialEnd, // Start annual after trial ends
-                // No proration needed - this is a fresh start after trial
-              }
-            ],
-            // CRITICAL: Prevent proration during trial by setting end_behavior
-            // This ensures no invoices are created until trial ends
-            end_behavior: 'none' // Don't cancel subscription when schedule ends
-            });
-            scheduleId = schedule.id;
-          }
-          
-          // Update subscription metadata to track scheduled change
-          // CRITICAL: Preserve trial_end to keep subscription in trialing status
-          // CRITICAL: Do NOT update interval metadata - keep it as current interval until trial ends
-          // Only update scheduledInterval to track the scheduled change
-          await stripe.subscriptions.update(subscription.id, {
-            trial_end: trialEnd, // ✅ EXPLICITLY PRESERVE trial_end to maintain trialing status
-            metadata: {
-              ...subscription.metadata,
-              // Keep interval as current (monthly) - don't change until trial ends
-              scheduledInterval: 'annual', // Track scheduled change
-              scheduledChangeDate: trialEnd
-            }
-          });
-          
-          return res.json({
-            success: true,
-            message: 'Billing interval change to annual scheduled for end of trial period',
-            scheduleId: scheduleId,
-            newInterval: newInterval,
-            effectiveDate: trialEnd
-          });
-        } catch (scheduleError) {
-          console.error('Subscription schedule error during trial interval upgrade:', scheduleError);
-          return res.status(500).json({ error: 'Failed to schedule interval change for trial' });
         }
+        
+        if (scheduleId) {
+          console.log('🔍 Found schedule during trial interval upgrade, releasing it');
+          await stripe.subscriptionSchedules.release(scheduleId);
+          subscription = await stripe.subscriptions.retrieve(subscription.id);
+        }
+        
+        // Direct update: Change to annual immediately, preserve trial_end
+        const updateParams = {
+          items: [{
+            id: subscription.items.data[0].id,
+            price: newPriceId, // Annual price
+          }],
+          trial_end: trialEnd, // ✅ EXPLICITLY PRESERVE trial_end
+          proration_behavior: 'none', // ✅ No proration during trial
+          metadata: {
+            userId: userId,
+            planId: subscription.metadata.planId, // Keep current plan
+            interval: 'annual', // Update to annual immediately
+            scheduledPlanId: null, // Clear scheduled changes
+            scheduledInterval: null,
+            scheduledChangeDate: null
+          }
+        };
+        
+        // If subscription is pending cancellation, cancel the cancellation
+        if (subscription.cancel_at_period_end) {
+          updateParams.cancel_at_period_end = false;
+          console.log('🔍 Trial interval upgrade from pending cancellation - canceling the cancellation');
+        }
+        
+        const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
+        
+        return res.json({
+          success: true,
+          message: 'Billing interval changed to annual. Full annual amount will be charged at trial end.',
+          subscription: updatedSubscription,
+          newInterval: newInterval
+        });
       } else if (isIntervalDowngrade) {
-        // Annual → Monthly during trial: Schedule for trial end (downgrade)
-        // User keeps annual benefits until trial ends, then switches to monthly
-        console.log('🔍 Trial interval change - Annual→Monthly downgrade, scheduling for trial end');
+        // Annual → Monthly during trial: Direct update (no schedule)
+        // User gets monthly plan immediately, but no charge until trial ends
+        console.log('🔍 Trial interval change - Annual→Monthly, applying directly, no schedule to avoid proration preview');
         
-        try {
-          // Check for existing schedule first (may exist from previous plan/interval change)
-          let scheduleId = subscription.schedule;
-          if (!scheduleId) {
-            try {
-              const schedules = await stripe.subscriptionSchedules.list({
-                customer: subscription.customer,
-                limit: 10
-              });
-              const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
-              if (matchingSchedule) {
-                scheduleId = matchingSchedule.id;
-              }
-            } catch (listError) {
-              console.log('🔍 Could not list schedules:', listError.message);
+        // First, release any existing schedule (from previous changes)
+        let scheduleId = subscription.schedule;
+        if (!scheduleId) {
+          try {
+            const schedules = await stripe.subscriptionSchedules.list({
+              customer: subscription.customer,
+              limit: 10
+            });
+            const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+            if (matchingSchedule) {
+              scheduleId = matchingSchedule.id;
             }
+          } catch (listError) {
+            console.log('🔍 Could not list schedules:', listError.message);
           }
-          
-          if (scheduleId) {
-            // Update existing schedule
-            console.log('🔍 Found existing schedule during trial interval downgrade, updating it:', scheduleId);
-            await stripe.subscriptionSchedules.update(scheduleId, {
-              metadata: {
-                userId: userId,
-                planId: subscription.metadata.planId,
-                interval: subscription.metadata.interval,
-                scheduledInterval: 'monthly',
-              },
-              phases: [
-                {
-                  items: [{
-                    price: subscription.items.data[0].price.id, // Keep current annual price during trial
-                    quantity: 1,
-                  }],
-                  start_date: subscription.current_period_start,
-                  end_date: trialEnd, // Keep annual until trial ends
-                },
-                {
-                  items: [{
-                    price: newPriceId, // Switch to monthly after trial ends
-                    quantity: 1,
-                  }],
-                  start_date: trialEnd, // Start monthly after trial ends
-                }
-              ]
-            });
-          } else {
-            // Create new schedule
-            console.log('🔍 No existing schedule found, creating new schedule for trial interval downgrade');
-            const schedule = await stripe.subscriptionSchedules.create({
-              from_subscription: subscription.id
-            });
-            
-            // Update schedule with phases
-            await stripe.subscriptionSchedules.update(schedule.id, {
-            metadata: {
-              userId: userId,
-              planId: subscription.metadata.planId,
-              interval: subscription.metadata.interval,
-              scheduledInterval: 'monthly',
-            },
-            phases: [
-              {
-                items: [{
-                  price: subscription.items.data[0].price.id, // Keep current annual price during trial
-                  quantity: 1,
-                }],
-                start_date: subscription.current_period_start,
-                end_date: trialEnd, // Keep annual until trial ends
-              },
-              {
-                items: [{
-                  price: newPriceId, // Switch to monthly after trial ends
-                  quantity: 1,
-                }],
-                start_date: trialEnd, // Start monthly after trial ends
-              }
-            ]
-            });
-            scheduleId = schedule.id;
-          }
-          
-          // Update subscription metadata
-          // CRITICAL: Preserve trial_end to keep subscription in trialing status
-          await stripe.subscriptions.update(subscription.id, {
-            trial_end: trialEnd, // ✅ EXPLICITLY PRESERVE trial_end to maintain trialing status
-            metadata: {
-              ...subscription.metadata,
-              scheduledInterval: 'monthly',
-              scheduledChangeDate: trialEnd
-            }
-          });
-          
-          return res.json({
-            success: true,
-            message: 'Billing interval change to monthly scheduled for end of trial period',
-            scheduleId: scheduleId,
-            newInterval: newInterval,
-            effectiveDate: trialEnd
-          });
-        } catch (scheduleError) {
-          console.error('Subscription schedule error during trial interval downgrade:', scheduleError);
-          return res.status(500).json({ error: 'Failed to schedule interval change for trial' });
         }
+        
+        if (scheduleId) {
+          console.log('🔍 Found schedule during trial interval downgrade, releasing it');
+          await stripe.subscriptionSchedules.release(scheduleId);
+          subscription = await stripe.subscriptions.retrieve(subscription.id);
+        }
+        
+        // Direct update: Change to monthly immediately, preserve trial_end
+        const updateParams = {
+          items: [{
+            id: subscription.items.data[0].id,
+            price: newPriceId, // Monthly price
+          }],
+          trial_end: trialEnd, // ✅ EXPLICITLY PRESERVE trial_end
+          proration_behavior: 'none', // ✅ No proration during trial
+          metadata: {
+            userId: userId,
+            planId: subscription.metadata.planId, // Keep current plan
+            interval: 'monthly', // Update to monthly immediately
+            scheduledPlanId: null, // Clear scheduled changes
+            scheduledInterval: null,
+            scheduledChangeDate: null
+          }
+        };
+        
+        // If subscription is pending cancellation, cancel the cancellation
+        if (subscription.cancel_at_period_end) {
+          updateParams.cancel_at_period_end = false;
+          console.log('🔍 Trial interval downgrade from pending cancellation - canceling the cancellation');
+        }
+        
+        const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
+        
+        return res.json({
+          success: true,
+          message: 'Billing interval changed to monthly. Full monthly amount will be charged at trial end.',
+          subscription: updatedSubscription,
+          newInterval: newInterval
+        });
       } else {
         // Same interval (shouldn't happen, but handle gracefully)
         return res.status(400).json({ 
