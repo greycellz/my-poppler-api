@@ -124,34 +124,51 @@ async function linkCustomerToUser(userId, customerId) {
 
 /**
  * Attach a test payment method to a customer
- * Uses token-based approach for test mode compatibility
+ * Note: For test mode, you may need to enable "Raw card data APIs" in Stripe Dashboard
+ * Settings > Developers > API keys > Enable raw card data APIs
+ * 
+ * Alternatively, for trial subscriptions, payment methods aren't required until trial ends
  */
 async function attachTestPaymentMethod(customerId) {
   if (!stripe) {
     throw new Error('Stripe not initialized.');
   }
 
-  // Create a test token first (required for test mode - avoids raw card number restriction)
-  const token = await stripe.tokens.create({
-    card: {
-      number: '4242424242424242', // Stripe test card
-      exp_month: 12,
-      exp_year: 2025,
-      cvc: '123'
+  try {
+    // Create a test token first (required for test mode - avoids raw card number restriction)
+    // NOTE: This requires "Raw card data APIs" to be enabled in Stripe Dashboard
+    const token = await stripe.tokens.create({
+      card: {
+        number: '4242424242424242', // Stripe test card
+        exp_month: 12,
+        exp_year: 2025,
+        cvc: '123'
+      }
+    });
+
+    // Attach token directly to customer as a source (this works in test mode)
+    const source = await stripe.customers.createSource(customerId, {
+      source: token.id
+    });
+
+    // Set as default source (this is sufficient for subscriptions)
+    await stripe.customers.update(customerId, {
+      default_source: source.id
+    });
+
+    return source;
+  } catch (error) {
+    // If raw card data APIs are not enabled, log warning but continue
+    // Trial subscriptions don't require payment methods until trial ends
+    if (error.message && (error.message.includes('raw card data') || error.message.includes('unsafe'))) {
+      console.warn('⚠️  Raw card data APIs not enabled. Payment method attachment skipped.');
+      console.warn('   Trial subscriptions will work, but subscription updates may fail.');
+      console.warn('   To enable: Stripe Dashboard > Settings > Developers > API keys > Enable raw card data APIs');
+      console.warn('   Or contact Stripe support to enable this feature for your test account.');
+      return null;
     }
-  });
-
-  // Attach token directly to customer as a source (this works in test mode)
-  const source = await stripe.customers.createSource(customerId, {
-    source: token.id
-  });
-
-  // Set as default source (this is sufficient for subscriptions)
-  await stripe.customers.update(customerId, {
-    default_source: source.id
-  });
-
-  return source;
+    throw error;
+  }
 }
 
 /**
@@ -166,7 +183,13 @@ async function createTestUserWithCustomer(options = {}) {
   });
   
   // Attach a test payment method (required for subscription updates)
-  await attachTestPaymentMethod(customer.id);
+  // Note: This may fail if raw card data APIs aren't enabled, but trial subscriptions don't need it immediately
+  try {
+    await attachTestPaymentMethod(customer.id);
+  } catch (error) {
+    console.warn('⚠️  Could not attach payment method:', error.message);
+    console.warn('   This is OK for trial subscriptions, but updates may fail.');
+  }
   
   await linkCustomerToUser(userId, customer.id);
 
