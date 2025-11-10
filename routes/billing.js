@@ -1717,6 +1717,92 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     }
   }
 
+  // ✅ EDGE CASE FIX: Handle canceling scheduled interval change
+  // If currentInterval === newInterval but there's a scheduled change, cancel it
+  if (currentInterval === newInterval) {
+    const scheduledInterval = subscription.metadata?.scheduledInterval;
+    
+    // Check if there's a scheduled change to cancel
+    if (scheduledInterval && scheduledInterval !== currentInterval) {
+      console.log('🔍 Canceling scheduled interval change:', scheduledInterval, '→ keeping', currentInterval);
+      
+      // Check if subscription has a schedule
+      let scheduleId = subscription.schedule;
+      let hasSchedule = false;
+      
+      if (!scheduleId) {
+        try {
+          const schedules = await stripe.subscriptionSchedules.list({
+            customer: subscription.customer,
+            limit: 10
+          });
+          const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+          if (matchingSchedule) {
+            scheduleId = matchingSchedule.id;
+            hasSchedule = true;
+          }
+        } catch (listError) {
+          console.log('🔍 Could not list schedules:', listError.message);
+        }
+      } else {
+        hasSchedule = true;
+      }
+      
+      // Track if we release a schedule (to know if we should clear scheduledPlanId too)
+      let scheduleWasReleased = false;
+      
+      if (hasSchedule && scheduleId) {
+        // Release the schedule to cancel the scheduled change
+        // Note: If schedule has both plan and interval changes, releasing cancels both
+        try {
+          await stripe.subscriptionSchedules.release(scheduleId);
+          console.log('🔍 Released schedule to cancel scheduled interval change');
+          scheduleWasReleased = true;
+          subscription = await stripe.subscriptions.retrieve(subscription.id);
+        } catch (releaseError) {
+          console.error('🔍 Error releasing schedule:', releaseError.message);
+          // Continue with metadata update even if schedule release fails
+        }
+      }
+      
+      // Clear scheduled interval change in metadata
+      // If schedule was released, also clear scheduledPlanId (schedule might have had both changes)
+      // If no schedule existed, only clear scheduledInterval (metadata-only change)
+      const updateParams = {
+        metadata: {
+          userId: userId,
+          planId: subscription.metadata.planId,
+          interval: currentInterval, // Keep current interval
+          scheduledInterval: null, // Always clear scheduled interval change
+          scheduledPlanId: scheduleWasReleased ? null : subscription.metadata.scheduledPlanId, // Clear if schedule was released
+          scheduledChangeDate: null
+        }
+      };
+      
+      // If no schedule was released, check if scheduledPlanId should be preserved
+      // (Only preserve if it's a real plan change, not just for interval-only change)
+      if (!scheduleWasReleased) {
+        if (!subscription.metadata.scheduledPlanId || subscription.metadata.scheduledPlanId === subscription.metadata.planId) {
+          updateParams.metadata.scheduledPlanId = null;
+        }
+      }
+      
+      const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
+      
+      return res.json({
+        success: true,
+        message: 'Scheduled interval change canceled. Your subscription will remain on ' + currentInterval + ' billing.',
+        subscription: updatedSubscription,
+        newInterval: newInterval
+      });
+    }
+    
+    // No scheduled change - already at requested interval
+    return res.status(400).json({ 
+      error: `No interval change needed. Your subscription is already on ${currentInterval} billing.` 
+    });
+  }
+
   // No-op or unsupported transition
   return res.status(400).json({ error: `No interval change performed from ${currentInterval} to ${newInterval}` })
   } catch (error) {
