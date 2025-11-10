@@ -411,10 +411,20 @@ async function handlePaymentFailed(invoice) {
 
 async function handleTrialWillEnd(subscription) {
   try {
-    console.log(`⏰ Processing trial will end: ${subscription.id}`);
+    console.log('═══════════════════════════════════════════════════');
+    console.log(`⏰ OPTION 2: Processing trial will end: ${subscription.id}`);
+    console.log('═══════════════════════════════════════════════════');
     
     const userId = subscription.metadata.userId;
+    const intendedPlan = subscription.metadata.planId;
+    const intendedInterval = subscription.metadata.interval;
     const trialEnd = subscription.trial_end;
+    const currentPriceId = subscription.items.data[0].price.id;
+    
+    console.log(`   User: ${userId}`);
+    console.log(`   Trial ends: ${trialEnd ? new Date(trialEnd * 1000).toISOString() : 'N/A'}`);
+    console.log(`   Current items: ${currentPriceId}`);
+    console.log(`   Intended plan: ${intendedPlan} (${intendedInterval})`);
     
     if (!userId) {
       console.error('❌ No userId in subscription metadata');
@@ -423,6 +433,67 @@ async function handleTrialWillEnd(subscription) {
     
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    
+    // PRICE_IDS mapping (same as in billing.js)
+    const PRICE_IDS = {
+      basic: {
+        monthly: 'price_1S8PO5RsohPcZDimYKy7PLNT',
+        annual: 'price_1S8PO5RsohPcZDim7N1h7kSM'
+      },
+      pro: {
+        monthly: 'price_1S8PQaRsohPcZDim8f6xylsh',
+        annual: 'price_1S8PVYRsohPcZDimF5L5l38A'
+      },
+      enterprise: {
+        monthly: 'price_1S8PQkRsohPcZDimjP8nS1rQ',
+        annual: 'price_1S8PVqRsohPcZDimqPBdg6lO'
+      }
+    };
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // CRITICAL: Apply metadata to subscription items
+    // This is the core of Option 2 - metadata changes are now applied
+    // ═══════════════════════════════════════════════════════════════════
+    
+    if (intendedPlan && intendedInterval) {
+      const intendedPriceId = PRICE_IDS[intendedPlan]?.[intendedInterval];
+      
+      if (!intendedPriceId) {
+        console.error(`❌ Invalid plan/interval combination: ${intendedPlan}/${intendedInterval}`);
+      } else if (currentPriceId !== intendedPriceId) {
+        console.log('🔍 Metadata differs from current items - applying changes now');
+        console.log(`   Changing subscription items: ${currentPriceId} → ${intendedPriceId}`);
+        
+        try {
+          // Update subscription items to match metadata
+          // Stripe will automatically generate invoice and charge customer
+          const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+            items: [{
+              id: subscription.items.data[0].id,
+              price: intendedPriceId
+            }]
+            // Stripe auto-transitions status from 'trialing' to 'active'
+            // Stripe auto-generates invoice for first billing period
+            // Stripe auto-sets correct current_period_end (trial_end + interval)
+            // Stripe auto-sets cancel_at_period_end: false (auto-renewal enabled)
+          });
+          
+          console.log('✅ Subscription items updated successfully');
+          console.log(`   New status: ${updatedSubscription.status}`);
+          console.log(`   New current_period_end: ${new Date(updatedSubscription.current_period_end * 1000).toISOString()}`);
+          console.log(`   Cancel at period end: ${updatedSubscription.cancel_at_period_end}`);
+          console.log(`   Stripe will now generate invoice for: ${intendedPlan} (${intendedInterval})`);
+        } catch (stripeError) {
+          console.error('❌ Error updating subscription items:', stripeError.message);
+          // Don't throw - continue with Firestore update
+        }
+      } else {
+        console.log('✅ Subscription items already match metadata - no changes needed');
+      }
+    } else {
+      console.log('⚠️  No plan/interval in metadata - items will not be changed');
+    }
     
     // Update Firestore to track trial ending
     // Convert Unix timestamp to ISO string for Firestore
@@ -433,10 +504,9 @@ async function handleTrialWillEnd(subscription) {
       updatedAt: new Date().toISOString()
     });
     
-    console.log(`✅ Trial ending tracked for user ${userId} (trial ends: ${trialEndDate})`);
+    console.log(`✅ Trial ending processed for user ${userId}`);
+    console.log('═══════════════════════════════════════════════════\n');
     
-    // Optional: Send email notification (future enhancement)
-    // await emailService.sendTrialEndingEmail(userId, trialEnd);
   } catch (error) {
     console.error('❌ Error handling trial will end:', error);
   }
