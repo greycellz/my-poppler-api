@@ -130,14 +130,21 @@ async function attachTestPaymentMethod(customerId) {
     throw new Error('Stripe not initialized.');
   }
 
-  // Create a test payment method (using Stripe test card)
-  const paymentMethod = await stripe.paymentMethods.create({
-    type: 'card',
+  // Create a test token first (required for test mode)
+  const token = await stripe.tokens.create({
     card: {
       number: '4242424242424242', // Stripe test card
       exp_month: 12,
       exp_year: 2025,
       cvc: '123'
+    }
+  });
+
+  // Create a payment method from the token
+  const paymentMethod = await stripe.paymentMethods.create({
+    type: 'card',
+    card: {
+      token: token.id
     }
   });
 
