@@ -277,6 +277,14 @@ async function handleSubscriptionDeleted(subscription) {
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
     
+    // Check if user document exists before updating
+    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    
+    if (!userDoc.exists) {
+      console.warn(`⚠️ User document ${userId} does not exist - skipping update (likely test user or already deleted)`);
+      return;
+    }
+    
     await gcpClient.firestore.collection('users').doc(userId).update({
       subscriptionId: null,
       subscriptionStatus: 'canceled',
@@ -288,6 +296,11 @@ async function handleSubscriptionDeleted(subscription) {
 
     console.log(`✅ User ${userId} subscription canceled - reverted to free plan`);
   } catch (error) {
+    // Handle Firestore "not found" errors gracefully (test users, deleted users, etc.)
+    if (error.code === 5 || (error.message && error.message.includes('No document to update'))) {
+      console.warn(`⚠️ User document not found for subscription deletion - skipping update (likely test user or already deleted): ${error.message}`);
+      return;
+    }
     console.error('❌ Error handling subscription deleted:', error);
   }
 }
