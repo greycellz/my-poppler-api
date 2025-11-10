@@ -1001,6 +1001,10 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
           console.log('🔍 Found schedule during trial upgrade, releasing it');
           await stripe.subscriptionSchedules.release(scheduleId);
           subscription = await stripe.subscriptions.retrieve(subscription.id);
+          // After releasing schedule, trial_end might be lost - preserve it
+          if (subscription.trial_end !== trialEnd && trialEnd && !hasTrialEnded) {
+            console.log('🔍 Trial_end changed after schedule release, preserving original trial_end');
+          }
         }
         
         // Immediate upgrade: Update items to Pro price, preserve trial_end only if trial hasn't ended
@@ -1020,7 +1024,7 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
           }
         };
         
-        // Only preserve trial_end if trial hasn't ended (Stripe rejects past trial_end values)
+        // CRITICAL: Always preserve trial_end if trial hasn't ended (especially after schedule release)
         if (trialEnd && !hasTrialEnded) {
           updateParams.trial_end = trialEnd; // ✅ PRESERVE trial_end only if trial is still active
         }
@@ -1398,6 +1402,10 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
           console.log('🔍 Found schedule during trial interval upgrade, releasing it');
           await stripe.subscriptionSchedules.release(scheduleId);
           subscription = await stripe.subscriptions.retrieve(subscription.id);
+          // After releasing schedule, trial_end might be lost - preserve it
+          if (subscription.trial_end !== trialEnd && trialEnd && !hasTrialEnded) {
+            console.log('🔍 Trial_end changed after schedule release, preserving original trial_end');
+          }
         }
         
         // Direct update: Change to annual immediately, preserve trial_end only if trial hasn't ended
@@ -1417,7 +1425,7 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
           }
         };
         
-        // Only preserve trial_end if trial hasn't ended (Stripe rejects past trial_end values)
+        // CRITICAL: Always preserve trial_end if trial hasn't ended (especially after schedule release)
         if (trialEnd && !hasTrialEnded) {
           updateParams.trial_end = trialEnd; // ✅ PRESERVE trial_end only if trial is still active
         }
