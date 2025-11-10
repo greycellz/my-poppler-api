@@ -597,6 +597,20 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
           };
           
           canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
+          
+          // Retrieve subscription again to verify the update took effect
+          canceledSubscription = await stripe.subscriptions.retrieve(subscription.id);
+          
+          // Verify cancel_at_period_end was set
+          if (!canceledSubscription.cancel_at_period_end) {
+            console.warn('⚠️  cancel_at_period_end not set after update, retrying...');
+            canceledSubscription = await stripe.subscriptions.update(subscription.id, {
+              cancel_at_period_end: true,
+              trial_end: trialEndForCancel
+            });
+            canceledSubscription = await stripe.subscriptions.retrieve(subscription.id);
+          }
+          
           cancellationDate = trialEndForCancel; // Cancel at trial end
           
           console.log('✅ Subscription canceled at trial end with trial preserved');
