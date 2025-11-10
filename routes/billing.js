@@ -598,17 +598,29 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
           
           canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
           
+          // Wait a moment for Stripe to process the update
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
           // Retrieve subscription again to verify the update took effect
           canceledSubscription = await stripe.subscriptions.retrieve(subscription.id);
           
           // Verify cancel_at_period_end was set
           if (!canceledSubscription.cancel_at_period_end) {
             console.warn('⚠️  cancel_at_period_end not set after update, retrying...');
+            // Try again with explicit parameters
             canceledSubscription = await stripe.subscriptions.update(subscription.id, {
               cancel_at_period_end: true,
               trial_end: trialEndForCancel
             });
+            await new Promise(resolve => setTimeout(resolve, 1000));
             canceledSubscription = await stripe.subscriptions.retrieve(subscription.id);
+            
+            // Final check
+            if (!canceledSubscription.cancel_at_period_end) {
+              console.error('❌ Failed to set cancel_at_period_end after retry');
+              console.error('   Subscription status:', canceledSubscription.status);
+              console.error('   Subscription cancel_at_period_end:', canceledSubscription.cancel_at_period_end);
+            }
           }
           
           cancellationDate = trialEndForCancel; // Cancel at trial end
@@ -1053,9 +1065,14 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
           console.log('🔍 Found schedule during trial upgrade, releasing it');
           await stripe.subscriptionSchedules.release(scheduleId);
           subscription = await stripe.subscriptions.retrieve(subscription.id);
-          // After releasing schedule, trial_end might be lost - preserve it
+          
+          // CRITICAL: After releasing schedule, Stripe may recalculate trial_end
+          // We must immediately restore the original trial_end BEFORE making other changes
           if (subscription.trial_end !== trialEnd && trialEnd && !hasTrialEnded) {
-            console.log('🔍 Trial_end changed after schedule release, preserving original trial_end');
+            console.log('🔍 Trial_end changed after schedule release, restoring original trial_end');
+            subscription = await stripe.subscriptions.update(subscription.id, {
+              trial_end: trialEnd // ✅ FORCE restore original trial_end
+            });
           }
         }
         
@@ -1454,9 +1471,14 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
           console.log('🔍 Found schedule during trial interval upgrade, releasing it');
           await stripe.subscriptionSchedules.release(scheduleId);
           subscription = await stripe.subscriptions.retrieve(subscription.id);
-          // After releasing schedule, trial_end might be lost - preserve it
+          
+          // CRITICAL: After releasing schedule, Stripe may recalculate trial_end
+          // We must immediately restore the original trial_end BEFORE making other changes
           if (subscription.trial_end !== trialEnd && trialEnd && !hasTrialEnded) {
-            console.log('🔍 Trial_end changed after schedule release, preserving original trial_end');
+            console.log('🔍 Trial_end changed after schedule release, restoring original trial_end');
+            subscription = await stripe.subscriptions.update(subscription.id, {
+              trial_end: trialEnd // ✅ FORCE restore original trial_end
+            });
           }
         }
         
