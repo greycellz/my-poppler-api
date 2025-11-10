@@ -1103,11 +1103,15 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
           try {
             const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
             const phaseEndDate = schedule.phases?.[0]?.end_date;
-            if (phaseEndDate && phaseEndDate > Date.now() / 1000) {
+            console.log('🔍 Schedule retrieved - phase end_date:', phaseEndDate, 'subscription trial_end:', trialEnd, 'current time:', Date.now() / 1000);
+            
+            // Use phase end_date if it exists (relax the date check for test clocks)
+            // The phase end_date should match the original trial_end from when schedule was created
+            if (phaseEndDate) {
               trialEndFromSchedule = phaseEndDate;
-              console.log('🔍 Using schedule phase end_date as trial_end source:', trialEndFromSchedule);
+              console.log('🔍 Using schedule phase end_date as trial_end source:', trialEndFromSchedule, '(original was:', trialEnd, ')');
             } else {
-              console.log('🔍 Schedule phase end_date not available or in past, using subscription trial_end');
+              console.log('🔍 Schedule phase end_date not available, using subscription trial_end:', trialEnd);
             }
           } catch (scheduleError) {
             console.log('🔍 Could not retrieve schedule, using subscription trial_end:', scheduleError.message);
@@ -1546,11 +1550,15 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
           try {
             const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
             const phaseEndDate = schedule.phases?.[0]?.end_date;
-            if (phaseEndDate && phaseEndDate > Date.now() / 1000) {
+            console.log('🔍 Schedule retrieved - phase end_date:', phaseEndDate, 'subscription trial_end:', trialEnd, 'current time:', Date.now() / 1000);
+            
+            // Use phase end_date if it exists (relax the date check for test clocks)
+            // The phase end_date should match the original trial_end from when schedule was created
+            if (phaseEndDate) {
               trialEndFromSchedule = phaseEndDate;
-              console.log('🔍 Using schedule phase end_date as trial_end source:', trialEndFromSchedule);
+              console.log('🔍 Using schedule phase end_date as trial_end source:', trialEndFromSchedule, '(original was:', trialEnd, ')');
             } else {
-              console.log('🔍 Schedule phase end_date not available or in past, using subscription trial_end');
+              console.log('🔍 Schedule phase end_date not available, using subscription trial_end:', trialEnd);
             }
           } catch (scheduleError) {
             console.log('🔍 Could not retrieve schedule, using subscription trial_end:', scheduleError.message);
