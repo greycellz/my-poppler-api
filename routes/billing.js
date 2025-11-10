@@ -569,13 +569,50 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
     
     if (scheduleId) {
       hasSchedule = true;
-      console.log('🔍 Found subscription schedule:', scheduleId, 'canceling schedule instead of subscription');
+      console.log('🔍 Found subscription schedule:', scheduleId);
       
-      try {
-        // Cancel the schedule - this will cancel the subscription at period end
-        // Stripe automatically sets cancel_at_period_end on the subscription when schedule is canceled
-        await stripe.subscriptionSchedules.cancel(scheduleId);
-        console.log('✅ Subscription schedule canceled successfully');
+      // Check if subscription is in trial - if so, release schedule first, then cancel subscription directly
+      // This ensures cancel_at_period_end is set correctly during trial
+      const now = Date.now() / 1000;
+      const trialEndForCancel = subscription.trial_end;
+      const hasTrialEndedForCancel = trialEndForCancel !== null && 
+                                     subscription.current_period_end > trialEndForCancel;
+      const isInTrialForCancel = !hasTrialEndedForCancel && (
+        subscription.status === 'trialing' || 
+        (trialEndForCancel !== null && trialEndForCancel > now)
+      );
+      
+      if (isInTrialForCancel && trialEndForCancel && !hasTrialEndedForCancel) {
+        // For trial subscriptions, release schedule first, then cancel subscription directly
+        // This ensures we can set cancel_at_period_end and preserve trial_end
+        console.log('🔍 Trial subscription with schedule - releasing schedule, then canceling subscription directly');
+        try {
+          await stripe.subscriptionSchedules.release(scheduleId);
+          console.log('✅ Schedule released, now canceling subscription directly');
+          
+          // Cancel subscription directly with cancel_at_period_end and trial_end preservation
+          const cancelParams = {
+            cancel_at_period_end: true,
+            trial_end: trialEndForCancel // ✅ PRESERVE trial_end
+          };
+          
+          canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
+          cancellationDate = trialEndForCancel; // Cancel at trial end
+          
+          console.log('✅ Subscription canceled at trial end with trial preserved');
+        } catch (releaseError) {
+          console.error('🔍 Error releasing schedule for trial cancellation:', releaseError.message);
+          // Fall back to canceling schedule
+          await stripe.subscriptionSchedules.cancel(scheduleId);
+          canceledSubscription = await stripe.subscriptions.retrieve(subscription.id);
+          cancellationDate = trialEndForCancel;
+        }
+      } else {
+        // Not in trial - cancel the schedule (Stripe will set cancel_at_period_end automatically)
+        console.log('🔍 Canceling schedule (non-trial)');
+        try {
+          await stripe.subscriptionSchedules.cancel(scheduleId);
+          console.log('✅ Subscription schedule canceled successfully');
         
         // CRITICAL: Preserve trial_end if subscription is in trial (and trial hasn't ended)
         // When canceling a schedule during trial, we must explicitly preserve trial_end
