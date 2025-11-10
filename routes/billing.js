@@ -1100,13 +1100,30 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         
         const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
         
-        res.json({ 
-          success: true, 
-          message: 'Plan upgraded to Pro immediately. Pro features are now active.',
-          subscription: updatedSubscription,
-          newPlan: newPlanId,
-          interval: interval
-        });
+        // CRITICAL: Verify trial_end was preserved after final update
+        // Stripe may recalculate it when changing items, so we need to check and fix if needed
+        if (updatedSubscription.trial_end !== trialEnd && trialEnd && !hasTrialEnded) {
+          console.log('🔍 Trial_end changed after final update, restoring original trial_end');
+          const finalSubscription = await stripe.subscriptions.update(subscription.id, {
+            trial_end: trialEnd // ✅ FORCE restore original trial_end one more time
+          });
+          
+          res.json({ 
+            success: true, 
+            message: 'Plan upgraded to Pro immediately. Pro features are now active.',
+            subscription: finalSubscription,
+            newPlan: newPlanId,
+            interval: interval
+          });
+        } else {
+          res.json({ 
+            success: true, 
+            message: 'Plan upgraded to Pro immediately. Pro features are now active.',
+            subscription: updatedSubscription,
+            newPlan: newPlanId,
+            interval: interval
+          });
+        }
         return;
       }
     }
@@ -1512,12 +1529,28 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
         
         const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
         
-        return res.json({
-          success: true,
-          message: 'Billing interval changed to annual. Full annual amount will be charged at trial end.',
-          subscription: updatedSubscription,
-          newInterval: newInterval
-        });
+        // CRITICAL: Verify trial_end was preserved after final update
+        // Stripe may recalculate it when changing items, so we need to check and fix if needed
+        if (updatedSubscription.trial_end !== trialEnd && trialEnd && !hasTrialEnded) {
+          console.log('🔍 Trial_end changed after final update, restoring original trial_end');
+          const finalSubscription = await stripe.subscriptions.update(subscription.id, {
+            trial_end: trialEnd // ✅ FORCE restore original trial_end one more time
+          });
+          
+          return res.json({
+            success: true,
+            message: 'Billing interval changed to annual. Full annual amount will be charged at trial end.',
+            subscription: finalSubscription,
+            newInterval: newInterval
+          });
+        } else {
+          return res.json({
+            success: true,
+            message: 'Billing interval changed to annual. Full annual amount will be charged at trial end.',
+            subscription: updatedSubscription,
+            newInterval: newInterval
+          });
+        }
       } else if (isIntervalDowngrade) {
         // Annual → Monthly during trial: Direct update (no schedule)
         // User gets monthly plan immediately, but no charge until trial ends
