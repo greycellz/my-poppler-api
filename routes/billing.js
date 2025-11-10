@@ -998,50 +998,121 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     // For non-trial subscriptions, use existing logic
     if (isDowngrade) {
       // For downgrades, use Stripe's subscription schedules for true end-of-period changes
-      // NOTE: Cannot set phases when using from_subscription - must create then update
+      // ✅ CRITICAL FIX: Check for existing schedule before creating new one
       try {
-        // Step 1: Create schedule from subscription (without phases or metadata)
-        // NOTE: Stripe doesn't allow setting metadata or phases when from_subscription is set
-        const schedule = await stripe.subscriptionSchedules.create({
-          from_subscription: subscription.id
-        });
+        // Check if subscription already has a schedule
+        let scheduleId = subscription.schedule;
+        let existingSchedule = null;
         
-        // Step 2: Update schedule with phases and metadata
-        await stripe.subscriptionSchedules.update(schedule.id, {
-          metadata: {
-            userId: userId,
-            planId: subscription.metadata.planId,
-            interval: subscription.metadata.interval,
-            scheduledPlanId: newPlanId,
-            scheduledInterval: interval,
-          },
-          phases: [
-            {
-              items: [{
-                price: subscription.items.data[0].price.id, // Keep current price
-                quantity: 1,
-              }],
-              start_date: subscription.current_period_start, // Start from current period start
-              end_date: subscription.current_period_end,
-            },
-            {
-              items: [{
-                price: newPriceId, // New price starts after current period
-                quantity: 1,
-              }],
-              start_date: subscription.current_period_end, // Start after current period
+        if (!scheduleId) {
+          try {
+            const schedules = await stripe.subscriptionSchedules.list({
+              customer: subscription.customer,
+              limit: 10
+            });
+            const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+            if (matchingSchedule) {
+              scheduleId = matchingSchedule.id;
+              existingSchedule = matchingSchedule;
             }
-          ]
-        });
+          } catch (listError) {
+            console.log('🔍 Could not list schedules:', listError.message);
+          }
+        } else {
+          // If schedule ID exists, retrieve the schedule
+          try {
+            existingSchedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+          } catch (retrieveError) {
+            console.log('🔍 Could not retrieve schedule:', retrieveError.message);
+          }
+        }
+        
+        if (existingSchedule && scheduleId) {
+          // ✅ Update existing schedule instead of creating new one
+          console.log('🔍 Found existing schedule:', scheduleId, 'updating it for plan downgrade');
+          await stripe.subscriptionSchedules.update(scheduleId, {
+            metadata: {
+              userId: userId,
+              planId: subscription.metadata.planId,
+              interval: subscription.metadata.interval,
+              scheduledPlanId: newPlanId,
+              scheduledInterval: interval,
+            },
+            phases: [
+              {
+                items: [{
+                  price: subscription.items.data[0].price.id, // Keep current price
+                  quantity: 1,
+                }],
+                start_date: subscription.current_period_start, // Start from current period start
+                end_date: subscription.current_period_end,
+              },
+              {
+                items: [{
+                  price: newPriceId, // New price starts after current period
+                  quantity: 1,
+                }],
+                start_date: subscription.current_period_end, // Start after current period
+              }
+            ]
+          });
 
-        res.json({ 
-          success: true, 
-          message: 'Plan change scheduled for end of current period',
-          scheduleId: schedule.id,
-          newPlan: newPlanId,
-          interval: interval,
-          effectiveDate: subscription.current_period_end
-        });
+          res.json({ 
+            success: true, 
+            message: 'Plan change scheduled for end of current period',
+            scheduleId: scheduleId,
+            newPlan: newPlanId,
+            interval: interval,
+            effectiveDate: subscription.current_period_end
+          });
+        } else {
+          // No existing schedule - create new one
+          // NOTE: Cannot set phases when using from_subscription - must create then update
+          console.log('🔍 No existing schedule found, creating new one for plan downgrade');
+          
+          // Step 1: Create schedule from subscription (without phases or metadata)
+          // NOTE: Stripe doesn't allow setting metadata or phases when from_subscription is set
+          const schedule = await stripe.subscriptionSchedules.create({
+            from_subscription: subscription.id
+          });
+          
+          // Step 2: Update schedule with phases and metadata
+          await stripe.subscriptionSchedules.update(schedule.id, {
+            metadata: {
+              userId: userId,
+              planId: subscription.metadata.planId,
+              interval: subscription.metadata.interval,
+              scheduledPlanId: newPlanId,
+              scheduledInterval: interval,
+            },
+            phases: [
+              {
+                items: [{
+                  price: subscription.items.data[0].price.id, // Keep current price
+                  quantity: 1,
+                }],
+                start_date: subscription.current_period_start, // Start from current period start
+                end_date: subscription.current_period_end,
+              },
+              {
+                items: [{
+                  price: newPriceId, // New price starts after current period
+                  quantity: 1,
+                }],
+                start_date: subscription.current_period_end, // Start after current period
+              }
+            ]
+          });
+
+          res.json({ 
+            success: true, 
+            message: 'Plan change scheduled for end of current period',
+            scheduleId: schedule.id,
+            newPlan: newPlanId,
+            interval: interval,
+            effectiveDate: subscription.current_period_end
+          });
+        }
       } catch (scheduleError) {
         console.error('Subscription schedule error:', scheduleError);
         // Fallback to metadata-only approach if schedules fail
@@ -1486,6 +1557,7 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
   }
 
   // Annual -> Monthly (downgrade): defer to end of current period, no proration
+  // ✅ CRITICAL FIX: Use subscription schedule (like plan downgrades) instead of direct update
   if (currentInterval === 'annual' && newInterval === 'monthly') {
     // ✅ CRITICAL: Guard against trial subscriptions - this path should NOT execute during trial
     // Use hasTrialEnded check (same as trial detection logic) to handle ended trials correctly
@@ -1507,83 +1579,142 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
       });
     }
     
-    // Check if subscription is managed by a schedule
-    let scheduleId = subscription.schedule;
-    let hasSchedule = false;
-    
-    // If not found directly, list schedules by customer
-    if (!scheduleId) {
-      try {
-        const schedules = await stripe.subscriptionSchedules.list({
-          customer: subscription.customer,
-          limit: 10
-        });
-        
-        const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
-        if (matchingSchedule) {
-          scheduleId = matchingSchedule.id;
-          hasSchedule = true;
-        }
-      } catch (listError) {
-        console.log('🔍 Could not list schedules, will try direct update:', listError.message);
-      }
-    } else {
-      hasSchedule = true;
-    }
-    
-    if (hasSchedule && scheduleId) {
-      // Subscription is managed by a schedule - release the schedule first
-      // Using release() instead of cancel() to avoid canceling the subscription
-      console.log('🔍 Subscription has schedule:', scheduleId, 'releasing schedule before annual->monthly change');
+    // ✅ Use subscription schedule for Annual → Monthly downgrade (like plan downgrades)
+    // This preserves current_period_end until the change takes effect
+    try {
+      // Check if subscription already has a schedule
+      let scheduleId = subscription.schedule;
+      let existingSchedule = null;
       
-      try {
-        // Release the schedule - this detaches it from the subscription without canceling
-        await stripe.subscriptionSchedules.release(scheduleId);
-        console.log('🔍 Subscription schedule released successfully, proceeding with direct update');
+      if (!scheduleId) {
+        try {
+          const schedules = await stripe.subscriptionSchedules.list({
+            customer: subscription.customer,
+            limit: 10
+          });
+          const matchingSchedule = schedules.data.find(s => s.subscription === subscription.id);
+          if (matchingSchedule) {
+            scheduleId = matchingSchedule.id;
+            existingSchedule = matchingSchedule;
+          }
+        } catch (listError) {
+          console.log('🔍 Could not list schedules:', listError.message);
+        }
+      } else {
+        // If schedule ID exists, retrieve the schedule
+        try {
+          existingSchedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+        } catch (retrieveError) {
+          console.log('🔍 Could not retrieve schedule:', retrieveError.message);
+        }
+      }
+      
+      if (existingSchedule && scheduleId) {
+        // ✅ Update existing schedule instead of creating new one
+        console.log('🔍 Found existing schedule:', scheduleId, 'updating it for interval downgrade');
+        await stripe.subscriptionSchedules.update(scheduleId, {
+          metadata: {
+            userId: userId,
+            planId: effectivePlanId,
+            interval: currentInterval,
+            scheduledInterval: 'monthly',
+          },
+          phases: [
+            {
+              items: [{
+                price: subscription.items.data[0].price.id, // Keep current annual price
+                quantity: 1,
+              }],
+              start_date: subscription.current_period_start,
+              end_date: subscription.current_period_end, // Preserve current period end
+            },
+            {
+              items: [{
+                price: newPriceId, // Monthly price starts after current period
+                quantity: 1,
+              }],
+              start_date: subscription.current_period_end, // Start after current period
+            }
+          ]
+        });
+
+        return res.json({
+          success: true,
+          message: subscription.cancel_at_period_end ? 
+            'Billing interval change to monthly scheduled for end of period and cancellation canceled' :
+            'Billing interval change to monthly scheduled for end of period',
+          scheduleId: scheduleId,
+          newInterval: newInterval,
+          effectiveDate: subscription.current_period_end
+        });
+      } else {
+        // No existing schedule - create new one
+        console.log('🔍 No existing schedule found, creating new one for interval downgrade');
         
-        // Retrieve the subscription again to get its current state after schedule release
-        subscription = await stripe.subscriptions.retrieve(subscription.id);
-      } catch (releaseError) {
-        console.error('🔍 Error releasing subscription schedule:', releaseError.message);
-        return res.status(500).json({ 
-          error: 'Failed to update subscription. Please try again or contact support.' 
+        // Step 1: Create schedule from subscription (without phases or metadata)
+        // NOTE: Stripe doesn't allow setting metadata or phases when from_subscription is set
+        const schedule = await stripe.subscriptionSchedules.create({
+          from_subscription: subscription.id
+        });
+        
+        // Step 2: Update schedule with phases and metadata
+        await stripe.subscriptionSchedules.update(schedule.id, {
+          metadata: {
+            userId: userId,
+            planId: effectivePlanId,
+            interval: currentInterval,
+            scheduledInterval: 'monthly',
+          },
+          phases: [
+            {
+              items: [{
+                price: subscription.items.data[0].price.id, // Keep current annual price
+                quantity: 1,
+              }],
+              start_date: subscription.current_period_start,
+              end_date: subscription.current_period_end, // Preserve current period end
+            },
+            {
+              items: [{
+                price: newPriceId, // Monthly price starts after current period
+                quantity: 1,
+              }],
+              start_date: subscription.current_period_end, // Start after current period
+            }
+          ]
+        });
+
+        return res.json({
+          success: true,
+          message: subscription.cancel_at_period_end ? 
+            'Billing interval change to monthly scheduled for end of period and cancellation canceled' :
+            'Billing interval change to monthly scheduled for end of period',
+          scheduleId: schedule.id,
+          newInterval: newInterval,
+          effectiveDate: subscription.current_period_end
         });
       }
+    } catch (scheduleError) {
+      console.error('Subscription schedule error:', scheduleError);
+      // Fallback to metadata-only approach if schedules fail
+      const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+        metadata: {
+          userId: userId,
+          planId: effectivePlanId,
+          interval: currentInterval,
+          scheduledInterval: 'monthly',
+          scheduledChangeDate: subscription.current_period_end
+        }
+      });
+      
+      return res.json({
+        success: true,
+        message: 'Billing interval change to monthly scheduled for end of period (metadata only)',
+        subscription: updatedSubscription,
+        newInterval: newInterval,
+        effectiveDate: subscription.current_period_end
+      });
     }
-    
-    // No schedule or schedule was released - update subscription directly
-    const updateParams = {
-      items: [{
-        id: subscription.items.data[0].id,
-        price: newPriceId,
-      }],
-      proration_behavior: 'none', // take effect next period
-      metadata: {
-        userId: userId,
-        planId: effectivePlanId,
-        interval: currentInterval,
-        scheduledInterval: 'monthly',
-        scheduledChangeDate: subscription.current_period_end
-      }
-    };
-
-    // If subscription is pending cancellation, cancel the cancellation
-    if (subscription.cancel_at_period_end) {
-      updateParams.cancel_at_period_end = false;
-      console.log('🔍 Annual->Monthly downgrade from pending cancellation - canceling the cancellation');
-    }
-
-    const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
-
-    return res.json({
-      success: true,
-      message: subscription.cancel_at_period_end ? 
-        'Billing interval change to monthly scheduled for end of period and cancellation canceled' :
-        'Billing interval change to monthly scheduled for end of period',
-      subscription: updatedSubscription,
-      newInterval: newInterval,
-      effectiveDate: subscription.current_period_end
-    })
   }
 
   // No-op or unsupported transition
