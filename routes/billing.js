@@ -569,39 +569,19 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
     let canceledSubscription;
     let cancellationDate;
     
-    // Step 1: Cancel schedule if it exists
+    // Step 1: Release schedule if it exists (not cancel, to avoid immediate subscription cancellation)
     if (scheduleId) {
-      console.log('🔍 Canceling schedule:', scheduleId);
+      console.log('🔍 Releasing schedule:', scheduleId);
       try {
-        await stripe.subscriptionSchedules.cancel(scheduleId);
-        console.log('✅ Schedule canceled successfully');
+        await stripe.subscriptionSchedules.release(scheduleId);
+        console.log('✅ Schedule released successfully');
         
-        // CRITICAL: After canceling schedule, retrieve subscription to check its current status
-        // Stripe may immediately cancel the subscription when the schedule is canceled
-        const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
-        console.log('🔍 Subscription status after schedule cancel:', updatedSubscription.status);
-        
-        if (updatedSubscription.status === 'canceled') {
-          // Subscription was already canceled by Stripe when we canceled the schedule
-          console.log('✅ Subscription automatically canceled when schedule was canceled');
-          cancellationDate = subscription.trial_end || subscription.current_period_end;
-          
-          return res.json({ 
-            success: true, 
-            message: subscription.status === 'trialing'
-              ? 'Subscription will be canceled at the end of your trial period'
-              : 'Subscription will be canceled at the end of your current billing period',
-            subscription: updatedSubscription,
-            cancelAtPeriodEnd: true,
-            cancellationDate: cancellationDate
-          });
-        }
-        
-        // If subscription is not canceled, update our reference for the next step
-        subscription = updatedSubscription;
-      } catch (scheduleCancelError) {
-        console.error('Error canceling schedule:', scheduleCancelError.message);
-        return res.status(500).json({ error: 'Failed to cancel schedule' });
+        // Retrieve subscription to get current state
+        subscription = await stripe.subscriptions.retrieve(subscription.id);
+        console.log('🔍 Subscription status after schedule release:', subscription.status);
+      } catch (scheduleReleaseError) {
+        console.error('Error releasing schedule:', scheduleReleaseError.message);
+        return res.status(500).json({ error: 'Failed to release schedule' });
       }
     }
     

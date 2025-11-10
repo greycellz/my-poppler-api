@@ -255,7 +255,8 @@ testDescribe('Trial Subscription Changes', () => {
       expect(updatedSub.items.data[0].price.id).toBe(getPriceId('pro', 'monthly'));
       expect(updatedSub.trial_end).toBe(trialEnd); // Trial preserved
       expect(updatedSub.metadata.planId).toBe('pro');
-      expect(updatedSub.metadata.scheduledInterval).toBeNull(); // Cleared
+      // Stripe returns undefined for unset metadata fields, not null
+      expect([null, undefined]).toContain(updatedSub.metadata.scheduledInterval);
     }, 30000);
   });
 
