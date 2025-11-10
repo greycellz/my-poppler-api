@@ -436,10 +436,28 @@ router.get('/subscription', authenticateToken, async (req, res) => {
         console.log('🔍 Subscription debug - scheduled change to same plan, keeping current plan:', effectivePlan, effectiveInterval);
       }
     } else if (!hasScheduledChange) {
-      // Only check price mismatch if we haven't already detected a scheduled change via metadata
-      // This prevents overwriting metadata-based scheduled changes with price-based detection
-      // Price mismatch check is a fallback for cases where metadata wasn't set correctly
-      if (subscription.items.data.length > 0) {
+      // ═══════════════════════════════════════════════════════════════════
+      // OPTION 2 FIX: Skip price mismatch check during trial
+      // During trial, items stay unchanged (to avoid charges) while metadata
+      // reflects the user's chosen plan. At trial end, webhook applies metadata.
+      // Price mismatch is INTENTIONAL in this case, not a "scheduled change".
+      // ═══════════════════════════════════════════════════════════════════
+      
+      // Only check price mismatch if:
+      // 1. NOT in trial (isTrial === false), OR
+      // 2. Has real scheduled change metadata (scheduledPlanId or scheduledInterval set)
+      //
+      // Skip if in trial with no scheduled metadata (Option 2 behavior)
+      const skipPriceMismatchCheck = isTrial && !scheduledPlanId && !scheduledInterval;
+      
+      if (skipPriceMismatchCheck) {
+        console.log('🔍 Subscription debug - in trial with no scheduled change metadata');
+        console.log('🔍 Subscription debug - skipping price mismatch check (Option 2 behavior)');
+        console.log('🔍 Subscription debug - metadata will be applied at trial end via webhook');
+      } else if (subscription.items.data.length > 0) {
+        // Only check price mismatch if we haven't already detected a scheduled change via metadata
+        // This prevents overwriting metadata-based scheduled changes with price-based detection
+        // Price mismatch check is a fallback for cases where metadata wasn't set correctly
         const currentItem = subscription.items.data[0];
         const currentPriceId = currentItem.price.id;
         const expectedPriceId = PRICE_IDS[planId] && PRICE_IDS[planId][interval];
