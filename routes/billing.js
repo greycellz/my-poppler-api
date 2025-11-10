@@ -684,63 +684,64 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
             ? trialEnd 
             : subscription.current_period_end;
         } catch (scheduleCancelError) {
-        console.error('🔍 Error canceling subscription schedule:', scheduleCancelError.message);
-        // If schedule cancellation fails, try to release subscription from schedule
-        try {
-          await stripe.subscriptionSchedules.release(scheduleId);
-          console.log('✅ Released subscription from schedule, now canceling directly');
-          
-          // CRITICAL: Preserve trial_end if subscription is in trial (and trial hasn't ended)
-          const now = Date.now() / 1000;
-          const trialEnd = subscription.trial_end;
-          const hasTrialEnded = trialEnd !== null && 
-                                subscription.current_period_end > trialEnd;
-          const isInTrial = !hasTrialEnded && (
-            subscription.status === 'trialing' || 
-            (trialEnd !== null && trialEnd > now)
-          );
-          
-          const cancelParams = {
-            cancel_at_period_end: true
-          };
-          
-          if (isInTrial && trialEnd && !hasTrialEnded) {
-            cancelParams.trial_end = trialEnd; // ✅ PRESERVE trial_end (only if trial hasn't ended)
-            console.log('🔍 Preserving trial_end during cancellation after schedule release');
+          console.error('🔍 Error canceling subscription schedule:', scheduleCancelError.message);
+          // If schedule cancellation fails, try to release subscription from schedule
+          try {
+            await stripe.subscriptionSchedules.release(scheduleId);
+            console.log('✅ Released subscription from schedule, now canceling directly');
+            
+            // CRITICAL: Preserve trial_end if subscription is in trial (and trial hasn't ended)
+            const now = Date.now() / 1000;
+            const trialEnd = subscription.trial_end;
+            const hasTrialEnded = trialEnd !== null && 
+                                  subscription.current_period_end > trialEnd;
+            const isInTrial = !hasTrialEnded && (
+              subscription.status === 'trialing' || 
+              (trialEnd !== null && trialEnd > now)
+            );
+            
+            const cancelParams = {
+              cancel_at_period_end: true
+            };
+            
+            if (isInTrial && trialEnd && !hasTrialEnded) {
+              cancelParams.trial_end = trialEnd; // ✅ PRESERVE trial_end (only if trial hasn't ended)
+              console.log('🔍 Preserving trial_end during cancellation after schedule release');
+            }
+            
+            canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
+            cancellationDate = isInTrial && trialEnd
+              ? trialEnd 
+              : subscription.current_period_end;
+          } catch (releaseError) {
+            console.error('🔍 Error releasing schedule:', releaseError.message);
+            // Last resort: try direct cancellation (may fail, but worth trying)
+            console.log('🔍 Attempting direct cancellation as last resort');
+            
+            // CRITICAL: Preserve trial_end if subscription is in trial (and trial hasn't ended)
+            const now = Date.now() / 1000;
+            const trialEnd = subscription.trial_end;
+            const hasTrialEnded = trialEnd !== null && 
+                                  subscription.current_period_end > trialEnd;
+            const isInTrial = !hasTrialEnded && (
+              subscription.status === 'trialing' || 
+              (trialEnd !== null && trialEnd > now)
+            );
+            
+            const cancelParams = {
+              cancel_at_period_end: true
+            };
+            
+            if (isInTrial && trialEnd && !hasTrialEnded) {
+              cancelParams.trial_end = trialEnd; // ✅ PRESERVE trial_end (only if trial hasn't ended)
+              console.log('🔍 Preserving trial_end during direct cancellation');
+            }
+            
+            canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
+            cancellationDate = isInTrial && trialEnd
+              ? trialEnd 
+              : subscription.current_period_end;
           }
-          
-          canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
-          cancellationDate = isInTrial && trialEnd
-            ? trialEnd 
-            : subscription.current_period_end;
-        } catch (releaseError) {
-          console.error('🔍 Error releasing schedule:', releaseError.message);
-          // Last resort: try direct cancellation (may fail, but worth trying)
-          console.log('🔍 Attempting direct cancellation as last resort');
-          
-          // CRITICAL: Preserve trial_end if subscription is in trial (and trial hasn't ended)
-          const now = Date.now() / 1000;
-          const trialEnd = subscription.trial_end;
-          const hasTrialEnded = trialEnd !== null && 
-                                subscription.current_period_end > trialEnd;
-          const isInTrial = !hasTrialEnded && (
-            subscription.status === 'trialing' || 
-            (trialEnd !== null && trialEnd > now)
-          );
-          
-          const cancelParams = {
-            cancel_at_period_end: true
-          };
-          
-          if (isInTrial && trialEnd && !hasTrialEnded) {
-            cancelParams.trial_end = trialEnd; // ✅ PRESERVE trial_end (only if trial hasn't ended)
-            console.log('🔍 Preserving trial_end during direct cancellation');
-          }
-          
-          canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
-          cancellationDate = isInTrial && trialEnd
-            ? trialEnd 
-            : subscription.current_period_end;
         }
       }
     } else {
