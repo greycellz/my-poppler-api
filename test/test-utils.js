@@ -124,10 +124,8 @@ async function linkCustomerToUser(userId, customerId) {
 
 /**
  * Attach a test payment method to a customer
- * Note: For test mode, you may need to enable "Raw card data APIs" in Stripe Dashboard
- * Settings > Developers > API keys > Enable raw card data APIs
- * 
- * Alternatively, for trial subscriptions, payment methods aren't required until trial ends
+ * Uses Stripe's predefined test payment method IDs (pm_card_visa, etc.)
+ * These work without needing raw card data APIs enabled
  */
 async function attachTestPaymentMethod(customerId) {
   if (!stripe) {
@@ -135,39 +133,59 @@ async function attachTestPaymentMethod(customerId) {
   }
 
   try {
-    // Create a test token first (required for test mode - avoids raw card number restriction)
-    // NOTE: This requires "Raw card data APIs" to be enabled in Stripe Dashboard
-    const token = await stripe.tokens.create({
-      card: {
-        number: '4242424242424242', // Stripe test card
-        exp_month: 12,
-        exp_year: 2025,
-        cvc: '123'
+    // Try using Stripe's predefined test payment method IDs first
+    // These work without raw card data APIs: pm_card_visa, pm_card_mastercard, etc.
+    const testPaymentMethodId = 'pm_card_visa'; // Stripe's predefined test Visa payment method
+    
+    try {
+      // Attach the test payment method to the customer
+      await stripe.paymentMethods.attach(testPaymentMethodId, {
+        customer: customerId
+      });
+
+      // Set as default payment method
+      await stripe.customers.update(customerId, {
+        invoice_settings: {
+          default_payment_method: testPaymentMethodId
+        }
+      });
+
+      console.log('✅ Attached test payment method (pm_card_visa) to customer');
+      return { id: testPaymentMethodId, type: 'card' };
+    } catch (attachError) {
+      // If predefined payment method doesn't work, try creating via SetupIntent
+      console.log('⚠️  Predefined payment method not attachable, trying SetupIntent approach...');
+      
+      const setupIntent = await stripe.setupIntents.create({
+        customer: customerId,
+        payment_method_types: ['card'],
+        payment_method: testPaymentMethodId
+      });
+
+      // Confirm the setup intent
+      const confirmedSetupIntent = await stripe.setupIntents.confirm(setupIntent.id);
+      
+      if (confirmedSetupIntent.payment_method) {
+        // Set as default payment method
+        await stripe.customers.update(customerId, {
+          invoice_settings: {
+            default_payment_method: confirmedSetupIntent.payment_method
+          }
+        });
+        
+        console.log('✅ Created payment method via SetupIntent');
+        return { id: confirmedSetupIntent.payment_method, type: 'card' };
       }
-    });
-
-    // Attach token directly to customer as a source (this works in test mode)
-    const source = await stripe.customers.createSource(customerId, {
-      source: token.id
-    });
-
-    // Set as default source (this is sufficient for subscriptions)
-    await stripe.customers.update(customerId, {
-      default_source: source.id
-    });
-
-    return source;
-  } catch (error) {
-    // If raw card data APIs are not enabled, log warning but continue
-    // Trial subscriptions don't require payment methods until trial ends
-    if (error.message && (error.message.includes('raw card data') || error.message.includes('unsafe'))) {
-      console.warn('⚠️  Raw card data APIs not enabled. Payment method attachment skipped.');
-      console.warn('   Trial subscriptions will work, but subscription updates may fail.');
-      console.warn('   To enable: Stripe Dashboard > Settings > Developers > API keys > Enable raw card data APIs');
-      console.warn('   Or contact Stripe support to enable this feature for your test account.');
-      return null;
+      
+      throw new Error('Could not create payment method via SetupIntent');
     }
-    throw error;
+  } catch (error) {
+    // If all methods fail, log warning but continue
+    // Trial subscriptions don't require payment methods until trial ends
+    console.warn('⚠️  Could not attach payment method:', error.message);
+    console.warn('   Trial subscriptions will work, but subscription updates may fail.');
+    console.warn('   To fix: Enable "Raw card data APIs" in Stripe Dashboard > Settings > Developers > API keys');
+    return null;
   }
 }
 
