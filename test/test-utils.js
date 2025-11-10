@@ -123,6 +123,40 @@ async function linkCustomerToUser(userId, customerId) {
 }
 
 /**
+ * Attach a test payment method to a customer
+ */
+async function attachTestPaymentMethod(customerId) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized.');
+  }
+
+  // Create a test payment method (using Stripe test card)
+  const paymentMethod = await stripe.paymentMethods.create({
+    type: 'card',
+    card: {
+      number: '4242424242424242', // Stripe test card
+      exp_month: 12,
+      exp_year: 2025,
+      cvc: '123'
+    }
+  });
+
+  // Attach to customer and set as default
+  await stripe.paymentMethods.attach(paymentMethod.id, {
+    customer: customerId
+  });
+
+  // Set as default payment method
+  await stripe.customers.update(customerId, {
+    invoice_settings: {
+      default_payment_method: paymentMethod.id
+    }
+  });
+
+  return paymentMethod;
+}
+
+/**
  * Create a complete test user with Stripe customer
  */
 async function createTestUserWithCustomer(options = {}) {
@@ -132,6 +166,9 @@ async function createTestUserWithCustomer(options = {}) {
     userId,
     testClockId: options.testClockId
   });
+  
+  // Attach a test payment method (required for subscription updates)
+  await attachTestPaymentMethod(customer.id);
   
   await linkCustomerToUser(userId, customer.id);
 
@@ -364,6 +401,7 @@ module.exports = {
   createTestUser,
   createStripeCustomer,
   linkCustomerToUser,
+  attachTestPaymentMethod,
   createTestUserWithCustomer,
   generateTestToken,
   createTrialSubscription,
