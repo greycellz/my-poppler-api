@@ -434,7 +434,8 @@ testDescribe('Trial Subscription Changes', () => {
       expect(updatedSub.items.data[0].price.id).toBe(getPriceId('pro', 'annual'));
       expect(updatedSub.trial_end).toBe(trialEnd); // Trial preserved
       expect(updatedSub.metadata.interval).toBe('annual');
-      expect(updatedSub.metadata.scheduledPlanId).toBeNull(); // Cleared
+      // scheduledPlanId should be null or undefined (Stripe may return undefined for missing metadata)
+      expect(updatedSub.metadata.scheduledPlanId === null || updatedSub.metadata.scheduledPlanId === undefined).toBe(true); // Cleared
     }, 30000);
   });
 
