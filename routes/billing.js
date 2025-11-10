@@ -585,8 +585,26 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
       if (isInTrialForCancel && trialEndForCancel && !hasTrialEndedForCancel) {
         // For trial subscriptions, release schedule first, then cancel subscription directly
         // This ensures we can set cancel_at_period_end and preserve trial_end
-        console.log('🔍 Trial subscription with schedule - releasing schedule, then canceling subscription directly');
+        console.log('🔍 Trial subscription with schedule - retrieving schedule to get phase end_date');
+        
+        // CRITICAL: Retrieve schedule BEFORE releasing to get phase end_date as source of truth
+        // The schedule's phase end_date is what Stripe uses, so we should use it too
+        let trialEndFromSchedule = trialEndForCancel;
         try {
+          const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+          const phaseEndDate = schedule.phases?.[0]?.end_date;
+          if (phaseEndDate && phaseEndDate > Date.now() / 1000) {
+            trialEndFromSchedule = phaseEndDate;
+            console.log('🔍 Using schedule phase end_date as trial_end source:', trialEndFromSchedule);
+          } else {
+            console.log('🔍 Schedule phase end_date not available or in past, using subscription trial_end');
+          }
+        } catch (scheduleError) {
+          console.log('🔍 Could not retrieve schedule, using subscription trial_end:', scheduleError.message);
+        }
+        
+        try {
+          console.log('🔍 Releasing schedule, then canceling subscription directly');
           await stripe.subscriptionSchedules.release(scheduleId);
           console.log('✅ Schedule released, now canceling subscription directly');
           
@@ -599,14 +617,14 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
           // Cancel subscription directly with cancel_at_period_end and trial_end preservation
           const cancelParams = {
             cancel_at_period_end: true,
-            trial_end: trialEndForCancel // ✅ PRESERVE trial_end
+            trial_end: trialEndFromSchedule // ✅ Use schedule's phase end_date as source of truth
           };
           
           // If trial_end changed after release, restore it first
-          if (subscriptionAfterRelease.trial_end !== trialEndForCancel && trialEndForCancel && !hasTrialEndedForCancel) {
-            console.log('🔍 Trial_end changed after schedule release, restoring before cancellation');
+          if (subscriptionAfterRelease.trial_end !== trialEndFromSchedule && trialEndFromSchedule && !hasTrialEndedForCancel) {
+            console.log('🔍 Trial_end changed after schedule release, restoring from schedule phase end_date before cancellation');
             await stripe.subscriptions.update(subscription.id, {
-              trial_end: trialEndForCancel
+              trial_end: trialEndFromSchedule
             });
             await new Promise(resolve => setTimeout(resolve, 500));
           }
@@ -622,10 +640,10 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
           // Verify cancel_at_period_end was set
           if (!canceledSubscription.cancel_at_period_end) {
             console.warn('⚠️  cancel_at_period_end not set after update, retrying...');
-            // Try again with explicit parameters
+            // Try again with explicit parameters (use schedule's phase end_date)
             canceledSubscription = await stripe.subscriptions.update(subscription.id, {
               cancel_at_period_end: true,
-              trial_end: trialEndForCancel
+              trial_end: trialEndFromSchedule // ✅ Use schedule's phase end_date
             });
             await new Promise(resolve => setTimeout(resolve, 1000));
             canceledSubscription = await stripe.subscriptions.retrieve(subscription.id);
@@ -638,7 +656,7 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
             }
           }
           
-          cancellationDate = trialEndForCancel; // Cancel at trial end
+          cancellationDate = trialEndFromSchedule; // Cancel at trial end (from schedule's phase end_date)
           
           console.log('✅ Subscription canceled at trial end with trial preserved');
         } catch (releaseError) {
@@ -1077,17 +1095,37 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         }
         
         if (scheduleId) {
-          console.log('🔍 Found schedule during trial upgrade, releasing it');
+          console.log('🔍 Found schedule during trial upgrade, retrieving it to get phase end_date');
+          
+          // CRITICAL: Retrieve schedule BEFORE releasing to get phase end_date as source of truth
+          // The schedule's phase end_date is what Stripe uses, so we should use it too
+          let trialEndFromSchedule = trialEnd;
+          try {
+            const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+            const phaseEndDate = schedule.phases?.[0]?.end_date;
+            if (phaseEndDate && phaseEndDate > Date.now() / 1000) {
+              trialEndFromSchedule = phaseEndDate;
+              console.log('🔍 Using schedule phase end_date as trial_end source:', trialEndFromSchedule);
+            } else {
+              console.log('🔍 Schedule phase end_date not available or in past, using subscription trial_end');
+            }
+          } catch (scheduleError) {
+            console.log('🔍 Could not retrieve schedule, using subscription trial_end:', scheduleError.message);
+          }
+          
+          console.log('🔍 Releasing schedule');
           await stripe.subscriptionSchedules.release(scheduleId);
           subscription = await stripe.subscriptions.retrieve(subscription.id);
           
           // CRITICAL: After releasing schedule, Stripe may recalculate trial_end
-          // We must immediately restore the original trial_end BEFORE making other changes
-          if (subscription.trial_end !== trialEnd && trialEnd && !hasTrialEnded) {
-            console.log('🔍 Trial_end changed after schedule release, restoring original trial_end');
+          // Use schedule's phase end_date as source of truth to restore original trial_end
+          if (subscription.trial_end !== trialEndFromSchedule && trialEndFromSchedule && !hasTrialEnded) {
+            console.log('🔍 Trial_end changed after schedule release, restoring from schedule phase end_date');
             subscription = await stripe.subscriptions.update(subscription.id, {
-              trial_end: trialEnd // ✅ FORCE restore original trial_end
+              trial_end: trialEndFromSchedule // ✅ Use schedule's phase end_date as source of truth
             });
+            // Update trialEnd variable for use in updateParams below
+            trialEnd = trialEndFromSchedule;
           }
         }
         
@@ -1500,17 +1538,37 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
         }
         
         if (scheduleId) {
-          console.log('🔍 Found schedule during trial interval upgrade, releasing it');
+          console.log('🔍 Found schedule during trial interval upgrade, retrieving it to get phase end_date');
+          
+          // CRITICAL: Retrieve schedule BEFORE releasing to get phase end_date as source of truth
+          // The schedule's phase end_date is what Stripe uses, so we should use it too
+          let trialEndFromSchedule = trialEnd;
+          try {
+            const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+            const phaseEndDate = schedule.phases?.[0]?.end_date;
+            if (phaseEndDate && phaseEndDate > Date.now() / 1000) {
+              trialEndFromSchedule = phaseEndDate;
+              console.log('🔍 Using schedule phase end_date as trial_end source:', trialEndFromSchedule);
+            } else {
+              console.log('🔍 Schedule phase end_date not available or in past, using subscription trial_end');
+            }
+          } catch (scheduleError) {
+            console.log('🔍 Could not retrieve schedule, using subscription trial_end:', scheduleError.message);
+          }
+          
+          console.log('🔍 Releasing schedule');
           await stripe.subscriptionSchedules.release(scheduleId);
           subscription = await stripe.subscriptions.retrieve(subscription.id);
           
           // CRITICAL: After releasing schedule, Stripe may recalculate trial_end
-          // We must immediately restore the original trial_end BEFORE making other changes
-          if (subscription.trial_end !== trialEnd && trialEnd && !hasTrialEnded) {
-            console.log('🔍 Trial_end changed after schedule release, restoring original trial_end');
+          // Use schedule's phase end_date as source of truth to restore original trial_end
+          if (subscription.trial_end !== trialEndFromSchedule && trialEndFromSchedule && !hasTrialEnded) {
+            console.log('🔍 Trial_end changed after schedule release, restoring from schedule phase end_date');
             subscription = await stripe.subscriptions.update(subscription.id, {
-              trial_end: trialEnd // ✅ FORCE restore original trial_end
+              trial_end: trialEndFromSchedule // ✅ Use schedule's phase end_date as source of truth
             });
+            // Update trialEnd variable for use in updateParams below
+            trialEnd = trialEndFromSchedule;
           }
         }
         
