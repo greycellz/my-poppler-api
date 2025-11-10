@@ -590,10 +590,21 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
         );
         
         if (isInTrial && trialEnd && !hasTrialEnded) {
-          console.log('🔍 Preserving trial_end after schedule cancellation during trial');
+          console.log('🔍 Preserving trial_end and setting cancel_at_period_end after schedule cancellation during trial');
           await stripe.subscriptions.update(subscription.id, {
-            trial_end: trialEnd // ✅ EXPLICITLY PRESERVE trial_end (only if trial hasn't ended)
+            trial_end: trialEnd, // ✅ EXPLICITLY PRESERVE trial_end (only if trial hasn't ended)
+            cancel_at_period_end: true // ✅ EXPLICITLY SET cancel_at_period_end (Stripe may not set it automatically during trial)
           });
+        } else {
+          // Not in trial - ensure cancel_at_period_end is set
+          // Stripe should set this automatically, but let's be explicit
+          const currentSub = await stripe.subscriptions.retrieve(subscription.id);
+          if (!currentSub.cancel_at_period_end) {
+            console.log('🔍 Setting cancel_at_period_end after schedule cancellation (non-trial)');
+            await stripe.subscriptions.update(subscription.id, {
+              cancel_at_period_end: true
+            });
+          }
         }
         
         // Retrieve updated subscription to get the current state

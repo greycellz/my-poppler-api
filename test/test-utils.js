@@ -4,12 +4,32 @@
  * Provides helper functions for creating test users, subscriptions, and managing test data
  */
 
+// Load test secrets FIRST before any other imports that might use them
+let testSecrets = {};
+try {
+  testSecrets = require('./test-secrets');
+} catch (e) {
+  // test-secrets.js not found, use environment variables
+}
+
+// Set JWT_SECRET FIRST before auth/utils is imported (it reads JWT_SECRET on load)
+if (testSecrets.JWT_SECRET && !process.env.JWT_SECRET) {
+  process.env.JWT_SECRET = testSecrets.JWT_SECRET;
+}
+
+// Set GCP credentials if provided in test-secrets
+if (testSecrets.GOOGLE_APPLICATION_CREDENTIALS_JSON && !process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+  process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON = JSON.stringify(testSecrets.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+}
+
 const GCPClient = require('../gcp-client');
 const { generateToken } = require('../auth/utils');
 const Stripe = require('stripe');
 
-const stripe = process.env.STRIPE_SECRET_KEY 
-  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+// Initialize Stripe with secret from test-secrets or environment
+const stripeSecret = testSecrets.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY;
+const stripe = stripeSecret 
+  ? new Stripe(stripeSecret)
   : null;
 
 const gcpClient = new GCPClient();

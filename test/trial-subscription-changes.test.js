@@ -23,33 +23,49 @@ const {
 } = require('./test-utils');
 
 const Stripe = require('stripe');
-const stripe = process.env.STRIPE_SECRET_KEY 
-  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+
+// Load test secrets if available
+let testSecretsForStripe = {};
+try {
+  testSecretsForStripe = require('./test-secrets');
+} catch (e) {
+  // test-secrets.js not found, use environment variables
+}
+
+const stripeSecret = testSecretsForStripe.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY;
+const stripe = stripeSecret 
+  ? new Stripe(stripeSecret)
   : null;
 
-const API_URL = process.env.API_URL || 'https://my-poppler-api-dev.up.railway.app';
+// Load test secrets if available
+let testSecrets = {};
+try {
+  testSecrets = require('./test-secrets');
+} catch (e) {
+  // test-secrets.js not found, use environment variables
+}
+
+const API_URL = testSecrets.API_URL || process.env.API_URL || 'https://my-poppler-api-dev.up.railway.app';
 
 // Conditionally skip if Stripe key not available
-const testDescribe = (!stripe || !process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_SECRET_KEY.includes('sk_test_'))
+const stripeKeyToCheck = testSecretsForStripe.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY;
+const testDescribe = (!stripe || !stripeKeyToCheck || !stripeKeyToCheck.includes('sk_test_'))
   ? describe.skip
   : describe;
 
 testDescribe('Trial Subscription Changes', () => {
-  let testClockId;
   let testUsers = []; // Track all test users for cleanup
 
-  beforeAll(async () => {
+  // Create a new test clock for each test to avoid the 3-customer limit
+  async function createTestClock() {
     if (!stripe) {
-      console.log('⚠️  Skipping - Stripe not initialized');
-      return;
+      throw new Error('Stripe not initialized');
     }
-
-    // Create test clock frozen at current time
     const testClock = await stripe.testHelpers.testClocks.create({
       frozen_time: Math.floor(Date.now() / 1000)
     });
-    testClockId = testClock.id;
-  });
+    return testClock.id;
+  }
 
   afterAll(async () => {
     // Cleanup all test users
@@ -66,6 +82,7 @@ testDescribe('Trial Subscription Changes', () => {
 
   describe('Trial Plan Changes', () => {
     test('Trial Plan Upgrade (Basic → Pro) - Immediate upgrade, trial preserved', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'basic',
@@ -111,6 +128,7 @@ testDescribe('Trial Subscription Changes', () => {
     }, 30000);
 
     test('Trial Plan Downgrade (Pro → Basic) - Immediate downgrade, trial preserved', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'pro',
@@ -156,6 +174,7 @@ testDescribe('Trial Subscription Changes', () => {
     }, 30000);
 
     test('Trial Plan Change with Existing Schedule - Schedule released, change applied', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'basic',
@@ -172,12 +191,17 @@ testDescribe('Trial Subscription Changes', () => {
       );
 
       // Create a schedule for interval change
+      // Note: Must create schedule first, then update with phases
       const schedule = await stripe.subscriptionSchedules.create({
-        from_subscription: subscription.id,
+        from_subscription: subscription.id
+      });
+      
+      // Update schedule with phases and metadata
+      await stripe.subscriptionSchedules.update(schedule.id, {
         phases: [
           {
             items: [{ price: getPriceId('basic', 'monthly') }],
-            start_date: Math.floor(Date.now() / 1000),
+            start_date: subscription.current_period_start,
             end_date: subscription.trial_end
           },
           {
@@ -233,6 +257,7 @@ testDescribe('Trial Subscription Changes', () => {
 
   describe('Trial Interval Changes', () => {
     test('Trial Interval Upgrade (Monthly → Annual) - Immediate change, trial preserved', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'pro',
@@ -278,6 +303,7 @@ testDescribe('Trial Subscription Changes', () => {
     }, 30000);
 
     test('Trial Interval Downgrade (Annual → Monthly) - Immediate change, trial preserved', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'pro',
@@ -323,6 +349,7 @@ testDescribe('Trial Subscription Changes', () => {
     }, 30000);
 
     test('Trial Interval Change with Existing Schedule - Schedule released, change applied', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'pro',
@@ -340,12 +367,17 @@ testDescribe('Trial Subscription Changes', () => {
       );
 
       // Create a schedule for plan change
+      // Note: Must create schedule first, then update with phases
       const schedule = await stripe.subscriptionSchedules.create({
-        from_subscription: subscription.id,
+        from_subscription: subscription.id
+      });
+      
+      // Update schedule with phases and metadata
+      await stripe.subscriptionSchedules.update(schedule.id, {
         phases: [
           {
             items: [{ price: getPriceId('pro', 'monthly') }],
-            start_date: Math.floor(Date.now() / 1000),
+            start_date: subscription.current_period_start,
             end_date: subscription.trial_end
           },
           {
@@ -398,6 +430,7 @@ testDescribe('Trial Subscription Changes', () => {
 
   describe('Trial Cancellation', () => {
     test('Cancel During Trial (No Schedule) - Subscription remains in trial', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'pro',
@@ -440,6 +473,7 @@ testDescribe('Trial Subscription Changes', () => {
     }, 30000);
 
     test('Cancel During Trial (With Schedule) - Schedule canceled, subscription remains in trial', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'pro',
@@ -456,12 +490,17 @@ testDescribe('Trial Subscription Changes', () => {
       );
 
       // Create a schedule
+      // Note: Must create schedule first, then update with phases
       const schedule = await stripe.subscriptionSchedules.create({
-        from_subscription: subscription.id,
+        from_subscription: subscription.id
+      });
+      
+      // Update schedule with phases and metadata
+      await stripe.subscriptionSchedules.update(schedule.id, {
         phases: [
           {
             items: [{ price: getPriceId('pro', 'monthly') }],
-            start_date: Math.floor(Date.now() / 1000),
+            start_date: subscription.current_period_start,
             end_date: subscription.trial_end
           },
           {
@@ -512,6 +551,7 @@ testDescribe('Trial Subscription Changes', () => {
 
   describe('Trial Detection After Trial Ends', () => {
     test('Trial Ended Detection (hasTrialEnded) - isTrial should be false', async () => {
+      const testClockId = await createTestClock();
       const { userId, email, customerId } = await createTestUserWithCustomer({
         testClockId,
         plan: 'pro',
