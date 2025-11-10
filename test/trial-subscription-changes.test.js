@@ -237,13 +237,17 @@ testDescribe('Trial Subscription Changes', () => {
       expect(response.data.success).toBe(true);
 
       // Verify schedule is released
+      // Note: release() doesn't delete the schedule, it just releases the subscription from it
+      // The schedule still exists but is no longer active/managing the subscription
       try {
-        await stripe.subscriptionSchedules.retrieve(schedule.id);
-        // If we get here, schedule still exists (shouldn't happen)
-        expect(true).toBe(false);
+        const releasedSchedule = await stripe.subscriptionSchedules.retrieve(schedule.id);
+        // Schedule still exists but should be released (not managing subscription)
+        expect(releasedSchedule.status).toBe('released');
       } catch (error) {
-        // Schedule should be released (not found)
-        expect(error.code).toBe('resource_missing');
+        // Schedule might be deleted or not found - that's also OK
+        if (error.code !== 'resource_missing') {
+          throw error; // Re-throw if it's a different error
+        }
       }
 
       // Verify subscription updated
@@ -412,11 +416,17 @@ testDescribe('Trial Subscription Changes', () => {
       expect(response.data.success).toBe(true);
 
       // Verify schedule is released
+      // Note: release() doesn't delete the schedule, it just releases the subscription from it
+      // The schedule still exists but is no longer active/managing the subscription
       try {
-        await stripe.subscriptionSchedules.retrieve(schedule.id);
-        expect(true).toBe(false);
+        const releasedSchedule = await stripe.subscriptionSchedules.retrieve(schedule.id);
+        // Schedule still exists but should be released (not managing subscription)
+        expect(releasedSchedule.status).toBe('released');
       } catch (error) {
-        expect(error.code).toBe('resource_missing');
+        // Schedule might be deleted or not found - that's also OK
+        if (error.code !== 'resource_missing') {
+          throw error; // Re-throw if it's a different error
+        }
       }
 
       // Verify subscription updated
