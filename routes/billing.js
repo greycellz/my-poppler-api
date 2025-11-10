@@ -531,7 +531,8 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
     });
 
     // Find active, trialing, or past_due subscription
-    const subscription = subscriptions.data.find(sub => 
+    // CRITICAL: Use 'let' instead of 'const' to allow reassignment after schedule operations
+    let subscription = subscriptions.data.find(sub => 
       sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due'
     );
 
@@ -574,13 +575,37 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
       try {
         await stripe.subscriptionSchedules.cancel(scheduleId);
         console.log('✅ Schedule canceled successfully');
+        
+        // CRITICAL: After canceling schedule, retrieve subscription to check its current status
+        // Stripe may immediately cancel the subscription when the schedule is canceled
+        const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
+        console.log('🔍 Subscription status after schedule cancel:', updatedSubscription.status);
+        
+        if (updatedSubscription.status === 'canceled') {
+          // Subscription was already canceled by Stripe when we canceled the schedule
+          console.log('✅ Subscription automatically canceled when schedule was canceled');
+          cancellationDate = subscription.trial_end || subscription.current_period_end;
+          
+          return res.json({ 
+            success: true, 
+            message: subscription.status === 'trialing'
+              ? 'Subscription will be canceled at the end of your trial period'
+              : 'Subscription will be canceled at the end of your current billing period',
+            subscription: updatedSubscription,
+            cancelAtPeriodEnd: true,
+            cancellationDate: cancellationDate
+          });
+        }
+        
+        // If subscription is not canceled, update our reference for the next step
+        subscription = updatedSubscription;
       } catch (scheduleCancelError) {
         console.error('Error canceling schedule:', scheduleCancelError.message);
         return res.status(500).json({ error: 'Failed to cancel schedule' });
       }
     }
     
-    // Step 2: Set cancel_at_period_end on the subscription
+    // Step 2: Set cancel_at_period_end on the subscription (only if not already canceled)
     const cancelParams = { cancel_at_period_end: true };
     
     // Preserve trial_end if it exists
@@ -709,7 +734,8 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     });
 
     // Find active, trialing, or past_due subscription
-    const subscription = subscriptions.data.find(sub => 
+    // CRITICAL: Use 'let' instead of 'const' to allow reassignment after schedule operations
+    let subscription = subscriptions.data.find(sub => 
       sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due'
     );
 
