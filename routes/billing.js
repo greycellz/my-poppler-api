@@ -1316,8 +1316,12 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     console.log('🔍 Change interval debug - has trial ended:', hasTrialEnded)
     
     // Determine if this is an upgrade or downgrade
-    // Monthly → Annual = upgrade (better value, but scheduled for trial end during trial)
-    // Annual → Monthly = downgrade (worse value, schedule for trial end)
+    // ✅ VALUE-BASED LOGIC: Interval changes are based on value proposition, NOT plan tier
+    // - Monthly → Annual = upgrade (always immediate) - Annual has more value regardless of plan tier
+    //   Examples: Monthly Pro → Annual Pro (immediate), Monthly Pro → Annual Basic (immediate)
+    // - Annual → Monthly = downgrade (always end of period) - Monthly has less value regardless of plan tier
+    //   Examples: Annual Pro → Monthly Pro (end of period), Annual Basic → Monthly Pro (end of period)
+    // This ensures we capture value from annual subscriptions and don't lose value from monthly downgrades
     const isIntervalUpgrade = currentInterval === 'monthly' && newInterval === 'annual';
     const isIntervalDowngrade = currentInterval === 'annual' && newInterval === 'monthly';
     

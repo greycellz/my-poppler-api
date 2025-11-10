@@ -1,0 +1,363 @@
+/**
+ * Test Utilities for Subscription Tests
+ * 
+ * Provides helper functions for creating test users, subscriptions, and managing test data
+ */
+
+const GCPClient = require('../gcp-client');
+const { generateToken } = require('../auth/utils');
+const Stripe = require('stripe');
+
+const stripe = process.env.STRIPE_SECRET_KEY 
+  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+  : null;
+
+const gcpClient = new GCPClient();
+
+// Price IDs from routes/billing.js
+const PRICE_IDS = {
+  basic: {
+    monthly: 'price_1S8PK8RsohPcZDimxfsFUWrB',
+    annual: 'price_1S8PO5RsohPcZDimYKy7PLNT'
+  },
+  pro: {
+    monthly: 'price_1S8PQaRsohPcZDim8f6xylsh',
+    annual: 'price_1S8PVYRsohPcZDimF5L5l38A'
+  },
+  enterprise: {
+    monthly: 'price_1S8PbBRsohPcZDim3rN4pRNX',
+    annual: 'price_1S8PbBRsohPcZDimuZvJDXY0'
+  }
+};
+
+/**
+ * Create a test user in Firestore
+ */
+async function createTestUser(options = {}) {
+  const timestamp = Date.now();
+  const randomId = Math.random().toString(36).substring(2, 15);
+  const userId = `test-user-${timestamp}-${randomId}`;
+  const email = options.email || `test-${timestamp}@chatterforms.test`;
+
+  const userData = {
+    email: email,
+    name: options.name || `Test User ${timestamp}`,
+    createdAt: new Date(),
+    subscription: {
+      plan: options.plan || 'free',
+      status: options.status || 'active',
+      interval: options.interval || 'monthly',
+      ...options.subscriptionData
+    },
+    hasHadPaidSubscription: options.hasHadPaidSubscription || false,
+    stripeCustomerId: null, // Will be set when customer is created
+    ...options.additionalData
+  };
+
+  await gcpClient.firestore.collection('users').doc(userId).set(userData);
+
+  return {
+    userId,
+    email,
+    userData
+  };
+}
+
+/**
+ * Create a Stripe customer
+ */
+async function createStripeCustomer(options = {}) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized. Set STRIPE_SECRET_KEY environment variable.');
+  }
+
+  const timestamp = Date.now();
+  const email = options.email || `test-${timestamp}@chatterforms.test`;
+  const testClockId = options.testClockId || null;
+
+  const customerData = {
+    email: email,
+    name: options.name || `Test Customer ${timestamp}`,
+    metadata: {
+      test: 'true',
+      userId: options.userId || 'test-user-id'
+    }
+  };
+
+  if (testClockId) {
+    customerData.test_clock = testClockId;
+  }
+
+  const customer = await stripe.customers.create(customerData);
+
+  return customer;
+}
+
+/**
+ * Link Stripe customer to Firestore user
+ */
+async function linkCustomerToUser(userId, customerId) {
+  await gcpClient.firestore.collection('users').doc(userId).update({
+    stripeCustomerId: customerId
+  });
+}
+
+/**
+ * Create a complete test user with Stripe customer
+ */
+async function createTestUserWithCustomer(options = {}) {
+  const { userId, email, userData } = await createTestUser(options);
+  const customer = await createStripeCustomer({
+    email,
+    userId,
+    testClockId: options.testClockId
+  });
+  
+  await linkCustomerToUser(userId, customer.id);
+
+  return {
+    userId,
+    email,
+    customerId: customer.id,
+    customer,
+    userData
+  };
+}
+
+/**
+ * Generate JWT token for test user
+ */
+function generateTestToken(userId, email) {
+  return generateToken(userId, email);
+}
+
+/**
+ * Create a subscription with trial
+ */
+async function createTrialSubscription(customerId, planId, interval, options = {}) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized.');
+  }
+
+  const priceId = PRICE_IDS[planId]?.[interval];
+  if (!priceId) {
+    throw new Error(`Invalid plan or interval: ${planId}/${interval}`);
+  }
+
+  const subscriptionData = {
+    customer: customerId,
+    items: [{ price: priceId }],
+    trial_period_days: options.trialDays || 30,
+    metadata: {
+      userId: options.userId || 'test-user-id',
+      planId: planId,
+      interval: interval
+    }
+  };
+
+  const subscription = await stripe.subscriptions.create(subscriptionData);
+
+  return subscription;
+}
+
+/**
+ * Create an active subscription (no trial)
+ */
+async function createActiveSubscription(customerId, planId, interval, options = {}) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized.');
+  }
+
+  const priceId = PRICE_IDS[planId]?.[interval];
+  if (!priceId) {
+    throw new Error(`Invalid plan or interval: ${planId}/${interval}`);
+  }
+
+  const subscriptionData = {
+    customer: customerId,
+    items: [{ price: priceId }],
+    metadata: {
+      userId: options.userId || 'test-user-id',
+      planId: planId,
+      interval: interval
+    }
+  };
+
+  const subscription = await stripe.subscriptions.create(subscriptionData);
+
+  return subscription;
+}
+
+/**
+ * Create a subscription schedule
+ */
+async function createSubscriptionSchedule(subscriptionId, phases, options = {}) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized.');
+  }
+
+  const scheduleData = {
+    from_subscription: subscriptionId,
+    phases: phases,
+    metadata: {
+      userId: options.userId || 'test-user-id',
+      ...options.metadata
+    }
+  };
+
+  const schedule = await stripe.subscriptionSchedules.create(scheduleData);
+
+  return schedule;
+}
+
+/**
+ * Update subscription metadata
+ */
+async function updateSubscriptionMetadata(subscriptionId, metadata) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized.');
+  }
+
+  const subscription = await stripe.subscriptions.update(subscriptionId, {
+    metadata: metadata
+  });
+
+  return subscription;
+}
+
+/**
+ * Cancel a subscription
+ */
+async function cancelSubscription(subscriptionId, cancelAtPeriodEnd = true) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized.');
+  }
+
+  const subscription = await stripe.subscriptions.update(subscriptionId, {
+    cancel_at_period_end: cancelAtPeriodEnd
+  });
+
+  return subscription;
+}
+
+/**
+ * Release a subscription schedule
+ */
+async function releaseSchedule(scheduleId) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized.');
+  }
+
+  const schedule = await stripe.subscriptionSchedules.release(scheduleId);
+
+  return schedule;
+}
+
+/**
+ * Clean up test user from Firestore
+ */
+async function cleanupTestUser(userId) {
+  try {
+    await gcpClient.firestore.collection('users').doc(userId).delete();
+  } catch (error) {
+    console.warn(`Failed to cleanup test user ${userId}:`, error.message);
+  }
+}
+
+/**
+ * Clean up Stripe customer (and all associated subscriptions)
+ */
+async function cleanupStripeCustomer(customerId) {
+  if (!stripe) {
+    return;
+  }
+
+  try {
+    // Cancel all subscriptions
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      limit: 100
+    });
+
+    for (const sub of subscriptions.data) {
+      try {
+        if (sub.status !== 'canceled') {
+          await stripe.subscriptions.cancel(sub.id);
+        }
+      } catch (error) {
+        console.warn(`Failed to cancel subscription ${sub.id}:`, error.message);
+      }
+    }
+
+    // Delete customer
+    await stripe.customers.del(customerId);
+  } catch (error) {
+    console.warn(`Failed to cleanup Stripe customer ${customerId}:`, error.message);
+  }
+}
+
+/**
+ * Clean up test clock
+ */
+async function cleanupTestClock(testClockId) {
+  if (!stripe || !testClockId) {
+    return;
+  }
+
+  try {
+    // Note: Test clocks can't be deleted while in use
+    // They will be automatically cleaned up by Stripe
+    // This is just a placeholder for future cleanup if needed
+  } catch (error) {
+    console.warn(`Failed to cleanup test clock ${testClockId}:`, error.message);
+  }
+}
+
+/**
+ * Wait for Stripe to process (for test clock advancements)
+ */
+function waitForStripeProcessing(ms = 2000) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Advance test clock
+ */
+async function advanceTestClock(testClockId, frozenTime) {
+  if (!stripe) {
+    throw new Error('Stripe not initialized.');
+  }
+
+  await stripe.testHelpers.testClocks.advance(testClockId, {
+    frozen_time: frozenTime
+  });
+}
+
+/**
+ * Get price ID for plan and interval
+ */
+function getPriceId(planId, interval) {
+  return PRICE_IDS[planId]?.[interval];
+}
+
+module.exports = {
+  createTestUser,
+  createStripeCustomer,
+  linkCustomerToUser,
+  createTestUserWithCustomer,
+  generateTestToken,
+  createTrialSubscription,
+  createActiveSubscription,
+  createSubscriptionSchedule,
+  updateSubscriptionMetadata,
+  cancelSubscription,
+  releaseSchedule,
+  cleanupTestUser,
+  cleanupStripeCustomer,
+  cleanupTestClock,
+  waitForStripeProcessing,
+  advanceTestClock,
+  getPriceId,
+  PRICE_IDS
+};
+
