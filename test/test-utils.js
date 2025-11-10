@@ -124,13 +124,14 @@ async function linkCustomerToUser(userId, customerId) {
 
 /**
  * Attach a test payment method to a customer
+ * Uses token-based approach for test mode compatibility
  */
 async function attachTestPaymentMethod(customerId) {
   if (!stripe) {
     throw new Error('Stripe not initialized.');
   }
 
-  // Create a test token first (required for test mode)
+  // Create a test token first (required for test mode - avoids raw card number restriction)
   const token = await stripe.tokens.create({
     card: {
       number: '4242424242424242', // Stripe test card
@@ -140,27 +141,17 @@ async function attachTestPaymentMethod(customerId) {
     }
   });
 
-  // Create a payment method from the token
-  const paymentMethod = await stripe.paymentMethods.create({
-    type: 'card',
-    card: {
-      token: token.id
-    }
+  // Attach token directly to customer as a source (this works in test mode)
+  const source = await stripe.customers.createSource(customerId, {
+    source: token.id
   });
 
-  // Attach to customer and set as default
-  await stripe.paymentMethods.attach(paymentMethod.id, {
-    customer: customerId
-  });
-
-  // Set as default payment method
+  // Set as default source (this is sufficient for subscriptions)
   await stripe.customers.update(customerId, {
-    invoice_settings: {
-      default_payment_method: paymentMethod.id
-    }
+    default_source: source.id
   });
 
-  return paymentMethod;
+  return source;
 }
 
 /**
