@@ -590,11 +590,26 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
           await stripe.subscriptionSchedules.release(scheduleId);
           console.log('✅ Schedule released, now canceling subscription directly');
           
+          // Wait a moment for Stripe to process the schedule release
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Retrieve subscription to check current state after release
+          const subscriptionAfterRelease = await stripe.subscriptions.retrieve(subscription.id);
+          
           // Cancel subscription directly with cancel_at_period_end and trial_end preservation
           const cancelParams = {
             cancel_at_period_end: true,
             trial_end: trialEndForCancel // ✅ PRESERVE trial_end
           };
+          
+          // If trial_end changed after release, restore it first
+          if (subscriptionAfterRelease.trial_end !== trialEndForCancel && trialEndForCancel && !hasTrialEndedForCancel) {
+            console.log('🔍 Trial_end changed after schedule release, restoring before cancellation');
+            await stripe.subscriptions.update(subscription.id, {
+              trial_end: trialEndForCancel
+            });
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
           
           canceledSubscription = await stripe.subscriptions.update(subscription.id, cancelParams);
           
