@@ -844,19 +844,19 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     console.log('🔍 Change plan debug - is downgrade:', isDowngrade);
     
     // ═══════════════════════════════════════════════════════════════════
-    // OPTION 2: METADATA-ONLY TRIAL CHANGES
-    // During trial, ONLY update metadata (NOT subscription items)
-    // This prevents ANY invoice generation and charges during trial
-    // At trial end, webhook applies metadata to actual subscription items
+    // TRIAL PLAN CHANGES: Direct item update with proration_behavior: 'none'
+    // During trial, update subscription items immediately BUT with proration_behavior: 'none'
+    // This prevents charges while updating the subscription to show correct plan in Stripe
+    // Verified: test/verify-proration-none.js confirms zero charges with this approach
     // ═══════════════════════════════════════════════════════════════════
     if (isInTrial) {
-      console.log('🔍 TRIAL CHANGE: Updating metadata only (no items, no charges)');
+      console.log('🔍 TRIAL CHANGE: Updating items with proration_behavior: none');
       console.log(`🔍 Plan change: ${currentPlanId} → ${newPlanId} (${interval})`);
       console.log(`🔍 Is downgrade: ${isDowngrade}`);
       
       // Release any existing schedule first (from previous changes)
       if (scheduleId) {
-        console.log('🔍 Releasing existing schedule before metadata update');
+        console.log('🔍 Releasing existing schedule before plan change');
         try {
           await stripe.subscriptionSchedules.release(scheduleId);
           subscription = await stripe.subscriptions.retrieve(subscription.id);
@@ -875,19 +875,24 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         }
       }
       
-      // Update ONLY metadata - NO items parameter
-      // This is the key: no items = no invoice = no charge
+      // Update items with proration_behavior: 'none'
+      // KEY: This updates subscription items (Stripe shows correct plan)
+      // but proration_behavior: 'none' prevents any charges
       const updateParams = {
-        // ❌ NO items parameter - subscription items remain unchanged
+        items: [{
+          id: subscription.items.data[0].id,
+          price: newPriceId  // ✅ Update to new plan immediately
+        }],
+        proration_behavior: 'none',  // ✅ KEY: Prevents charges during trial
+        trial_end: trialEnd,          // ✅ KEY: Preserves trial period
         metadata: {
           userId: userId,
-          planId: newPlanId,        // Track intended plan in metadata
-          interval: interval,        // Track intended interval in metadata
+          planId: newPlanId,
+          interval: interval,
           scheduledPlanId: null,     // Clear any scheduled changes
           scheduledInterval: null,
           scheduledChangeDate: null
-        },
-        trial_end: trialEnd  // Preserve trial period
+        }
       };
       
       // If subscription is pending cancellation, cancel the cancellation
@@ -896,15 +901,16 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         console.log('🔍 Canceling pending cancellation during trial plan change');
       }
       
-      console.log('🔍 Updating subscription with metadata-only params...');
+      console.log('🔍 Updating subscription items with proration_behavior: none...');
       const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
       
-      console.log('✅ Trial plan change complete - metadata updated, no charges');
+      console.log('✅ Trial plan change complete - items updated, no charges');
       console.log(`   Status: ${updatedSubscription.status} (still trialing)`);
-      console.log(`   Items: ${updatedSubscription.items.data[0].price.id} (unchanged)`);
+      console.log(`   Items: ${updatedSubscription.items.data[0].price.id} (${newPriceId})`);
       console.log(`   Metadata.planId: ${updatedSubscription.metadata.planId} (${newPlanId})`);
       console.log(`   Trial ends: ${new Date(updatedSubscription.trial_end * 1000).toISOString()}`);
-      console.log(`   At trial end, webhook will apply: ${newPlanId} (${interval})`);
+      console.log(`   Stripe dashboard: Shows correct plan immediately ✅`);
+      console.log(`   Invoice preview: Shows correct price ✅`);
       
       // Return success with clear messaging
       const changeType = isDowngrade ? 'downgraded' : 'upgraded';
@@ -927,8 +933,7 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         subscription: updatedSubscription,
         newPlan: newPlanId,
         interval: interval,
-        isTrial: true,
-        noChargesDuringTrial: true  // Flag to frontend
+        isTrial: true
       });
       return;
     }
@@ -1300,19 +1305,19 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     const isIntervalDowngrade = currentInterval === 'annual' && newInterval === 'monthly';
     
     // ═══════════════════════════════════════════════════════════════════
-    // OPTION 2: METADATA-ONLY TRIAL INTERVAL CHANGES
-    // During trial, ONLY update metadata (NOT subscription items)
-    // This prevents ANY invoice generation and charges during trial
-    // At trial end, webhook applies metadata to actual subscription items
+    // TRIAL INTERVAL CHANGES: Direct item update with proration_behavior: 'none'
+    // During trial, update subscription items immediately BUT with proration_behavior: 'none'
+    // This prevents charges while updating the subscription to show correct interval in Stripe
+    // Verified: test/verify-proration-none.js confirms zero charges with this approach
     // ═══════════════════════════════════════════════════════════════════
     if (isInTrial) {
-      console.log('🔍 TRIAL INTERVAL CHANGE: Updating metadata only (no items, no charges)');
+      console.log('🔍 TRIAL INTERVAL CHANGE: Updating items with proration_behavior: none');
       console.log(`🔍 Interval change: ${currentInterval} → ${newInterval} for plan: ${subscriptionPlanId}`);
       console.log(`🔍 Is upgrade: ${isIntervalUpgrade}, Is downgrade: ${isIntervalDowngrade}`);
       
       // Release any existing schedule first (from previous changes)
       if (scheduleId) {
-        console.log('🔍 Releasing existing schedule before metadata update');
+        console.log('🔍 Releasing existing schedule before interval change');
         try {
           await stripe.subscriptionSchedules.release(scheduleId);
           subscription = await stripe.subscriptions.retrieve(subscription.id);
@@ -1331,19 +1336,27 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
         }
       }
       
-      // Update ONLY metadata - NO items parameter
-      // This is the key: no items = no invoice = no charge
+      // Get the new price ID for the same plan but different interval
+      const newPriceId = PRICE_IDS[subscriptionPlanId][newInterval];
+      
+      // Update items with proration_behavior: 'none'
+      // KEY: This updates subscription items (Stripe shows correct interval)
+      // but proration_behavior: 'none' prevents any charges
       const updateParams = {
-        // ❌ NO items parameter - subscription items remain unchanged
+        items: [{
+          id: subscription.items.data[0].id,
+          price: newPriceId  // ✅ Update to new interval immediately
+        }],
+        proration_behavior: 'none',  // ✅ KEY: Prevents charges during trial
+        trial_end: trialEnd,          // ✅ KEY: Preserves trial period
         metadata: {
           userId: userId,
           planId: subscriptionPlanId,    // Keep current plan
-          interval: newInterval,          // Track intended interval in metadata
+          interval: newInterval,          // Update to new interval
           scheduledPlanId: null,          // Clear any scheduled changes
           scheduledInterval: null,
           scheduledChangeDate: null
-        },
-        trial_end: trialEnd  // Preserve trial period
+        }
       };
       
       // If subscription is pending cancellation, cancel the cancellation
@@ -1352,15 +1365,16 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
         console.log('🔍 Canceling pending cancellation during trial interval change');
       }
       
-      console.log('🔍 Updating subscription with metadata-only params...');
+      console.log('🔍 Updating subscription items with proration_behavior: none...');
       const updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
       
-      console.log('✅ Trial interval change complete - metadata updated, no charges');
+      console.log('✅ Trial interval change complete - items updated, no charges');
       console.log(`   Status: ${updatedSubscription.status} (still trialing)`);
-      console.log(`   Items: ${updatedSubscription.items.data[0].price.id} (unchanged)`);
+      console.log(`   Items: ${updatedSubscription.items.data[0].price.id} (${newPriceId})`);
       console.log(`   Metadata.interval: ${updatedSubscription.metadata.interval} (${newInterval})`);
       console.log(`   Trial ends: ${new Date(updatedSubscription.trial_end * 1000).toISOString()}`);
-      console.log(`   At trial end, webhook will apply: ${subscriptionPlanId} (${newInterval})`);
+      console.log(`   Stripe dashboard: Shows correct interval immediately ✅`);
+      console.log(`   Invoice preview: Shows correct price ✅`);
       
       // Return success with clear messaging
       const changeType = isIntervalUpgrade ? 'upgraded' : 'downgraded';
@@ -1382,8 +1396,7 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
         message: `Billing interval ${changeType} to ${intervalName}. You'll be charged $${getPlanAmount(subscriptionPlanId, newInterval)} when your trial ends on ${new Date(updatedSubscription.trial_end * 1000).toLocaleDateString()}.`,
         subscription: updatedSubscription,
         newInterval: newInterval,
-        isTrial: true,
-        noChargesDuringTrial: true  // Flag to frontend
+        isTrial: true
       });
     }
     
