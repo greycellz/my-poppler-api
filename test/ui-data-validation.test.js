@@ -14,8 +14,8 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || require('./tes
 const axios = require('axios');
 const { 
   createTestUserWithCustomer, 
-  createTestSubscription, 
-  generateJWT, 
+  createTrialSubscription, 
+  generateTestToken, 
   cleanupTestUser
 } = require('./test-utils');
 
@@ -33,10 +33,10 @@ describe('UI Data Validation Tests', () => {
       name: `test-clock-${Date.now()}`
     });
 
-    const setup = await createTestUserWithCustomer(testClock.id);
-    testUser = setup.user;
+    const setup = await createTestUserWithCustomer({ testClockId: testClock.id });
+    testUser = { userId: setup.userId, email: setup.email };
     testCustomer = setup.customer;
-    jwt = generateJWT(testUser.userId);
+    jwt = generateTestToken(setup.userId, setup.email);
   });
 
   afterEach(async () => {
@@ -52,11 +52,11 @@ describe('UI Data Validation Tests', () => {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
     // Create Basic Monthly trial
-    const subscription = await createTestSubscription(
+    const subscription = await createTrialSubscription(
       testCustomer.id,
-      'price_1S8PO5RsohPcZDimYKy7PLNT',
-      { userId: testUser.userId, planId: 'basic', interval: 'monthly' },
-      30
+      'basic',
+      'monthly',
+      { userId: testUser.userId, trialDays: 30 }
     );
 
     console.log('✅ Created Basic Monthly trial');
@@ -168,11 +168,11 @@ describe('UI Data Validation Tests', () => {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
     // Create Basic Monthly trial
-    const subscription = await createTestSubscription(
+    const subscription = await createTrialSubscription(
       testCustomer.id,
-      'price_1S8PO5RsohPcZDimYKy7PLNT',
-      { userId: testUser.userId, planId: 'basic', interval: 'monthly' },
-      30
+      'basic',
+      'monthly',
+      { userId: testUser.userId, trialDays: 30 }
     );
 
     console.log('✅ Created Basic Monthly trial');
@@ -225,11 +225,11 @@ describe('UI Data Validation Tests', () => {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
     // Create Basic trial (no HIPAA)
-    let subscription = await createTestSubscription(
+    let subscription = await createTrialSubscription(
       testCustomer.id,
-      'price_1S8PO5RsohPcZDimYKy7PLNT',
-      { userId: testUser.userId, planId: 'basic', interval: 'monthly' },
-      30
+      'basic',
+      'monthly',
+      { userId: testUser.userId, trialDays: 30 }
     );
 
     console.log('✅ Created Basic Monthly trial (no HIPAA)');

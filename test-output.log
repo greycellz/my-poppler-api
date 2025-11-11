@@ -1,0 +1,16 @@
+
+> chatterforms-api@1.1.0 test
+> jest test/option2-trial-scenarios.test.js --verbose
+
+PASS test/option2-trial-scenarios.test.js (42.106 s)
+  Option 2: Trial Scenarios Test Suite
+    ✓ Scenario 1: Basic → Pro Monthly → Pro Annual (13754 ms)
+    ✓ Scenario 2: Multiple Changes During Trial (13438 ms)
+    ✓ Scenario 3: Interval Change (Monthly → Annual) (7086 ms)
+    ✓ Scenario 4: Downgrade During Trial (7252 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
+Snapshots:   0 total
+Time:        42.226 s, estimated 44 s
+Ran all test suites matching test/option2-trial-scenarios.test.js.
