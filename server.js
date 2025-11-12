@@ -376,9 +376,28 @@ async function handlePaymentSucceeded(invoice) {
   try {
     console.log(`💰 Processing payment succeeded: ${invoice.id}`);
     
-    if (invoice.subscription) {
+      if (invoice.subscription) {
       const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
       const userId = subscription.metadata.userId;
+      let planId = subscription.metadata.planId;
+      
+      // Fallback: If planId not in metadata, try to get from price ID
+      if (!planId && subscription.items?.data?.[0]?.price?.id) {
+        const priceId = subscription.items.data[0].price.id;
+        // Reverse lookup from PRICE_IDS
+        const PRICE_IDS = require('./routes/billing').PRICE_IDS || {};
+        for (const [pId, intervals] of Object.entries(PRICE_IDS)) {
+          for (const [interval, pIdValue] of Object.entries(intervals)) {
+            if (pIdValue === priceId) {
+              planId = pId;
+              break;
+            }
+          }
+          if (planId) break;
+        }
+      }
+
+      console.log(`🔍 Payment webhook debug - userId: ${userId}, planId: ${planId}, subscription metadata:`, JSON.stringify(subscription.metadata));
 
       if (userId) {
         // Update user's last payment date
@@ -391,6 +410,78 @@ async function handlePaymentSucceeded(invoice) {
         });
 
         console.log(`✅ Payment recorded for user ${userId}`);
+        
+        // Also trigger BAA PDF generation if this is Pro/Enterprise and subscription update hasn't fired yet
+        if (planId === 'pro' || planId === 'enterprise') {
+          console.log('🔍 Checking for pending BAA signature after payment...');
+          
+          try {
+            // Query for pending BAA record
+            const baaSnapshot = await gcpClient.firestore
+              .collection('baa-agreements')
+              .where('userId', '==', userId)
+              .where('status', '==', 'pending_payment')
+              .orderBy('signedAt', 'desc')
+              .limit(1)
+              .get();
+            
+            if (!baaSnapshot.empty) {
+              const baaDoc = baaSnapshot.docs[0];
+              const baaData = baaDoc.data();
+              
+              // Check if PDF already generated (status might have been updated by subscription.updated)
+              if (baaData.status === 'pending_payment') {
+                console.log('📝 Generating BAA PDF from payment webhook...');
+                
+                // Get user data
+                const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+                const userData = userDoc.data();
+                
+                // Generate PDF
+                const BAAService = require('./baa-service');
+                const baaService = new BAAService(gcpClient);
+                
+                const pdfResult = await baaService.generateBAAPDF(
+                  { 
+                    userId,
+                    name: userData?.name || 'Unknown',
+                    email: userData?.email || 'unknown@example.com',
+                    company: userData?.company
+                  },
+                  baaData.signatureData
+                );
+                
+                // Update BAA record
+                await baaDoc.ref.update({
+                  status: 'completed',
+                  pdfUrl: pdfResult.url,
+                  pdfFilename: pdfResult.filename,
+                  completedAt: new Date().toISOString(),
+                  subscriptionId: subscription.id
+                });
+                
+                console.log('✅ BAA PDF generated and record updated from payment webhook');
+                
+                // Send email with PDF
+                const emailService = require('./email-service');
+                await emailService.sendBAAConfirmationEmail(
+                  userData?.email || 'unknown@example.com',
+                  userData?.name || 'User',
+                  pdfResult.filename
+                );
+                
+                console.log('📧 BAA confirmation email sent from payment webhook');
+              } else {
+                console.log('ℹ️ BAA PDF already generated (status:', baaData.status, ')');
+              }
+            } else {
+              console.log('ℹ️ No pending BAA signature found for user');
+            }
+          } catch (baaError) {
+            // Don't fail the payment processing if BAA generation fails
+            console.error('❌ Error generating BAA PDF from payment webhook (non-blocking):', baaError);
+          }
+        }
       }
     }
   } catch (error) {
