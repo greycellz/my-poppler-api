@@ -52,10 +52,13 @@ class BAAService {
         baSignature = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
       }
       
+      // Get company name from signature data or user data
+      const companyName = signatureData.companyName || userData.company || 'N/A';
+      
       htmlTemplate = htmlTemplate
         .replace(/{{userName}}/g, (userData.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
         .replace(/{{userEmail}}/g, (userData.email || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
-        .replace(/{{company}}/g, (userData.company || 'N/A').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+        .replace(/{{company}}/g, companyName.replace(/</g, '&lt;').replace(/>/g, '&gt;'))
         .replace(/{{effectiveDate}}/g, effectiveDate)
         .replace(/{{signature}}/g, signatureData.imageBase64 || '')
         .replace(/{{baSignature}}/g, baSignature);

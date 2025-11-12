@@ -30,12 +30,14 @@ router.post('/store-signature', authenticateToken, async (req, res) => {
       userId,
       userEmail: req.user.email || '',
       userName: req.user.name || signatureData.userName,
+      companyName: signatureData.companyName || req.user.company || null,
       planId,
       signatureData: {
         imageBase64: signatureData.imageBase64,
         method: 'click',
         completedAt: signatureData.completedAt || new Date().toISOString(),
-        userName: signatureData.userName
+        userName: signatureData.userName,
+        companyName: signatureData.companyName || null
       },
       status: 'pending_payment',
       signedAt: new Date().toISOString(),
@@ -69,6 +71,68 @@ router.post('/store-signature', authenticateToken, async (req, res) => {
       error: 'Failed to store signature',
       message: error.message 
     });
+  }
+});
+
+// Get user's BAA agreement
+router.get('/agreement', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const GCPClient = require('../gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Get the most recent completed BAA agreement
+    const baaSnapshot = await gcpClient.firestore
+      .collection('baa-agreements')
+      .where('userId', '==', userId)
+      .where('status', '==', 'completed')
+      .orderBy('completedAt', 'desc')
+      .limit(1)
+      .get();
+    
+    if (baaSnapshot.empty) {
+      return res.status(404).json({ error: 'No BAA agreement found' });
+    }
+    
+    const baaDoc = baaSnapshot.docs[0];
+    const baaData = baaDoc.data();
+    
+    // Generate signed URL for PDF download (valid for 1 year)
+    if (baaData.pdfFilename) {
+      const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-submissions-us-central1';
+      const bucket = gcpClient.storage.bucket(bucketName);
+      const file = bucket.file(baaData.pdfFilename);
+      
+      const [signedUrl] = await file.getSignedUrl({
+        action: 'read',
+        expires: Date.now() + (365 * 24 * 60 * 60 * 1000) // 1 year
+      });
+      
+      return res.json({
+        success: true,
+        agreement: {
+          id: baaDoc.id,
+          signedAt: baaData.signedAt,
+          completedAt: baaData.completedAt,
+          pdfUrl: signedUrl,
+          companyName: baaData.companyName || null
+        }
+      });
+    }
+    
+    return res.json({
+      success: true,
+      agreement: {
+        id: baaDoc.id,
+        signedAt: baaData.signedAt,
+        completedAt: baaData.completedAt,
+        companyName: baaData.companyName || null
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching BAA agreement:', error);
+    res.status(500).json({ error: 'Failed to fetch BAA agreement' });
   }
 });
 

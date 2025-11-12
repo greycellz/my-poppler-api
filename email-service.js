@@ -292,7 +292,7 @@ class EmailService {
         return { success: true, skipped: true, reason: 'No user email provided' };
       }
       
-      // Generate signed URL for PDF download (valid for 7 days)
+      // Generate signed URL for PDF download (valid for 1 year - BAA documents are legal records)
       const GCPClient = require('./gcp-client');
       const gcpClient = new GCPClient();
       const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-submissions-us-central1';
@@ -301,7 +301,7 @@ class EmailService {
       
       const [signedUrl] = await file.getSignedUrl({
         action: 'read',
-        expires: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days
+        expires: Date.now() + (365 * 24 * 60 * 60 * 1000) // 1 year (BAA documents are legal records)
       });
       
       const data = await this.mg.messages.create(this.domain, {
@@ -313,14 +313,14 @@ class EmailService {
             <h2 style="color: #6366f1;">Business Associate Agreement Signed</h2>
             <p>Hi ${userName || 'there'},</p>
             <p>Thank you for upgrading to a HIPAA-compliant plan. Your Business Associate Agreement has been signed and is ready for download.</p>
-            <p>You can download your signed BAA using the link below (valid for 7 days):</p>
+            <p>You can download your signed BAA using the link below (valid for 1 year):</p>
             <p style="margin: 20px 0;">
               <a href="${signedUrl}" 
                  style="display: inline-block; padding: 12px 24px; background: #6366f1; color: white; text-decoration: none; border-radius: 6px;">
                 Download Signed BAA
               </a>
             </p>
-            <p>You can also access your BAA anytime from your ChatterForms dashboard.</p>
+            <p>You can also access your BAA anytime from your <a href="${process.env.FRONTEND_URL || 'https://chatterforms.com'}/billing" style="color: #6366f1; text-decoration: underline;">billing portal</a>.</p>
             <p style="color: #999; font-size: 12px; margin-top: 30px;">
               This agreement is required for HIPAA compliance and outlines how ChatterForms handles Protected Health Information (PHI) on your behalf.
             </p>
@@ -340,7 +340,7 @@ class EmailService {
         
           Download your signed BAA: ${signedUrl}
         
-          You can also access your BAA anytime from your ChatterForms dashboard.
+          You can also access your BAA anytime from your billing portal: ${process.env.FRONTEND_URL || 'https://chatterforms.com'}/billing
         
           This agreement is required for HIPAA compliance and outlines how ChatterForms handles Protected Health Information (PHI) on your behalf.
         
