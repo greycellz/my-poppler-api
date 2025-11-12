@@ -47,6 +47,8 @@ After signing the PDF, you need to extract the signature image and convert it to
 1. Upload the signed review PDF to a GCS bucket (public or with long-lived signed URL)
 2. Get the public URL or generate a signed URL (valid for 1+ years)
 
+**Note:** The review PDF can be uploaded to any public bucket. The actual signed BAA PDFs (generated after payment) are stored in the HIPAA bucket (`chatterforms-submissions-us-central1` by default, or override with `GCS_HIPAA_BUCKET`).
+
 ### Step 5: Set Environment Variables
 
 Add to your `.env` file:
@@ -58,7 +60,18 @@ NEXT_PUBLIC_BAA_REVIEW_PDF_URL=https://storage.googleapis.com/your-bucket/baa-re
 # Business Associate signature (base64 image)
 # Alternative: Store in static/ba-signature-base64.txt file
 BA_SIGNATURE_BASE64=data:image/png;base64,iVBORw0KGgo...
+
+# GCS Bucket for BAA PDFs (optional - defaults to chatterforms-submissions-us-central1)
+# Set this if you want to use a different bucket for storing signed BAA PDFs
+GCS_HIPAA_BUCKET=chatterforms-submissions-us-central1
 ```
+
+**GCS Bucket Configuration:**
+- **Default**: `chatterforms-submissions-us-central1` (existing HIPAA bucket)
+- **Purpose**: Stores signed BAA PDFs in `baa-agreements/` folder
+- **Access**: Private files with signed URLs for email delivery (7-day expiry)
+- **Override**: Set `GCS_HIPAA_BUCKET` environment variable to use a different bucket
+- **Note**: Ensure the bucket exists and service account has write permissions
 
 ## Files Created
 

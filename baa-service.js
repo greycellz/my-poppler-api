@@ -93,8 +93,8 @@ class BAAService {
       
       await browser.close();
       
-      // Upload to GCS (HIPAA bucket)
-      const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-hipaa-data';
+      // Upload to GCS (HIPAA bucket - use existing HIPAA submissions bucket)
+      const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-submissions-us-central1';
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `baa-agreements/${userData.userId}_${timestamp}.pdf`;
       

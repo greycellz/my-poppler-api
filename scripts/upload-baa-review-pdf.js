@@ -96,7 +96,7 @@ async function uploadBAAReviewPDF() {
       
       try {
         const gcpClient = new GCPClient();
-        const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-hipaa-data';
+        const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-submissions-us-central1';
         const pdfPath = path.join(__dirname, '..', 'static', 'baa-review-template.pdf');
         const pdfBuffer = fs.readFileSync(pdfPath);
         const filename = 'baa-review-template.pdf';

@@ -295,7 +295,7 @@ class EmailService {
       // Generate signed URL for PDF download (valid for 7 days)
       const GCPClient = require('./gcp-client');
       const gcpClient = new GCPClient();
-      const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-hipaa-data';
+      const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-submissions-us-central1';
       const bucket = gcpClient.storage.bucket(bucketName);
       const file = bucket.file(pdfFilename);
       
