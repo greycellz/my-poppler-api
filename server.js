@@ -147,6 +147,78 @@ async function handleSubscriptionCreated(subscription) {
     await gcpClient.firestore.collection('users').doc(userId).update(updateData);
 
     console.log(`✅ User ${userId} subscription created: ${planId} (${interval})`);
+    
+    // Check if this is Pro/Enterprise and generate BAA PDF (for trial subscriptions, generate immediately)
+    if (planId === 'pro' || planId === 'enterprise') {
+      console.log('🔍 Checking for pending BAA signature on subscription creation...');
+      
+      try {
+        // Query for pending BAA record
+        const baaSnapshot = await gcpClient.firestore
+          .collection('baa-agreements')
+          .where('userId', '==', userId)
+          .where('status', '==', 'pending_payment')
+          .orderBy('signedAt', 'desc')
+          .limit(1)
+          .get();
+        
+        if (!baaSnapshot.empty) {
+          const baaDoc = baaSnapshot.docs[0];
+          const baaData = baaDoc.data();
+          
+          // Check if PDF already generated
+          if (baaData.status === 'pending_payment') {
+            console.log('📝 Generating BAA PDF from subscription creation...');
+            
+            // Get user data
+            const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+            const userData = userDoc.data();
+            
+            // Generate PDF
+            const BAAService = require('./baa-service');
+            const baaService = new BAAService(gcpClient);
+            
+            const pdfResult = await baaService.generateBAAPDF(
+              { 
+                userId,
+                name: userData?.name || 'Unknown',
+                email: userData?.email || 'unknown@example.com',
+                company: userData?.company
+              },
+              baaData.signatureData
+            );
+            
+            // Update BAA record
+            await baaDoc.ref.update({
+              status: 'completed',
+              pdfUrl: pdfResult.url,
+              pdfFilename: pdfResult.filename,
+              completedAt: new Date().toISOString(),
+              subscriptionId: subscription.id
+            });
+            
+            console.log('✅ BAA PDF generated and record updated from subscription creation');
+            
+            // Send email with PDF
+            const emailService = require('./email-service');
+            await emailService.sendBAAConfirmationEmail(
+              userData?.email || 'unknown@example.com',
+              userData?.name || 'User',
+              pdfResult.filename
+            );
+            
+            console.log('📧 BAA confirmation email sent from subscription creation');
+          } else {
+            console.log('ℹ️ BAA PDF already generated (status:', baaData.status, ')');
+          }
+        } else {
+          console.log('ℹ️ No pending BAA signature found for user');
+        }
+      } catch (baaError) {
+        // Don't fail the subscription creation if BAA generation fails
+        console.error('❌ Error generating BAA PDF from subscription creation (non-blocking):', baaError);
+      }
+    }
   } catch (error) {
     console.error('❌ Error handling subscription created:', error);
   }
