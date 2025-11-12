@@ -230,7 +230,8 @@ async function handleSubscriptionCreated(subscription) {
             console.log(`🔍 Email check - emailSent: ${currentBaaData.emailSent}, status: ${currentBaaData.status}`);
             
             if (!currentBaaData.emailSent) {
-              console.log('📧 Sending BAA confirmation email from subscription creation...');
+              const webhookId = `sub-created-${Date.now()}`;
+              console.log(`📧 [${webhookId}] Sending BAA confirmation email from subscription creation...`);
               // Send email with PDF
               const emailService = require('./email-service');
               const emailResult = await emailService.sendBAAConfirmationEmail(
@@ -239,15 +240,17 @@ async function handleSubscriptionCreated(subscription) {
                 pdfResult.filename
               );
               
+              console.log(`🔍 [${webhookId}] Email result:`, { success: emailResult.success, emailCallId: emailResult.emailCallId, messageId: emailResult.messageId });
+              
               // Mark email as sent if successful (atomic update)
               if (emailResult.success) {
                 await baaDocRef.update({
                   emailSent: true,
                   emailSentAt: new Date().toISOString()
                 });
-                console.log('✅ BAA confirmation email sent and marked as sent from subscription creation');
+                console.log(`✅ [${webhookId}] BAA confirmation email sent and marked as sent from subscription creation`);
               } else {
-                console.error('❌ Failed to send BAA confirmation email:', emailResult.error);
+                console.error(`❌ [${webhookId}] Failed to send BAA confirmation email:`, emailResult.error);
               }
             } else {
               console.log('ℹ️ BAA confirmation email already sent, skipping duplicate (subscription creation)');
