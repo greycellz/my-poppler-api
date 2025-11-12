@@ -244,6 +244,73 @@ async function handleSubscriptionUpdated(subscription) {
     await gcpClient.firestore.collection('users').doc(userId).update(updateData);
 
     console.log(`✅ User ${userId} subscription updated: ${planId} (${interval}) - Status: ${subscription.status}`);
+    
+    // Check if this is Pro/Enterprise upgrade and generate BAA PDF
+    if (planId === 'pro' || planId === 'enterprise') {
+      console.log('🔍 Checking for pending BAA signature...');
+      
+      try {
+        // Query for pending BAA record
+        const baaSnapshot = await gcpClient.firestore
+          .collection('baa-agreements')
+          .where('userId', '==', userId)
+          .where('status', '==', 'pending_payment')
+          .orderBy('signedAt', 'desc')
+          .limit(1)
+          .get();
+        
+        if (!baaSnapshot.empty) {
+          const baaDoc = baaSnapshot.docs[0];
+          const baaData = baaDoc.data();
+          
+          console.log('📝 Generating BAA PDF...');
+          
+          // Get user data
+          const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+          const userData = userDoc.data();
+          
+          // Generate PDF
+          const BAAService = require('./baa-service');
+          const baaService = new BAAService(gcpClient);
+          
+          const pdfResult = await baaService.generateBAAPDF(
+            { 
+              userId,
+              name: userData?.name || 'Unknown',
+              email: userData?.email || 'unknown@example.com',
+              company: userData?.company
+            },
+            baaData.signatureData
+          );
+          
+          // Update BAA record
+          await baaDoc.ref.update({
+            status: 'completed',
+            pdfUrl: pdfResult.url,
+            pdfFilename: pdfResult.filename,
+            completedAt: new Date().toISOString(),
+            subscriptionId: subscription.id
+          });
+          
+          console.log('✅ BAA PDF generated and record updated');
+          
+          // Send email with PDF
+          const emailService = require('./email-service');
+          await emailService.sendBAAConfirmationEmail(
+            userData?.email || 'unknown@example.com',
+            userData?.name || 'User',
+            pdfResult.filename
+          );
+          
+          console.log('📧 BAA confirmation email sent');
+        } else {
+          console.log('ℹ️ No pending BAA signature found for user');
+        }
+      } catch (baaError) {
+        // Don't fail the subscription update if BAA generation fails
+        console.error('❌ Error generating BAA PDF (non-blocking):', baaError);
+      }
+    }
   } catch (error) {
     console.error('❌ Error handling subscription updated:', error);
   }
@@ -2910,11 +2977,17 @@ const authRoutes = require('./auth/routes');
 // Import billing routes
 const billingRoutes = require('./routes/billing');
 
+// Import BAA routes
+const baaRoutes = require('./routes/baa');
+
 // Mount authentication routes
 app.use('/auth', authRoutes);
 
 // Mount billing routes
 app.use('/api/billing', billingRoutes);
+
+// Mount BAA routes
+app.use('/api/baa', baaRoutes);
 
 // ============== AUTO-SAVE ENDPOINT ==============
 

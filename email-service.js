@@ -281,6 +281,81 @@ class EmailService {
       return { success: false, error: error.message };
     }
   }
+
+  async sendBAAConfirmationEmail(userEmail, userName, pdfFilename) {
+    try {
+      console.log(`📧 Sending BAA confirmation email to: ${userEmail}`);
+      
+      // Skip if no email provided
+      if (!userEmail || userEmail.trim() === '') {
+        console.log('📧 Skipping BAA confirmation email - no user email provided');
+        return { success: true, skipped: true, reason: 'No user email provided' };
+      }
+      
+      // Generate signed URL for PDF download (valid for 7 days)
+      const GCPClient = require('./gcp-client');
+      const gcpClient = new GCPClient();
+      const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-hipaa-data';
+      const bucket = gcpClient.storage.bucket(bucketName);
+      const file = bucket.file(pdfFilename);
+      
+      const [signedUrl] = await file.getSignedUrl({
+        action: 'read',
+        expires: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days
+      });
+      
+      const data = await this.mg.messages.create(this.domain, {
+        from: this.fromEmail,
+        to: [userEmail],
+        subject: 'Your Business Associate Agreement - ChatterForms',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #6366f1;">Business Associate Agreement Signed</h2>
+            <p>Hi ${userName || 'there'},</p>
+            <p>Thank you for upgrading to a HIPAA-compliant plan. Your Business Associate Agreement has been signed and is ready for download.</p>
+            <p>You can download your signed BAA using the link below (valid for 7 days):</p>
+            <p style="margin: 20px 0;">
+              <a href="${signedUrl}" 
+                 style="display: inline-block; padding: 12px 24px; background: #6366f1; color: white; text-decoration: none; border-radius: 6px;">
+                Download Signed BAA
+              </a>
+            </p>
+            <p>You can also access your BAA anytime from your ChatterForms dashboard.</p>
+            <p style="color: #999; font-size: 12px; margin-top: 30px;">
+              This agreement is required for HIPAA compliance and outlines how ChatterForms handles Protected Health Information (PHI) on your behalf.
+            </p>
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
+            <p style="color: #6b7280; font-size: 12px;">
+              ChatterForms / Neo HealthTech LLC<br>
+              admin@chatterforms.com
+            </p>
+          </div>
+        `,
+        text: `
+          Business Associate Agreement Signed
+        
+          Hi ${userName || 'there'},
+        
+          Thank you for upgrading to a HIPAA-compliant plan. Your Business Associate Agreement has been signed.
+        
+          Download your signed BAA: ${signedUrl}
+        
+          You can also access your BAA anytime from your ChatterForms dashboard.
+        
+          This agreement is required for HIPAA compliance and outlines how ChatterForms handles Protected Health Information (PHI) on your behalf.
+        
+          ChatterForms / Neo HealthTech LLC
+          admin@chatterforms.com
+        `
+      });
+      
+      console.log('✅ BAA confirmation email sent successfully:', data.id);
+      return { success: true, messageId: data.id };
+    } catch (error) {
+      console.error('❌ Error sending BAA confirmation email:', error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 module.exports = new EmailService();
