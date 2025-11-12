@@ -375,8 +375,9 @@ async function handleSubscriptionDeleted(subscription) {
 async function handlePaymentSucceeded(invoice) {
   try {
     console.log(`💰 Processing payment succeeded: ${invoice.id}`);
+    console.log(`🔍 Payment webhook debug - invoice.subscription: ${invoice.subscription}, invoice.amount_paid: ${invoice.amount_paid}, invoice.billing_reason: ${invoice.billing_reason}`);
     
-      if (invoice.subscription) {
+    if (invoice.subscription) {
       const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
       const userId = subscription.metadata.userId;
       let planId = subscription.metadata.planId;
