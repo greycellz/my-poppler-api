@@ -61,6 +61,9 @@ NEXT_PUBLIC_BAA_REVIEW_PDF_URL=https://storage.googleapis.com/your-bucket/baa-re
 # Alternative: Store in static/ba-signature-base64.txt file
 BA_SIGNATURE_BASE64=data:image/png;base64,iVBORw0KGgo...
 
+# Business Associate authorized signatory name (defaults to "Abhishek Jha" if not set)
+BA_AUTHORIZED_SIGNATORY_NAME=Abhishek Jha
+
 # GCS Bucket for BAA PDFs (optional - defaults to chatterforms-submissions-us-central1)
 # Set this if you want to use a different bucket for storing signed BAA PDFs
 GCS_HIPAA_BUCKET=chatterforms-submissions-us-central1

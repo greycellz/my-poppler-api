@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const crypto = require('crypto');
 
 class BAAService {
   constructor(gcpClient) {
@@ -53,15 +54,49 @@ class BAAService {
       }
       
       // Get company name from signature data or user data
-      const companyName = signatureData.companyName || userData.company || 'N/A';
+      const companyName = signatureData.companyName || userData.company || null;
+      
+      // Covered Entity name: Company name if provided, else user name
+      const coveredEntityName = companyName && companyName !== 'N/A' ? companyName : (userData.name || 'N/A');
+      
+      // Get authorized signatory name for Business Associate
+      const baAuthorizedSignatory = process.env.BA_AUTHORIZED_SIGNATORY_NAME || 'Abhishek Jha';
+      
+      // Compute SHA-256 hash of BAA agreement data for verification
+      // Hash includes: user info, company, signatures, dates, and agreement content
+      const baaDataForHash = {
+        userId: userData.userId,
+        userName: userData.name,
+        userEmail: userData.email,
+        companyName: companyName,
+        coveredEntityName: coveredEntityName,
+        effectiveDate: effectiveDate,
+        baAuthorizedSignatory: baAuthorizedSignatory,
+        signatureMethod: signatureData.method || 'click',
+        signatureCompletedAt: signatureData.completedAt,
+        agreementType: 'BAA',
+        businessAssociate: 'Chatterforms / Neo HealthTech LLC'
+      };
+      
+      const baaHash = crypto.createHash('sha256')
+        .update(JSON.stringify(baaDataForHash))
+        .digest('hex');
+      
+      const hashDisplay = `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280;">
+        <p><strong>Agreement SHA-256 Hash:</strong> ${baaHash}</p>
+        <p style="font-size: 10px; margin-top: 5px;">This hash can be used to verify the integrity and authenticity of this agreement.</p>
+      </div>`;
       
       htmlTemplate = htmlTemplate
         .replace(/{{userName}}/g, (userData.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
         .replace(/{{userEmail}}/g, (userData.email || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
-        .replace(/{{company}}/g, companyName.replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+        .replace(/{{company}}/g, (companyName || 'N/A').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+        .replace(/{{coveredEntityName}}/g, coveredEntityName.replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+        .replace(/{{baAuthorizedSignatory}}/g, baAuthorizedSignatory.replace(/</g, '&lt;').replace(/>/g, '&gt;'))
         .replace(/{{effectiveDate}}/g, effectiveDate)
         .replace(/{{signature}}/g, signatureData.imageBase64 || '')
-        .replace(/{{baSignature}}/g, baSignature);
+        .replace(/{{baSignature}}/g, baSignature)
+        .replace(/{{baaHash}}/g, hashDisplay);
       
       // Generate PDF using puppeteer
       const browser = await puppeteer.launch({

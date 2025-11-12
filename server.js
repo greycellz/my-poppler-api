@@ -218,7 +218,8 @@ async function handleSubscriptionCreated(subscription) {
               pdfFilename: pdfResult.filename,
               completedAt: new Date().toISOString(),
               subscriptionId: subscription.id,
-              emailSent: false // Initialize emailSent flag
+              emailSent: false, // Initialize emailSent flag
+              baaHash: pdfResult.baaHash // Store hash for verification
             });
             
             console.log('✅ BAA PDF generated and record updated from subscription creation');
@@ -444,7 +445,8 @@ async function handleSubscriptionUpdated(subscription) {
               pdfFilename: pdfResult.filename,
               completedAt: new Date().toISOString(),
               subscriptionId: subscription.id,
-              emailSent: false // Initialize emailSent flag
+              emailSent: false, // Initialize emailSent flag
+              baaHash: pdfResult.baaHash // Store hash for verification
             });
             
             console.log('✅ BAA PDF generated and record updated');
@@ -715,7 +717,8 @@ async function handlePaymentSucceeded(invoice) {
               pdfFilename: pdfResult.filename,
               completedAt: new Date().toISOString(),
               subscriptionId: subscription.id,
-              emailSent: false // Initialize emailSent flag
+              emailSent: false, // Initialize emailSent flag
+              baaHash: pdfResult.baaHash // Store hash for verification
             });
             
             console.log('✅ BAA PDF generated and record updated from payment webhook');
