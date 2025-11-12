@@ -64,27 +64,43 @@ class BAAService {
       
       // Compute SHA-256 hash of BAA agreement data for verification
       // Hash includes: user info, company, signatures, dates, and agreement content
+      // Similar to form submission hashing for consistency
+      
+      // Hash the signature images for integrity verification
+      const userSignatureHash = signatureData.imageBase64 
+        ? crypto.createHash('sha256').update(signatureData.imageBase64).digest('hex').substring(0, 16)
+        : null;
+      const baSignatureHash = baSignature && baSignature.startsWith('data:image')
+        ? crypto.createHash('sha256').update(baSignature).digest('hex').substring(0, 16)
+        : null;
+      
       const baaDataForHash = {
         userId: userData.userId,
         userName: userData.name,
         userEmail: userData.email,
-        companyName: companyName,
+        companyName: companyName || null,
         coveredEntityName: coveredEntityName,
         effectiveDate: effectiveDate,
         baAuthorizedSignatory: baAuthorizedSignatory,
         signatureMethod: signatureData.method || 'click',
         signatureCompletedAt: signatureData.completedAt,
+        userSignatureHash: userSignatureHash,
+        baSignatureHash: baSignatureHash,
         agreementType: 'BAA',
-        businessAssociate: 'Chatterforms / Neo HealthTech LLC'
+        businessAssociate: 'Chatterforms / Neo HealthTech LLC',
+        agreementVersion: '1.0'
       };
       
+      // Create deterministic hash (sorted keys for consistency)
+      const sortedHashData = JSON.stringify(baaDataForHash, Object.keys(baaDataForHash).sort());
       const baaHash = crypto.createHash('sha256')
-        .update(JSON.stringify(baaDataForHash))
+        .update(sortedHashData)
         .digest('hex');
       
-      const hashDisplay = `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280;">
-        <p><strong>Agreement SHA-256 Hash:</strong> ${baaHash}</p>
-        <p style="font-size: 10px; margin-top: 5px;">This hash can be used to verify the integrity and authenticity of this agreement.</p>
+      const hashDisplay = `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280; background: #f9fafb; padding: 15px; border-radius: 6px;">
+        <p style="margin: 0 0 8px 0;"><strong>Agreement Verification Hash (SHA-256):</strong></p>
+        <p style="margin: 0 0 8px 0; font-family: monospace; font-size: 10px; word-break: break-all; color: #1f2937;">${baaHash}</p>
+        <p style="margin: 8px 0 0 0; font-size: 10px; color: #6b7280;">This hash verifies the integrity and authenticity of this agreement. It includes all parties, signatures, dates, and agreement terms.</p>
       </div>`;
       
       htmlTemplate = htmlTemplate

@@ -72,6 +72,12 @@
       margin-top: 15px;
       font-size: 14px;
     }
+    .signature-box h4 {
+      margin: 0 0 15px 0;
+      font-size: 16px;
+      font-weight: bold;
+      color: #374151;
+    }
     .footer {
       margin-top: 40px;
       padding-top: 20px;
@@ -154,7 +160,7 @@
     
     <!-- Business Associate Signature Box -->
     <div class="signature-box">
-      <p><strong>Business Associate Signature:</strong></p>
+      <h4>Business Associate Signature:</h4>
       <img src="{{baSignature}}" alt="Chatterforms Signature" class="signature-image" />
       <div class="signature-details">
         <p><strong>By:</strong> {{baAuthorizedSignatory}}</p>
@@ -167,7 +173,7 @@
     
     <!-- Covered Entity Signature Box -->
     <div class="signature-box">
-      <p><strong>Covered Entity Signature:</strong></p>
+      <h4>Covered Entity Signature:</h4>
       <img src="{{signature}}" alt="Digital Signature" class="signature-image" />
       <div class="signature-details">
         <p><strong>By:</strong> {{userName}}</p>
