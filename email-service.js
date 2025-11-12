@@ -283,8 +283,9 @@ class EmailService {
   }
 
   async sendBAAConfirmationEmail(userEmail, userName, pdfFilename) {
+    const emailCallId = `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     try {
-      console.log(`📧 Sending BAA confirmation email to: ${userEmail}`);
+      console.log(`📧 [EMAIL SERVICE] [${emailCallId}] Sending BAA confirmation email to: ${userEmail}, filename: ${pdfFilename}`);
       
       // Skip if no email provided
       if (!userEmail || userEmail.trim() === '') {
@@ -349,11 +350,11 @@ class EmailService {
         `
       });
       
-      console.log('✅ BAA confirmation email sent successfully:', data.id);
-      return { success: true, messageId: data.id };
+      console.log(`✅ [EMAIL SERVICE] [${emailCallId}] BAA confirmation email sent successfully - Message ID: ${data.id}, To: ${userEmail}`);
+      return { success: true, messageId: data.id, emailCallId };
     } catch (error) {
-      console.error('❌ Error sending BAA confirmation email:', error);
-      return { success: false, error: error.message };
+      console.error(`❌ [EMAIL SERVICE] [${emailCallId}] Error sending BAA confirmation email:`, error);
+      return { success: false, error: error.message, emailCallId };
     }
   }
 }

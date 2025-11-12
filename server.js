@@ -223,21 +223,34 @@ async function handleSubscriptionCreated(subscription) {
             
             console.log('✅ BAA PDF generated and record updated from subscription creation');
             
-            // Send email with PDF (only if not already sent)
-            const emailService = require('./email-service');
-            const emailResult = await emailService.sendBAAConfirmationEmail(
-              userData?.email || 'unknown@example.com',
-              userData?.name || 'User',
-              pdfResult.filename
-            );
+            // Check if email was already sent before sending (atomic check)
+            const currentBaaDoc = await baaDocRef.get();
+            const currentBaaData = currentBaaDoc.data();
             
-            // Mark email as sent if successful
-            if (emailResult.success) {
-              await baaDocRef.update({
-                emailSent: true,
-                emailSentAt: new Date().toISOString()
-              });
-              console.log('📧 BAA confirmation email sent from subscription creation');
+            console.log(`🔍 Email check - emailSent: ${currentBaaData.emailSent}, status: ${currentBaaData.status}`);
+            
+            if (!currentBaaData.emailSent) {
+              console.log('📧 Sending BAA confirmation email from subscription creation...');
+              // Send email with PDF
+              const emailService = require('./email-service');
+              const emailResult = await emailService.sendBAAConfirmationEmail(
+                userData?.email || 'unknown@example.com',
+                userData?.name || 'User',
+                pdfResult.filename
+              );
+              
+              // Mark email as sent if successful (atomic update)
+              if (emailResult.success) {
+                await baaDocRef.update({
+                  emailSent: true,
+                  emailSentAt: new Date().toISOString()
+                });
+                console.log('✅ BAA confirmation email sent and marked as sent from subscription creation');
+              } else {
+                console.error('❌ Failed to send BAA confirmation email:', emailResult.error);
+              }
+            } else {
+              console.log('ℹ️ BAA confirmation email already sent, skipping duplicate (subscription creation)');
             }
           } catch (updateError) {
             // If update fails, another webhook might be processing
@@ -433,21 +446,37 @@ async function handleSubscriptionUpdated(subscription) {
             
             console.log('✅ BAA PDF generated and record updated');
             
-            // Send email with PDF (only if not already sent)
-            const emailService = require('./email-service');
-            const emailResult = await emailService.sendBAAConfirmationEmail(
-              userData?.email || 'unknown@example.com',
-              userData?.name || 'User',
-              pdfResult.filename
-            );
+            // Check if email was already sent before sending (atomic check)
+            const currentBaaDoc = await baaDocRef.get();
+            const currentBaaData = currentBaaDoc.data();
             
-            // Mark email as sent if successful
-            if (emailResult.success) {
-              await baaDocRef.update({
-                emailSent: true,
-                emailSentAt: new Date().toISOString()
-              });
-              console.log('📧 BAA confirmation email sent');
+            console.log(`🔍 Email check - emailSent: ${currentBaaData.emailSent}, status: ${currentBaaData.status}`);
+            
+            if (!currentBaaData.emailSent) {
+              const webhookId = `sub-updated-${Date.now()}`;
+              console.log(`📧 [${webhookId}] Sending BAA confirmation email from subscription update...`);
+              // Send email with PDF
+              const emailService = require('./email-service');
+              const emailResult = await emailService.sendBAAConfirmationEmail(
+                userData?.email || 'unknown@example.com',
+                userData?.name || 'User',
+                pdfResult.filename
+              );
+              
+              console.log(`🔍 [${webhookId}] Email result:`, { success: emailResult.success, emailCallId: emailResult.emailCallId, messageId: emailResult.messageId });
+              
+              // Mark email as sent if successful (atomic update)
+              if (emailResult.success) {
+                await baaDocRef.update({
+                  emailSent: true,
+                  emailSentAt: new Date().toISOString()
+                });
+                console.log(`✅ [${webhookId}] BAA confirmation email sent and marked as sent from subscription update`);
+              } else {
+                console.error(`❌ [${webhookId}] Failed to send BAA confirmation email:`, emailResult.error);
+              }
+            } else {
+              console.log('ℹ️ BAA confirmation email already sent, skipping duplicate (subscription update)');
             }
           } catch (updateError) {
             // If update fails, another webhook might be processing
@@ -609,7 +638,13 @@ async function handlePaymentSucceeded(invoice) {
               if (baaData.pdfUrl || baaData.pdfFilename) {
                 console.log('ℹ️ BAA PDF already generated, skipping (idempotency check)');
                 // If email not sent yet, send it now (fallback)
-                if (!baaData.emailSent && baaData.status === 'completed') {
+                // Double-check emailSent flag atomically before sending
+                const fallbackBaaDoc = await baaDocRef.get();
+                const fallbackBaaData = fallbackBaaDoc.data();
+                
+                console.log(`🔍 Fallback email check - emailSent: ${fallbackBaaData.emailSent}, status: ${fallbackBaaData.status}`);
+                
+                if (!fallbackBaaData.emailSent && fallbackBaaData.status === 'completed') {
                   console.log('📧 Sending BAA confirmation email (fallback)...');
                   const emailService = require('./email-service');
                   const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
@@ -617,14 +652,19 @@ async function handlePaymentSucceeded(invoice) {
                   const emailResult = await emailService.sendBAAConfirmationEmail(
                     userData?.email || 'unknown@example.com',
                     userData?.name || 'User',
-                    baaData.pdfFilename
+                    fallbackBaaData.pdfFilename
                   );
                   if (emailResult.success) {
                     await baaDocRef.update({
                       emailSent: true,
                       emailSentAt: new Date().toISOString()
                     });
+                    console.log('✅ BAA confirmation email sent and marked as sent (fallback)');
+                  } else {
+                    console.error('❌ Failed to send BAA confirmation email (fallback):', emailResult.error);
                   }
+                } else {
+                  console.log('ℹ️ BAA confirmation email already sent or not completed, skipping fallback');
                 }
                 return;
               }
@@ -677,11 +717,15 @@ async function handlePaymentSucceeded(invoice) {
             
             console.log('✅ BAA PDF generated and record updated from payment webhook');
             
-            // Check if email was already sent before sending
+            // Check if email was already sent before sending (atomic check)
             const currentBaaDoc = await baaDocRef.get();
             const currentBaaData = currentBaaDoc.data();
             
+            console.log(`🔍 Email check - emailSent: ${currentBaaData.emailSent}, status: ${currentBaaData.status}`);
+            
             if (!currentBaaData.emailSent) {
+              const webhookId = `payment-${Date.now()}`;
+              console.log(`📧 [${webhookId}] Sending BAA confirmation email from payment webhook...`);
               // Send email with PDF
               const emailService = require('./email-service');
               const emailResult = await emailService.sendBAAConfirmationEmail(
@@ -690,16 +734,20 @@ async function handlePaymentSucceeded(invoice) {
                 pdfResult.filename
               );
               
-              // Mark email as sent if successful
+              console.log(`🔍 [${webhookId}] Email result:`, { success: emailResult.success, emailCallId: emailResult.emailCallId, messageId: emailResult.messageId });
+              
+              // Mark email as sent if successful (atomic update)
               if (emailResult.success) {
                 await baaDocRef.update({
                   emailSent: true,
                   emailSentAt: new Date().toISOString()
                 });
-                console.log('📧 BAA confirmation email sent from payment webhook');
+                console.log(`✅ [${webhookId}] BAA confirmation email sent and marked as sent from payment webhook`);
+              } else {
+                console.error(`❌ [${webhookId}] Failed to send BAA confirmation email:`, emailResult.error);
               }
             } else {
-              console.log('ℹ️ BAA confirmation email already sent, skipping duplicate');
+              console.log('ℹ️ BAA confirmation email already sent, skipping duplicate (payment webhook)');
             }
               } catch (updateError) {
                 // If update fails, another webhook might be processing
