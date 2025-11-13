@@ -7,6 +7,7 @@
  * Usage:
  *   node scripts/update-onboarding-level.js <email> <level>
  *   node scripts/update-onboarding-level.js jha.abhishek@gmail.com 4
+ *   node scripts/update-onboarding-level.js user@example.com 0  (resets all tasks)
  */
 
 const path = require('path');
@@ -69,9 +70,9 @@ const levelNames = {
 async function updateOnboardingLevel(email, targetLevel) {
   const gcpClient = new GCPClient();
   
-  // Validate level
-  if (targetLevel < 1 || targetLevel > 5) {
-    console.error(`❌ Invalid level: ${targetLevel}. Level must be between 1 and 5.`);
+  // Validate level (0 is allowed to reset all tasks)
+  if (targetLevel < 0 || targetLevel > 5) {
+    console.error(`❌ Invalid level: ${targetLevel}. Level must be between 0 and 5.`);
     process.exit(1);
   }
   
@@ -128,6 +129,49 @@ async function updateOnboardingLevel(email, targetLevel) {
   const oldLevel = progress.currentLevel;
   const oldCompletedTasks = [...progress.completedTasks];
   const oldAchievements = [...(progress.achievements || [])];
+  
+  // Handle level 0: reset all tasks
+  if (targetLevel === 0) {
+    console.log(`\n🔄 Resetting all onboarding tasks...`);
+    
+    progress.completedTasks = [];
+    progress.achievements = [];
+    progress.currentLevel = 1;
+    progress.totalProgress = 0;
+    delete progress.completedAt;
+    progress.lastUpdated = new Date();
+    
+    // Update user document
+    await gcpClient.firestore
+      .collection('users')
+      .doc(userId)
+      .set({
+        onboardingProgress: progress
+      }, { merge: true });
+    
+    console.log(`\n✅ All onboarding tasks have been reset!`);
+    console.log(`   Old Level: ${oldLevel}`);
+    console.log(`   New Level: 1 (Form Creator) - Reset`);
+    console.log(`   Previously Completed Tasks: ${oldCompletedTasks.length}`);
+    console.log(`   Tasks Removed: ${oldCompletedTasks.length}`);
+    console.log(`   Total Completed Tasks: 0`);
+    console.log(`   Total Progress: 0%`);
+    
+    if (oldCompletedTasks.length > 0) {
+      console.log(`\n🗑️  All tasks removed:`);
+      oldCompletedTasks.forEach(taskId => {
+        const task = findTaskById(taskId);
+        if (task) {
+          console.log(`   - ${task.name} (Level ${levelForTask(taskId)})`);
+        } else {
+          console.log(`   - ${taskId} (Level ${levelForTask(taskId)})`);
+        }
+      });
+    }
+    
+    console.log(`\n🎉 User ${user.email} onboarding has been reset to Level 1!`);
+    return;
+  }
   
   console.log(`\n🎯 Updating onboarding level from ${oldLevel} to ${targetLevel}...`);
   
@@ -265,6 +309,7 @@ const args = process.argv.slice(2);
 if (args.length < 2) {
   console.error('❌ Usage: node scripts/update-onboarding-level.js <email> <level>');
   console.error('   Example: node scripts/update-onboarding-level.js jha.abhishek@gmail.com 4');
+  console.error('   Use level 0 to reset all onboarding tasks');
   process.exit(1);
 }
 
@@ -272,7 +317,8 @@ const email = args[0];
 const level = parseInt(args[1], 10);
 
 if (isNaN(level)) {
-  console.error(`❌ Invalid level: ${args[1]}. Level must be a number between 1 and 5.`);
+  console.error(`❌ Invalid level: ${args[1]}. Level must be a number between 0 and 5.`);
+  console.error(`   Use level 0 to reset all onboarding tasks.`);
   process.exit(1);
 }
 
