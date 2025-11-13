@@ -92,7 +92,8 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
         metadata: {
           userId: userId,
           planId: planId,
-          interval: interval
+          interval: interval,
+          environment: process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV || 'development'
         }
       }
     });
@@ -224,7 +225,8 @@ router.post('/create-trial-checkout-session', authenticateToken, async (req, res
         metadata: {
           userId: userId,
           planId: planId,
-          interval: interval
+          interval: interval,
+          environment: process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV || 'development'
         }
       },
       success_url: `${process.env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,

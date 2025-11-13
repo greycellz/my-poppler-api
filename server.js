@@ -119,6 +119,14 @@ async function handleSubscriptionCreated(subscription) {
   try {
     console.log(`✅ Processing subscription created: ${subscription.id}`);
     
+    // Environment filtering: Skip if subscription belongs to different environment
+    const subscriptionEnv = subscription.metadata?.environment;
+    const currentEnv = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV || 'development';
+    if (subscriptionEnv && subscriptionEnv !== currentEnv) {
+      console.log(`ℹ️ Skipping webhook - subscription environment (${subscriptionEnv}) doesn't match current environment (${currentEnv})`);
+      return;
+    }
+    
     const customerId = subscription.customer;
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
@@ -312,6 +320,14 @@ async function handleSubscriptionUpdated(subscription) {
   try {
     console.log(`🔄 Processing subscription updated: ${subscription.id}`);
     
+    // Environment filtering: Skip if subscription belongs to different environment
+    const subscriptionEnv = subscription.metadata?.environment;
+    const currentEnv = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV || 'development';
+    if (subscriptionEnv && subscriptionEnv !== currentEnv) {
+      console.log(`ℹ️ Skipping webhook - subscription environment (${subscriptionEnv}) doesn't match current environment (${currentEnv})`);
+      return;
+    }
+    
     const customerId = subscription.customer;
     const planId = subscription.metadata.planId;
     const interval = subscription.metadata.interval;
@@ -403,10 +419,24 @@ async function handleSubscriptionUpdated(subscription) {
     
     // Check if this is Pro/Enterprise upgrade and generate BAA PDF
     if (planId === 'pro' || planId === 'enterprise') {
-      console.log('🔍 Checking for pending BAA signature...');
+      console.log('🔍 Checking for BAA agreement status...');
       
       try {
-        // Query for pending BAA record
+        // First, check if user already has a completed BAA (BAA is not tied to subscription, it persists)
+        const completedBaaSnapshot = await gcpClient.firestore
+          .collection('baa-agreements')
+          .where('userId', '==', userId)
+          .where('status', '==', 'completed')
+          .orderBy('completedAt', 'desc')
+          .limit(1)
+          .get();
+        
+        if (!completedBaaSnapshot.empty) {
+          console.log('ℹ️ User already has a completed BAA agreement - no need to regenerate');
+          return; // BAA persists, no need to sign again
+        }
+        
+        // If no completed BAA, check for pending BAA (user signed but payment not processed yet)
         const baaSnapshot = await gcpClient.firestore
           .collection('baa-agreements')
           .where('userId', '==', userId)
