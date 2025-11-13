@@ -24,11 +24,17 @@ class BAAService {
       // Replace placeholders
       // Use the date from signatureData.completedAt (when user signed) as the effective date
       // This ensures both signatures have the same date
-      const effectiveDate = new Date(signatureData.completedAt || new Date()).toLocaleDateString('en-US', {
+      // Format as US Pacific time with date and time
+      const signatureDate = new Date(signatureData.completedAt || new Date());
+      const effectiveDate = signatureDate.toLocaleString('en-US', {
+        timeZone: 'America/Los_Angeles',
         year: 'numeric',
         month: 'long',
-        day: 'numeric'
-      });
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      }) + ' Pacific Time';
       
       // Load Business Associate signature (pre-signed)
       // This should be a base64 image stored in environment variable or file
