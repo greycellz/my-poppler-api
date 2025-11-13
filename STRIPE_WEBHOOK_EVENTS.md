@@ -21,12 +21,12 @@
    - **BAA Action**: Generates PDF and sends email (for Pro/Enterprise upgrades)
    - **Status**: ✅ REQUIRED - Handles plan upgrades
 
-3. **`invoice.payment_succeeded`** ⚠️ FALLBACK
-   - **Purpose**: Fallback trigger for BAA generation if subscription.created missed
+3. **`invoice.payment_succeeded`** ⚠️ NOT USED FOR BAA
+   - **Purpose**: Records payment date (BAA generation removed to avoid race conditions)
    - **When it fires**: When payment succeeds (including $0 trial invoices)
    - **Handler**: `handlePaymentSucceeded()`
-   - **BAA Action**: Generates PDF and sends email (only for first payment or trial creation)
-   - **Status**: ✅ REQUIRED - Fallback safety net
+   - **BAA Action**: None - BAA generation only happens via subscription events
+   - **Status**: ✅ REQUIRED - For payment tracking (not BAA)
 
 ## Required Events for Subscription Management
 
@@ -167,9 +167,9 @@ account.updated
 
 ## Event Priority for BAA Generation
 
-1. **Primary**: `customer.subscription.created` - Fires first, generates BAA immediately
-2. **Secondary**: `customer.subscription.updated` - For plan upgrades
-3. **Fallback**: `invoice.payment_succeeded` - Only if subscription.created missed
+1. **Primary**: `customer.subscription.created` - Generates BAA when subscription is created (trial or active)
+2. **Secondary**: `customer.subscription.updated` - Generates BAA when upgrading to Pro/Enterprise
+3. **Note**: `invoice.payment_succeeded` is NOT used for BAA generation to avoid race conditions and ensure we rely on the correct, mutually exclusive events
 
 ## Testing Checklist
 
