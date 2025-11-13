@@ -128,24 +128,28 @@ class BAAService {
         ]
       });
       
-      const page = await browser.newPage();
-      await page.setContent(htmlTemplate, { waitUntil: 'networkidle0' });
-      
-      // Add a delay to ensure everything is rendered
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const pdfBuffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { 
-          top: '20mm', 
-          right: '20mm', 
-          bottom: '20mm', 
-          left: '20mm' 
-        }
-      });
-      
-      await browser.close();
+      let pdfBuffer;
+      try {
+        const page = await browser.newPage();
+        await page.setContent(htmlTemplate, { waitUntil: 'networkidle0' });
+        
+        // Add a delay to ensure everything is rendered
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        pdfBuffer = await page.pdf({
+          format: 'A4',
+          printBackground: true,
+          margin: { 
+            top: '20mm', 
+            right: '20mm', 
+            bottom: '20mm', 
+            left: '20mm' 
+          }
+        });
+      } finally {
+        // Always close browser to prevent resource leaks
+        await browser.close();
+      }
       
       // Upload to GCS (HIPAA bucket - use existing HIPAA submissions bucket)
       const bucketName = process.env.GCS_HIPAA_BUCKET || 'chatterforms-submissions-us-central1';
@@ -173,7 +177,8 @@ class BAAService {
         success: true,
         filename,
         url: `gs://${bucketName}/${filename}`,
-        size: pdfBuffer.length
+        size: pdfBuffer.length,
+        baaHash: baaHash // Include hash for verification and storage
       };
     } catch (error) {
       console.error('❌ BAA PDF generation failed:', error);

@@ -193,6 +193,14 @@ async function handleSubscriptionCreated(subscription) {
             
             console.log('📝 Generating BAA PDF from subscription creation...');
             
+            // Validate signature data exists
+            if (!baaData.signatureData || !baaData.signatureData.imageBase64) {
+              console.error('❌ Cannot generate BAA PDF: signature data missing or incomplete');
+              // Revert status to pending_payment
+              await baaDocRef.update({ status: 'pending_payment' });
+              return;
+            }
+            
             // Get user data
             const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
             const userData = userDoc.data();
@@ -212,15 +220,21 @@ async function handleSubscriptionCreated(subscription) {
             );
             
             // Update BAA record to completed
-            await baaDocRef.update({
+            const updateData = {
               status: 'completed',
               pdfUrl: pdfResult.url,
               pdfFilename: pdfResult.filename,
               completedAt: new Date().toISOString(),
               subscriptionId: subscription.id,
-              emailSent: false, // Initialize emailSent flag
-              baaHash: pdfResult.baaHash // Store hash for verification
-            });
+              emailSent: false // Initialize emailSent flag
+            };
+            
+            // Only add baaHash if it exists (for verification)
+            if (pdfResult.baaHash) {
+              updateData.baaHash = pdfResult.baaHash;
+            }
+            
+            await baaDocRef.update(updateData);
             
             console.log('✅ BAA PDF generated and record updated from subscription creation');
             
@@ -420,6 +434,14 @@ async function handleSubscriptionUpdated(subscription) {
             
             console.log('📝 Generating BAA PDF...');
             
+            // Validate signature data exists
+            if (!baaData.signatureData || !baaData.signatureData.imageBase64) {
+              console.error('❌ Cannot generate BAA PDF: signature data missing or incomplete');
+              // Revert status to pending_payment
+              await baaDocRef.update({ status: 'pending_payment' });
+              return;
+            }
+            
             // Get user data
             const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
             const userData = userDoc.data();
@@ -439,15 +461,21 @@ async function handleSubscriptionUpdated(subscription) {
             );
             
             // Update BAA record to completed
-            await baaDocRef.update({
+            const updateData = {
               status: 'completed',
               pdfUrl: pdfResult.url,
               pdfFilename: pdfResult.filename,
               completedAt: new Date().toISOString(),
               subscriptionId: subscription.id,
-              emailSent: false, // Initialize emailSent flag
-              baaHash: pdfResult.baaHash // Store hash for verification
-            });
+              emailSent: false // Initialize emailSent flag
+            };
+            
+            // Only add baaHash if it exists (for verification)
+            if (pdfResult.baaHash) {
+              updateData.baaHash = pdfResult.baaHash;
+            }
+            
+            await baaDocRef.update(updateData);
             
             console.log('✅ BAA PDF generated and record updated');
             
@@ -581,6 +609,13 @@ async function handlePaymentSucceeded(invoice) {
     
     if (subscriptionId) {
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      
+      // Validate subscription was retrieved successfully
+      if (!subscription || !subscription.metadata) {
+        console.error('❌ Invalid subscription retrieved:', subscriptionId);
+        return; // Skip BAA generation
+      }
+      
       const userId = subscription.metadata.userId;
       let planId = subscription.metadata.planId;
       
@@ -692,6 +727,14 @@ async function handlePaymentSucceeded(invoice) {
                 
                 console.log('📝 Generating BAA PDF from payment webhook...');
                 
+                // Validate signature data exists
+                if (!baaData.signatureData || !baaData.signatureData.imageBase64) {
+                  console.error('❌ Cannot generate BAA PDF: signature data missing or incomplete');
+                  // Revert status to pending_payment
+                  await baaDocRef.update({ status: 'pending_payment' });
+                  return;
+                }
+                
                 // Get user data
                 const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
                 const userData = userDoc.data();
@@ -705,21 +748,27 @@ async function handlePaymentSucceeded(invoice) {
                     userId,
                     name: userData?.name || 'Unknown',
                     email: userData?.email || 'unknown@example.com',
-                    company: userData?.company
+                    company: baaData.signatureData?.companyName || baaData.companyName || userData?.company
                   },
                   baaData.signatureData
                 );
                 
             // Update BAA record to completed
-            await baaDocRef.update({
+            const updateData = {
               status: 'completed',
               pdfUrl: pdfResult.url,
               pdfFilename: pdfResult.filename,
               completedAt: new Date().toISOString(),
               subscriptionId: subscription.id,
-              emailSent: false, // Initialize emailSent flag
-              baaHash: pdfResult.baaHash // Store hash for verification
-            });
+              emailSent: false // Initialize emailSent flag
+            };
+            
+            // Only add baaHash if it exists (for verification)
+            if (pdfResult.baaHash) {
+              updateData.baaHash = pdfResult.baaHash;
+            }
+            
+            await baaDocRef.update(updateData);
             
             console.log('✅ BAA PDF generated and record updated from payment webhook');
             
