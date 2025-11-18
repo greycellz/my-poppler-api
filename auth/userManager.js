@@ -6,15 +6,41 @@ const {
   isValidEmail,
   validatePasswordStrength 
 } = require('./utils')
+const validator = require('validator')
 
 // Import GCP client (we'll use the existing one)
 const GCPClient = require('../gcp-client')
 const gcpClient = new GCPClient()
 
 /**
+ * Normalize email for duplicate checking and lookups
+ * Uses standard validator library (same as express-validator uses internally)
+ * For Gmail: removes dots, removes +aliases, handles @googlemail.com
+ * For other providers: applies provider-specific normalization
+ * This prevents abuse by creating multiple accounts with the same underlying email
+ */
+const normalizeEmailForLookup = (email) => {
+  const trimmedEmail = email.toLowerCase().trim()
+  
+  // Use validator.normalizeEmail() - standard library normalization
+  // This handles Gmail, Outlook, Yahoo, iCloud, and other providers
+  const normalized = validator.normalizeEmail(trimmedEmail, {
+    gmail_lowercase: true,
+    gmail_remove_dots: true,
+    gmail_remove_subaddress: true,
+    outlookdotcom_lowercase: true,
+    yahoo_lowercase: true,
+    icloud_lowercase: true
+  })
+  
+  // validator.normalizeEmail() returns false for invalid emails, so fallback to lowercase
+  return normalized || trimmedEmail
+}
+
+/**
  * Create a new user
  */
-const createUser = async (email, password, name) => {
+const createUser = async (email, password, firstName, lastName) => {
   try {
     // Validate input
     if (!isValidEmail(email)) {
@@ -26,8 +52,9 @@ const createUser = async (email, password, name) => {
       throw new Error(`Password validation failed: ${passwordValidation.errors.join(', ')}`)
     }
 
-    // Check if user already exists
-    const existingUser = await getUserByEmail(email)
+    // Check if user already exists using normalized email (prevents Gmail abuse)
+    const normalizedEmail = normalizeEmailForLookup(email)
+    const existingUser = await getUserByEmail(normalizedEmail, true) // true = use normalized lookup
     if (existingUser) {
       throw new Error('User with this email already exists')
     }
@@ -36,10 +63,14 @@ const createUser = async (email, password, name) => {
     const passwordHash = await hashPassword(password)
 
     // Create user document
+    // Store exact email (for display) and normalized email (for duplicate checking)
     const userData = {
-      email: email.toLowerCase(),
+      email: email.toLowerCase().trim(), // Store exact email (lowercased) for display
+      normalizedEmail: normalizeEmailForLookup(email), // Store normalized for duplicate checking
       passwordHash,
-      name,
+      firstName,
+      lastName,
+      name: `${firstName} ${lastName}`, // Keep name for backward compatibility
       emailVerified: false,
       createdAt: new Date(),
       lastLoginAt: null,
@@ -55,12 +86,33 @@ const createUser = async (email, password, name) => {
     const verificationToken = generateRandomToken(32)
     await gcpClient.storeEmailVerificationToken(userId, email, verificationToken)
 
+    // Send verification email (fail-soft - don't block signup if email fails)
+    const emailService = require('../email-service')
+    try {
+      const emailResult = await emailService.sendVerificationEmail(email, verificationToken)
+      if (!emailResult.success && !emailResult.skipped) {
+        console.error('Failed to send verification email:', emailResult.error)
+        // Don't fail the request if email fails - token is still stored
+        // User can still use the verification token if they request a resend
+      }
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError)
+      // Don't fail the request if email fails - token is still stored
+      // User can still use the verification token if they request a resend
+    }
+
+    // Generate JWT token for immediate login (needed for form migration)
+    const token = generateToken(userId, email)
+
     return {
       success: true,
       userId,
       email,
-      name,
-      verificationToken
+      firstName,
+      lastName,
+      name: `${firstName} ${lastName}`,
+      verificationToken,
+      token
     }
   } catch (error) {
     console.error('User creation error:', error)
@@ -96,15 +148,34 @@ const authenticateUser = async (email, password) => {
     // Generate JWT token
     const token = generateToken(user.id, user.email)
 
+    // Helper to convert Firestore Timestamp to ISO string
+    const convertTimestamp = (timestamp) => {
+      if (!timestamp) return null
+      if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+        return timestamp.toDate().toISOString()
+      }
+      if (timestamp instanceof Date) {
+        return timestamp.toISOString()
+      }
+      if (typeof timestamp === 'string') {
+        return timestamp
+      }
+      return null
+    }
+
     return {
       success: true,
       user: {
         id: user.id,
         email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
         name: user.name,
         emailVerified: user.emailVerified,
         plan: user.plan,
-        status: user.status
+        status: user.status,
+        createdAt: convertTimestamp(user.createdAt),
+        lastLoginAt: convertTimestamp(user.lastLoginAt)
       },
       token
     }
@@ -116,10 +187,13 @@ const authenticateUser = async (email, password) => {
 
 /**
  * Get user by email
+ * @param {string} email - Email address
+ * @param {boolean} useNormalized - If true, query by normalizedEmail field (for duplicate checks)
  */
-const getUserByEmail = async (email) => {
+const getUserByEmail = async (email, useNormalized = false) => {
   try {
-    return await gcpClient.getUserByEmail(email.toLowerCase())
+    const lookupEmail = useNormalized ? normalizeEmailForLookup(email) : email.toLowerCase().trim()
+    return await gcpClient.getUserByEmail(lookupEmail, useNormalized)
   } catch (error) {
     console.error('Get user by email error:', error)
     return null
@@ -186,12 +260,65 @@ const requestPasswordReset = async (email) => {
     const resetToken = generateRandomToken(32)
     await gcpClient.storePasswordResetToken(user.id, email, resetToken)
 
+    // Send password reset email
+    const emailService = require('../email-service')
+    try {
+      await emailService.sendPasswordResetEmail(email, resetToken)
+    } catch (emailError) {
+      console.error('Failed to send password reset email:', emailError)
+      // Don't fail the request if email fails - token is still stored
+      // User can still use the reset token if they have it
+    }
+
     return {
       success: true,
       message: 'If the email exists, a reset link has been sent'
     }
   } catch (error) {
     console.error('Password reset request error:', error)
+    throw error
+  }
+}
+
+/**
+ * Resend verification email
+ */
+const resendVerificationEmail = async (email) => {
+  try {
+    const user = await getUserByEmail(email)
+    if (!user) {
+      // Don't reveal if user exists or not
+      return { success: true, message: 'If the email exists and is unverified, a verification link has been sent' }
+    }
+
+    // Check if already verified
+    if (user.emailVerified) {
+      return { success: true, message: 'Email is already verified' }
+    }
+
+    // Generate new verification token
+    const verificationToken = generateRandomToken(32)
+    await gcpClient.storeEmailVerificationToken(user.id, email, verificationToken)
+
+    // Send verification email
+    const emailService = require('../email-service')
+    try {
+      const emailResult = await emailService.sendVerificationEmail(email, verificationToken)
+      if (!emailResult.success && !emailResult.skipped) {
+        console.error('Failed to send verification email:', emailResult.error)
+        // Don't fail the request if email fails - token is still stored
+      }
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError)
+      // Don't fail the request if email fails - token is still stored
+    }
+
+    return {
+      success: true,
+      message: 'If the email exists and is unverified, a verification link has been sent'
+    }
+  } catch (error) {
+    console.error('Resend verification email error:', error)
     throw error
   }
 }
@@ -260,6 +387,7 @@ module.exports = {
   getUserByEmail,
   getUserById,
   verifyEmail,
+  resendVerificationEmail,
   requestPasswordReset,
   resetPassword,
   migrateAnonymousForms

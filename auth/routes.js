@@ -1,6 +1,6 @@
 const express = require('express')
 const { body } = require('express-validator')
-const { authRateLimiter, signupRateLimiter, passwordResetRateLimiter } = require('./middleware')
+const { authenticateToken, authRateLimiter, signupRateLimiter, passwordResetRateLimiter, resendVerificationRateLimiter } = require('./middleware')
 const { validateRequest } = require('./utils')
 const userManager = require('./userManager')
 
@@ -15,32 +15,43 @@ router.post('/signup',
   [
     body('email')
       .isEmail()
-      .normalizeEmail()
       .withMessage('Please provide a valid email address'),
     body('password')
       .isLength({ min: 8 })
       .withMessage('Password must be at least 8 characters long')
-      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
+      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]/)
       .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
-    body('name')
+    body('firstName')
       .trim()
-      .isLength({ min: 2, max: 50 })
-      .withMessage('Name must be between 2 and 50 characters')
+      .isLength({ min: 1, max: 30 })
+      .withMessage('First name must be between 1 and 30 characters'),
+    body('lastName')
+      .trim()
+      .isLength({ min: 1, max: 30 })
+      .withMessage('Last name must be between 1 and 30 characters')
   ],
   validateRequest,
   async (req, res) => {
     try {
-      const { email, password, name } = req.body
+      const { email, password, firstName, lastName } = req.body
 
-      const result = await userManager.createUser(email, password, name)
+      const result = await userManager.createUser(email, password, firstName, lastName)
 
       res.status(201).json({
         success: true,
         message: 'Account created successfully. Please check your email to verify your account.',
         data: {
-          userId: result.userId,
-          email: result.email,
-          name: result.name
+          user: {
+            id: result.userId,
+            email: result.email,
+            firstName: result.firstName,
+            lastName: result.lastName,
+            name: result.name,
+            emailVerified: false,
+            plan: 'free',
+            status: 'pending'
+          },
+          token: result.token
         }
       })
     } catch (error) {
@@ -62,7 +73,6 @@ router.post('/login',
   [
     body('email')
       .isEmail()
-      .normalizeEmail()
       .withMessage('Please provide a valid email address'),
     body('password')
       .notEmpty()
@@ -129,6 +139,38 @@ router.post('/verify-email',
 )
 
 /**
+ * POST /auth/resend-verification
+ * Resend verification email
+ */
+router.post('/resend-verification',
+  resendVerificationRateLimiter,
+  [
+    body('email')
+      .isEmail()
+      .withMessage('Please provide a valid email address')
+  ],
+  validateRequest,
+  async (req, res) => {
+    try {
+      const { email } = req.body
+
+      const result = await userManager.resendVerificationEmail(email)
+
+      res.json({
+        success: true,
+        message: result.message
+      })
+    } catch (error) {
+      console.error('Resend verification error:', error)
+      res.status(400).json({
+        success: false,
+        error: error.message
+      })
+    }
+  }
+)
+
+/**
  * POST /auth/request-reset
  * Request password reset
  */
@@ -137,7 +179,6 @@ router.post('/request-reset',
   [
     body('email')
       .isEmail()
-      .normalizeEmail()
       .withMessage('Please provide a valid email address')
   ],
   validateRequest,
@@ -173,7 +214,7 @@ router.post('/reset-password',
     body('password')
       .isLength({ min: 8 })
       .withMessage('Password must be at least 8 characters long')
-      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
+      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]/)
       .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character')
   ],
   validateRequest,
@@ -247,7 +288,7 @@ router.post('/migrate-forms',
  * GET /auth/session
  * Get current user session
  */
-router.get('/session', async (req, res) => {
+router.get('/session', authenticateToken, async (req, res) => {
   try {
     const userId = req.user?.userId
 
@@ -266,6 +307,21 @@ router.get('/session', async (req, res) => {
       })
     }
 
+    // Helper to convert Firestore Timestamp to ISO string
+    const convertTimestamp = (timestamp) => {
+      if (!timestamp) return null
+      if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+        return timestamp.toDate().toISOString()
+      }
+      if (timestamp instanceof Date) {
+        return timestamp.toISOString()
+      }
+      if (typeof timestamp === 'string') {
+        return timestamp
+      }
+      return null
+    }
+
     res.json({
       success: true,
       data: {
@@ -275,7 +331,9 @@ router.get('/session', async (req, res) => {
           name: user.name,
           emailVerified: user.emailVerified,
           plan: user.plan,
-          status: user.status
+          status: user.status,
+          createdAt: convertTimestamp(user.createdAt),
+          lastLoginAt: convertTimestamp(user.lastLoginAt)
         }
       }
     })

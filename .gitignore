@@ -10,3 +10,4 @@ chatterforms-*-key.json
 .env
 .env.local
 .env.production
+test-secrets.js

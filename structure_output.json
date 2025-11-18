@@ -1,0 +1,83 @@
+{
+  "title": "Popular Survey",
+  "fields": [
+    {
+      "id": "customer_service_rating",
+      "type": "select",
+      "label": "Rate our Customer Service",
+      "required": true,
+      "placeholder": "Select a rating",
+      "options": [
+        "1 - Poor",
+        "2 - Fair",
+        "3 - Good",
+        "4 - Very Good",
+        "5 - Excellent"
+      ],
+      "allowOther": false
+    },
+    {
+      "id": "product_quality_rating",
+      "type": "select",
+      "label": "Rate our Product Quality",
+      "required": true,
+      "placeholder": "Select a rating",
+      "options": [
+        "1 - Poor",
+        "2 - Fair",
+        "3 - Good",
+        "4 - Very Good",
+        "5 - Excellent"
+      ],
+      "allowOther": false
+    },
+    {
+      "id": "delivery_efficiency_rating",
+      "type": "select",
+      "label": "Rate our Delivery Efficiency",
+      "required": true,
+      "placeholder": "Select a rating",
+      "options": [
+        "1 - Poor",
+        "2 - Fair",
+        "3 - Good",
+        "4 - Very Good",
+        "5 - Excellent"
+      ],
+      "allowOther": false
+    },
+    {
+      "id": "improvement_areas",
+      "type": "checkbox-group",
+      "label": "What areas could we improve?",
+      "required": false,
+      "placeholder": "",
+      "options": [
+        "Customer Service",
+        "Product Quality",
+        "Delivery Efficiency"
+      ],
+      "allowOther": true,
+      "otherLabel": "Other:",
+      "otherPlaceholder": "Please specify..."
+    },
+    {
+      "id": "feedback",
+      "type": "textarea",
+      "label": "Provide your valuable feedback",
+      "required": false,
+      "placeholder": "Write here...",
+      "allowOther": false
+    }
+  ],
+  "formId": "form_1758567969233_6h3kwqr1k",
+  "styling": {
+    "globalFontSize": "m",
+    "fieldSizes": {},
+    "fontFamily": "Inter, sans-serif",
+    "fontColor": "#92400e",
+    "backgroundColor": "linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)",
+    "buttonColor": "linear-gradient(135deg, #ddc7a1 0%, #f59e0b 100%)"
+  },
+  "id": "form_1758567969233_6h3kwqr1k"
+}

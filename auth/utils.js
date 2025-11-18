@@ -7,6 +7,12 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-i
 const JWT_EXPIRES_IN = '7d'
 const SALT_ROUNDS = 12
 
+// Debug JWT_SECRET on startup
+console.log('🔧 JWT_SECRET environment variable check:')
+console.log('🔧 JWT_SECRET exists:', !!process.env.JWT_SECRET)
+console.log('🔧 JWT_SECRET length:', process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 'undefined')
+console.log('🔧 Using fallback:', !process.env.JWT_SECRET)
+
 /**
  * Hash a password using bcrypt
  */
@@ -37,18 +43,22 @@ const comparePassword = async (password, hash) => {
  */
 const generateToken = (userId, email) => {
   try {
-    return jwt.sign(
+    console.log('🔑 Generating token for user:', userId, email)
+    console.log('🔑 JWT_SECRET length:', JWT_SECRET ? JWT_SECRET.length : 'undefined')
+    
+    const token = jwt.sign(
       { 
         userId, 
-        email,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
+        email
       },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     )
+    
+    console.log('✅ Token generated successfully, length:', token.length)
+    return token
   } catch (error) {
-    console.error('Token generation error:', error)
+    console.error('❌ Token generation error:', error)
     throw new Error('Failed to generate token')
   }
 }
@@ -108,7 +118,7 @@ const validatePasswordStrength = (password) => {
   const hasUpperCase = /[A-Z]/.test(password)
   const hasLowerCase = /[a-z]/.test(password)
   const hasNumbers = /\d/.test(password)
-  const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password)
+  const hasSpecialChar = /[@$!%*?&#]/.test(password)
 
   const errors = []
   

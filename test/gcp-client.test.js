@@ -57,8 +57,19 @@ describe('GCPClient', () => {
 
   describe('Firestore Operations', () => {
     test('should store form structure successfully', async () => {
+      // Set environment to dev for testing
+      process.env.RAILWAY_ENVIRONMENT_NAME = 'dev';
+      const gcpClient = new GCPClient();
+      
       const mockSet = jest.fn().mockResolvedValue();
-      const mockDoc = jest.fn().mockReturnValue({ set: mockSet });
+      const mockGet = jest.fn().mockResolvedValue({ 
+        exists: false,
+        data: () => null
+      });
+      const mockDoc = jest.fn().mockReturnValue({ 
+        set: mockSet,
+        get: mockGet
+      });
       const mockCollection = jest.fn().mockReturnValue({ doc: mockDoc });
       gcpClient.firestore.collection = mockCollection;
 
@@ -71,7 +82,8 @@ describe('GCPClient', () => {
 
       expect(result.success).toBe(true);
       expect(result.formId).toBe(formId);
-      expect(mockCollection).toHaveBeenCalledWith('forms');
+      // Should use dev_ prefix
+      expect(mockCollection).toHaveBeenCalledWith('dev_forms');
       expect(mockDoc).toHaveBeenCalledWith(formId);
       expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({
         form_id: formId,
@@ -83,8 +95,16 @@ describe('GCPClient', () => {
     });
 
     test('should store form submission successfully', async () => {
+      // Set environment to dev for testing
+      process.env.RAILWAY_ENVIRONMENT_NAME = 'dev';
+      const gcpClient = new GCPClient();
+      
       const mockSet = jest.fn().mockResolvedValue();
-      const mockDoc = jest.fn().mockReturnValue({ set: mockSet });
+      const mockGet = jest.fn().mockResolvedValue({ exists: true, data: () => ({}) });
+      const mockDoc = jest.fn().mockReturnValue({ 
+        set: mockSet,
+        get: mockGet
+      });
       const mockCollection = jest.fn().mockReturnValue({ doc: mockDoc });
       gcpClient.firestore.collection = mockCollection;
 
@@ -98,7 +118,8 @@ describe('GCPClient', () => {
 
       expect(result.success).toBe(true);
       expect(result.submissionId).toBe(submissionId);
-      expect(mockCollection).toHaveBeenCalledWith('submissions');
+      // Should use dev_ prefix
+      expect(mockCollection).toHaveBeenCalledWith('dev_submissions');
       expect(mockDoc).toHaveBeenCalledWith(submissionId);
     });
   });
