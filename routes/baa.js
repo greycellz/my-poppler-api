@@ -47,12 +47,12 @@ router.post('/store-signature', authenticateToken, async (req, res) => {
     console.log('📝 Creating BAA record in Firestore...');
     
     // Store in Firestore
-    const docRef = await gcpClient.firestore.collection('baa-agreements').add(baaRecord);
+    const docRef = await gcpClient.collection('baa-agreements').add(baaRecord);
     
     console.log('✅ BAA record created:', docRef.id);
     
     // Update user document
-    await gcpClient.firestore.collection('users').doc(userId).update({
+    await gcpClient.collection('users').doc(userId).update({
       baaSigned: true,
       baaSignedAt: new Date().toISOString(),
       baaAgreementId: docRef.id
@@ -83,7 +83,7 @@ router.get('/agreement', authenticateToken, async (req, res) => {
     const gcpClient = new GCPClient();
     
     // Get the most recent completed BAA agreement
-    const baaSnapshot = await gcpClient.firestore
+    const baaSnapshot = await gcpClient
       .collection('baa-agreements')
       .where('userId', '==', userId)
       .where('status', '==', 'completed')

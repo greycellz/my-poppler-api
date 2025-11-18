@@ -142,7 +142,7 @@ async function updateOnboardingLevel(email, targetLevel) {
     progress.lastUpdated = new Date();
     
     // Update user document
-    await gcpClient.firestore
+    await gcpClient
       .collection('users')
       .doc(userId)
       .set({
@@ -248,7 +248,7 @@ async function updateOnboardingLevel(email, targetLevel) {
   progress.lastUpdated = new Date();
   
   // Update user document
-  await gcpClient.firestore
+  await gcpClient
     .collection('users')
     .doc(userId)
     .set({

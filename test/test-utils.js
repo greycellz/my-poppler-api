@@ -74,7 +74,7 @@ async function createTestUser(options = {}) {
     ...options.additionalData
   };
 
-  await gcpClient.firestore.collection('users').doc(userId).set(userData);
+  await gcpClient.collection('users').doc(userId).set(userData);
 
   return {
     userId,
@@ -117,7 +117,7 @@ async function createStripeCustomer(options = {}) {
  * Link Stripe customer to Firestore user
  */
 async function linkCustomerToUser(userId, customerId) {
-  await gcpClient.firestore.collection('users').doc(userId).update({
+  await gcpClient.collection('users').doc(userId).update({
     stripeCustomerId: customerId
   });
 }
@@ -354,7 +354,7 @@ async function releaseSchedule(scheduleId) {
  */
 async function cleanupTestUser(userId) {
   try {
-    await gcpClient.firestore.collection('users').doc(userId).delete();
+    await gcpClient.collection('users').doc(userId).delete();
   } catch (error) {
     console.warn(`Failed to cleanup test user ${userId}:`, error.message);
   }

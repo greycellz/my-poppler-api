@@ -154,7 +154,7 @@ async function handleSubscriptionCreated(subscription) {
       updateData.currentPeriodEnd = subscription.current_period_end;
     }
 
-    await gcpClient.firestore.collection('users').doc(userId).update(updateData);
+    await gcpClient.collection('users').doc(userId).update(updateData);
 
     console.log(`✅ User ${userId} subscription created: ${planId} (${interval})`);
     
@@ -164,7 +164,7 @@ async function handleSubscriptionCreated(subscription) {
       
       try {
         // Query for pending BAA record
-        const baaSnapshot = await gcpClient.firestore
+        const baaSnapshot = await gcpClient
           .collection('baa-agreements')
           .where('userId', '==', userId)
           .where('status', '==', 'pending_payment')
@@ -210,7 +210,7 @@ async function handleSubscriptionCreated(subscription) {
             }
             
             // Get user data
-            const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+            const userDoc = await gcpClient.collection('users').doc(userId).get();
             const userData = userDoc.data();
             
             // Generate PDF
@@ -374,7 +374,7 @@ async function handleSubscriptionUpdated(subscription) {
         updateData.currentPeriodEnd = subscription.current_period_end;
       }
 
-      await gcpClient.firestore.collection('users').doc(userId).update(updateData);
+      await gcpClient.collection('users').doc(userId).update(updateData);
       console.log(`✅ User ${userId} subscription kept active during trial cancellation`);
       return;
     }
@@ -413,7 +413,7 @@ async function handleSubscriptionUpdated(subscription) {
       console.log(`✅ Trial converted to paid for subscription ${subscription.id} (user ${userId})`);
     }
 
-    await gcpClient.firestore.collection('users').doc(userId).update(updateData);
+    await gcpClient.collection('users').doc(userId).update(updateData);
 
     console.log(`✅ User ${userId} subscription updated: ${planId} (${interval}) - Status: ${subscription.status}`);
     
@@ -423,7 +423,7 @@ async function handleSubscriptionUpdated(subscription) {
       
       try {
         // First, check if user already has a completed BAA (BAA is not tied to subscription, it persists)
-        const completedBaaSnapshot = await gcpClient.firestore
+        const completedBaaSnapshot = await gcpClient
           .collection('baa-agreements')
           .where('userId', '==', userId)
           .where('status', '==', 'completed')
@@ -437,7 +437,7 @@ async function handleSubscriptionUpdated(subscription) {
         }
         
         // If no completed BAA, check for pending BAA (user signed but payment not processed yet)
-        const baaSnapshot = await gcpClient.firestore
+        const baaSnapshot = await gcpClient
           .collection('baa-agreements')
           .where('userId', '==', userId)
           .where('status', '==', 'pending_payment')
@@ -483,7 +483,7 @@ async function handleSubscriptionUpdated(subscription) {
             }
             
             // Get user data
-            const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+            const userDoc = await gcpClient.collection('users').doc(userId).get();
             const userData = userDoc.data();
             
             // Generate PDF
@@ -618,14 +618,14 @@ async function handleSubscriptionDeleted(subscription) {
     const gcpClient = new GCPClient();
     
     // Check if user document exists before updating
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
       console.warn(`⚠️ User document ${userId} does not exist - skipping update (likely test user or already deleted)`);
       return;
     }
     
-    await gcpClient.firestore.collection('users').doc(userId).update({
+    await gcpClient.collection('users').doc(userId).update({
       subscriptionId: null,
       subscriptionStatus: 'canceled',
       planId: 'free',
@@ -692,7 +692,7 @@ async function handlePaymentSucceeded(invoice) {
         const GCPClient = require('./gcp-client');
         const gcpClient = new GCPClient();
         
-        await gcpClient.firestore.collection('users').doc(userId).update({
+        await gcpClient.collection('users').doc(userId).update({
           lastPaymentDate: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
@@ -734,7 +734,7 @@ async function handlePaymentFailed(invoice) {
     const gcpClient = new GCPClient();
     
     // Get current user data to check existing failure tracking
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     const userData = userDoc.exists ? userDoc.data() : {};
     
     // Track payment failure
@@ -753,14 +753,14 @@ async function handlePaymentFailed(invoice) {
       updatedAt: now
     };
     
-    await gcpClient.firestore.collection('users').doc(userId).update(updateData);
+    await gcpClient.collection('users').doc(userId).update(updateData);
     
     // Check if this is after grace period (7 days)
     const daysSinceFirstFailure = (Date.now() - firstFailureTime) / (1000 * 60 * 60 * 24);
     
     if (daysSinceFirstFailure >= 7) {
       // Grace period ended, downgrade to free
-      await gcpClient.firestore.collection('users').doc(userId).update({
+      await gcpClient.collection('users').doc(userId).update({
         plan: 'free',
         planId: 'free',
         downgradedAt: now,
@@ -827,7 +827,7 @@ async function handleTrialWillEnd(subscription) {
     const trialEndDate = trialEnd ? new Date(trialEnd * 1000).toISOString() : null;
     
     try {
-      await gcpClient.firestore.collection('users').doc(userId).update({
+      await gcpClient.collection('users').doc(userId).update({
         trialEndingAt: trialEndDate,
         updatedAt: new Date().toISOString()
       });
@@ -2140,7 +2140,7 @@ app.delete('/admin/delete-all-logos/:userId', async (req, res) => {
     console.log(`🗑️ Admin: Deleting all logos for user: ${userId}`)
 
     // Get all logos for the user
-    const logosSnapshot = await gcpClient.firestore
+    const logosSnapshot = await gcpClient
       .collection('user_logos')
       .where('userId', '==', userId)
       .get()
@@ -2387,7 +2387,7 @@ app.put('/form-images/:formId/:fieldId/sequence', async (req, res) => {
     console.log('🔍 Validating image IDs exist in database...')
     const validationPromises = images.map(async (image) => {
       try {
-        const doc = await gcpClient.firestore.collection('form_images').doc(image.id).get()
+        const doc = await gcpClient.collection('form_images').doc(image.id).get()
         if (!doc.exists) {
           throw new Error(`Image ${image.id} not found in database`)
         }
@@ -2441,7 +2441,7 @@ app.get('/api/files/logo/:userId/:logoId', async (req, res) => {
     console.log(`🖼️ Serving logo file: ${logoId} for user: ${userId}`)
 
     // Get logo metadata from Firestore
-    const logoRef = gcpClient.firestore.collection('user_logos').doc(logoId)
+    const logoRef = gcpClient.collection('user_logos').doc(logoId)
     const logoDoc = await logoRef.get()
     
     if (!logoDoc.exists) {
@@ -2524,7 +2524,7 @@ app.get('/api/files/form-image/:formId/:fieldId/:imageId', async (req, res) => {
     console.log(`🖼️ Serving form image file: ${imageId} for form: ${formId}, field: ${fieldId}`)
 
     // Get image metadata from Firestore
-    const imageRef = gcpClient.firestore.collection('form_images').doc(imageId)
+    const imageRef = gcpClient.collection('form_images').doc(imageId)
     const imageDoc = await imageRef.get()
     
     if (!imageDoc.exists) {
@@ -2634,7 +2634,7 @@ app.post('/api/debug/cleanup-payment-fields/:formId/:fieldId', async (req, res) 
     const { formId, fieldId } = req.params;
     console.log(`🧹 CLEANUP: Cleaning up duplicate payment fields for form: ${formId}, field: ${fieldId}`);
     
-    const fieldsQuery = await gcpClient.firestore
+    const fieldsQuery = await gcpClient
       .collection('payment_fields')
       .where('form_id', '==', formId)
       .where('field_id', '==', fieldId)
@@ -2847,7 +2847,7 @@ app.get('/api/submissions/:submissionId/signature/:fieldId', async (req, res) =>
     console.log(`📝 Requesting signature for submission ${submissionId}, field ${fieldId}`);
 
     // Get submission data
-    const submissionRef = gcpClient.firestore.collection('submissions').doc(submissionId);
+    const submissionRef = gcpClient.collection('submissions').doc(submissionId);
     const submissionDoc = await submissionRef.get();
 
     if (!submissionDoc.exists) {
@@ -2926,7 +2926,7 @@ app.get('/api/submissions/:submissionId/pdf/:fieldId', async (req, res) => {
     // In production, add proper user authentication
 
     // Get submission data
-    const submissionRef = gcpClient.firestore.collection('submissions').doc(submissionId);
+    const submissionRef = gcpClient.collection('submissions').doc(submissionId);
     const submissionDoc = await submissionRef.get();
 
     if (!submissionDoc.exists) {
@@ -3982,7 +3982,7 @@ app.delete('/api/stripe/account/:userId/:accountId', async (req, res) => {
     }
 
     // Get the specific account to verify ownership and get Stripe account ID
-    const accountRef = gcpClient.firestore.collection('user_stripe_accounts').doc(accountId);
+    const accountRef = gcpClient.collection('user_stripe_accounts').doc(accountId);
     const accountDoc = await accountRef.get();
     
     if (!accountDoc.exists) {
@@ -5117,7 +5117,7 @@ app.post('/api/onboarding/force-fix-completion', async (req, res) => {
       progress.totalProgress = Math.round((progress.completedTasks.length / allTasks.length) * 100);
       
       // Update in database
-      const userRef = gcpClient.firestore.collection('users').doc(userId);
+      const userRef = gcpClient.collection('users').doc(userId);
       await userRef.update({
         onboardingProgress: progress
       });

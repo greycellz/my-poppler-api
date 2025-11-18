@@ -77,6 +77,36 @@ class GCPClient {
     }
   }
 
+  // ============== COLLECTION PREFIX HELPERS ==============
+
+  /**
+   * Get collection name with environment prefix
+   * - dev environment → dev_${collectionName}
+   * - staging environment → staging_${collectionName}
+   * - production or undefined → ${collectionName} (no prefix)
+   */
+  getCollectionName(collectionName) {
+    const env = process.env.RAILWAY_ENVIRONMENT_NAME;
+    
+    if (env === 'dev') {
+      return `dev_${collectionName}`;
+    } else if (env === 'staging') {
+      return `staging_${collectionName}`;
+    } else {
+      // production or undefined (default to no prefix for production)
+      return collectionName;
+    }
+  }
+
+  /**
+   * Helper method to get Firestore collection with environment prefix
+   * Replaces direct this.firestore.collection() calls
+   */
+  collection(collectionName) {
+    const prefixedName = this.getCollectionName(collectionName);
+    return this.firestore.collection(prefixedName);
+  }
+
   // ============== FIRESTORE OPERATIONS ==============
 
   /**
@@ -108,7 +138,7 @@ class GCPClient {
       }
 
       // Check if this is an update (form already exists)
-      const existingDoc = await this.firestore
+      const existingDoc = await this
         .collection('forms')
         .doc(formId)
         .get();
@@ -154,7 +184,7 @@ class GCPClient {
         isAutoSave
       });
 
-      await this.firestore
+      await this
         .collection('forms')
         .doc(formId)
         .set(formDoc);
@@ -263,7 +293,7 @@ class GCPClient {
     try {
       console.log(`📋 Retrieving form structure: ${formId}${forceFresh ? ' (force fresh)' : ''}`);
       
-      const docRef = this.firestore.collection('forms').doc(formId);
+      const docRef = this.collection('forms').doc(formId);
       
       // Force fresh read from server if requested (to avoid cache issues after updates)
       const doc = forceFresh 
@@ -291,7 +321,7 @@ class GCPClient {
     try {
       console.log(`📋 Retrieving submission with files: ${submissionId}`);
       
-      const docRef = this.firestore.collection('submissions').doc(submissionId);
+      const docRef = this.collection('submissions').doc(submissionId);
       const doc = await docRef.get();
       
       if (!doc.exists) {
@@ -318,7 +348,7 @@ class GCPClient {
     try {
       console.log(`📋 Retrieving submissions for form: ${formId}`);
       
-      const snapshot = await this.firestore
+      const snapshot = await this
         .collection('submissions')
         .where('form_id', '==', formId)
         .orderBy('timestamp', 'desc')
@@ -503,14 +533,14 @@ class GCPClient {
             submission_data: processedFormData,
       };
 
-      await this.firestore
+      await this
         .collection('submissions')
         .doc(submissionId)
         .set(submissionDoc);
 
       // Update the form document with submission count and last submission date
       try {
-        const formRef = this.firestore.collection('forms').doc(formId);
+        const formRef = this.collection('forms').doc(formId);
         const formDoc = await formRef.get();
         
         if (formDoc.exists) {
@@ -811,7 +841,7 @@ class GCPClient {
    */
   async getFormSubmissions(formId) {
     try {
-      const submissionsSnapshot = await this.firestore
+      const submissionsSnapshot = await this
         .collection('submissions')
         .where('form_id', '==', formId)
         .orderBy('timestamp', 'desc')
@@ -911,7 +941,7 @@ class GCPClient {
       console.log(`📋 Getting paginated submissions for form: ${formId}, limit: ${limit}, offset: ${offset}`);
       
       // Build Firestore query with pagination
-      let query = this.firestore
+      let query = this
         .collection('submissions')
         .where('form_id', '==', formId);
       
@@ -928,7 +958,7 @@ class GCPClient {
       
       // Get total count (for pagination metadata) - we need to do this separately
       // because Firestore doesn't support count() with complex queries efficiently
-      const totalSnapshot = await this.firestore
+      const totalSnapshot = await this
         .collection('submissions')
         .where('form_id', '==', formId)
         .get();
@@ -999,7 +1029,7 @@ class GCPClient {
     try {
       console.log(`📋 Loading submission data for: ${submissionId}`);
       
-      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      const submissionRef = this.collection('submissions').doc(submissionId);
       const submissionDoc = await submissionRef.get();
       
       if (!submissionDoc.exists) {
@@ -1190,7 +1220,7 @@ class GCPClient {
    */
   async getSignatureSignedUrls(submissionId) {
     try {
-      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      const submissionRef = this.collection('submissions').doc(submissionId);
       const doc = await submissionRef.get();
       if (!doc.exists) {
         return {};
@@ -1225,7 +1255,7 @@ class GCPClient {
    */
   async getOrCreateSignedPDF(submissionId, fieldId) {
     try {
-      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      const submissionRef = this.collection('submissions').doc(submissionId);
       const doc = await submissionRef.get();
       if (!doc.exists) {
         throw new Error('Submission not found');
@@ -1433,7 +1463,7 @@ class GCPClient {
    */
   async storeSignatureReference(submissionId, fieldId, signatureInfo) {
     try {
-      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      const submissionRef = this.collection('submissions').doc(submissionId);
       
       await submissionRef.update({
         [`signatures.${fieldId}`]: {
@@ -1469,7 +1499,7 @@ class GCPClient {
       if (signatureFields.length === 0) {
         try {
           console.log('📄 No inline signature data found; attempting fallback via stored GCS signatures...');
-          const subDoc = await this.firestore.collection('submissions').doc(submissionId).get();
+          const subDoc = await this.collection('submissions').doc(submissionId).get();
           const sigMap = subDoc.exists ? (subDoc.data().signatures || {}) : {};
           const reconstructed = [];
           for (const [fieldId, sig] of Object.entries(sigMap)) {
@@ -1498,7 +1528,7 @@ class GCPClient {
       console.log(`📄 Found ${signatureFields.length} signature field(s), generating PDF...`);
 
       // Get form schema for PDF generation
-      const formRef = this.firestore.collection('forms').doc(formId);
+      const formRef = this.collection('forms').doc(formId);
       const formDoc = await formRef.get();
       
       if (!formDoc.exists) {
@@ -1515,7 +1545,7 @@ class GCPClient {
       let ipAddress = undefined;
       let userAgent = undefined;
       try {
-        const subDoc = await this.firestore.collection('submissions').doc(submissionId).get();
+        const subDoc = await this.collection('submissions').doc(submissionId).get();
         if (subDoc.exists) {
           const sdata = subDoc.data();
           ipAddress = sdata?.ip_address;
@@ -1561,7 +1591,7 @@ class GCPClient {
    */
   async storePDFReference(submissionId, fieldId, pdfResult, isHipaa = false) {
     try {
-      const submissionRef = this.firestore.collection('submissions').doc(submissionId);
+      const submissionRef = this.collection('submissions').doc(submissionId);
       
       await submissionRef.update({
         [`pdfs.${fieldId}`]: {
@@ -1586,7 +1616,7 @@ class GCPClient {
    */
   async createUser(userData) {
     try {
-      const userRef = this.firestore.collection('users').doc();
+      const userRef = this.collection('users').doc();
       const userId = userRef.id;
       
       await userRef.set({
@@ -1616,14 +1646,14 @@ class GCPClient {
       let snapshot
       if (useNormalized) {
         // Query by normalizedEmail field (for duplicate checking)
-        snapshot = await this.firestore
+        snapshot = await this
           .collection('users')
           .where('normalizedEmail', '==', lookupEmail)
           .limit(1)
           .get();
       } else {
         // Query by exact email (for login - try exact first, then normalized)
-        snapshot = await this.firestore
+        snapshot = await this
           .collection('users')
           .where('email', '==', lookupEmail)
           .limit(1)
@@ -1639,7 +1669,7 @@ class GCPClient {
             gmail_remove_subaddress: true
           }) || lookupEmail
           
-          snapshot = await this.firestore
+          snapshot = await this
             .collection('users')
             .where('normalizedEmail', '==', normalizedEmail)
             .limit(1)
@@ -1664,7 +1694,7 @@ class GCPClient {
    */
   async getUserById(userId) {
     try {
-      const doc = await this.firestore
+      const doc = await this
         .collection('users')
         .doc(userId)
         .get();
@@ -1685,7 +1715,7 @@ class GCPClient {
    */
   async updateUserLastLogin(userId) {
     try {
-      await this.firestore
+      await this
         .collection('users')
         .doc(userId)
         .update({
@@ -1705,7 +1735,7 @@ class GCPClient {
    */
   async updateUserEmailVerification(userId, isVerified) {
     try {
-      await this.firestore
+      await this
         .collection('users')
         .doc(userId)
         .update({
@@ -1726,7 +1756,7 @@ class GCPClient {
    */
   async updateUserPassword(userId, passwordHash) {
     try {
-      await this.firestore
+      await this
         .collection('users')
         .doc(userId)
         .update({
@@ -1746,7 +1776,7 @@ class GCPClient {
    */
   async storeEmailVerificationToken(userId, email, token) {
     try {
-      await this.firestore
+      await this
         .collection('emailVerificationTokens')
         .doc(token)
         .set({
@@ -1769,7 +1799,7 @@ class GCPClient {
    */
   async getEmailVerificationByToken(token) {
     try {
-      const doc = await this.firestore
+      const doc = await this
         .collection('emailVerificationTokens')
         .doc(token)
         .get();
@@ -1790,7 +1820,7 @@ class GCPClient {
    */
   async deleteEmailVerificationToken(token) {
     try {
-      await this.firestore
+      await this
         .collection('emailVerificationTokens')
         .doc(token)
         .delete();
@@ -1807,7 +1837,7 @@ class GCPClient {
    */
   async storePasswordResetToken(userId, email, token) {
     try {
-      await this.firestore
+      await this
         .collection('passwordResetTokens')
         .doc(token)
         .set({
@@ -1830,7 +1860,7 @@ class GCPClient {
    */
   async getPasswordResetByToken(token) {
     try {
-      const doc = await this.firestore
+      const doc = await this
         .collection('passwordResetTokens')
         .doc(token)
         .get();
@@ -1851,7 +1881,7 @@ class GCPClient {
    */
   async deletePasswordResetToken(token) {
     try {
-      await this.firestore
+      await this
         .collection('passwordResetTokens')
         .doc(token)
         .delete();
@@ -1886,7 +1916,7 @@ class GCPClient {
         ipAddress
       };
 
-      await this.firestore
+      await this
         .collection('anonymousSessions')
         .doc(sessionId)
         .set(sessionDoc);
@@ -1906,7 +1936,7 @@ class GCPClient {
     try {
       const { FieldValue } = require('@google-cloud/firestore');
       
-      await this.firestore
+      await this
         .collection('anonymousSessions')
         .doc(sessionId)
         .update({
@@ -1930,7 +1960,7 @@ class GCPClient {
       console.log(`🔄 Migrating forms from ${tempUserId} to ${realUserId}`);
       
       // Get all forms with the temporary user ID
-      const snapshot = await this.firestore
+      const snapshot = await this
         .collection('forms')
         .where('user_id', '==', tempUserId)
         .get();
@@ -1958,7 +1988,7 @@ class GCPClient {
       await batch.commit();
 
       // Update the anonymous session to mark as migrated
-      await this.firestore
+      await this
         .collection('anonymousSessions')
         .doc(tempUserId.replace('temp_', ''))
         .update({
@@ -1983,7 +2013,7 @@ class GCPClient {
       console.log('🧹 Cleaning up expired anonymous sessions...');
       
       const now = new Date();
-      const snapshot = await this.firestore
+      const snapshot = await this
         .collection('anonymousSessions')
         .where('expiresAt', '<', now)
         .get();
@@ -2004,7 +2034,7 @@ class GCPClient {
         if (sessionData.forms && sessionData.forms.length > 0) {
           for (const formId of sessionData.forms) {
             try {
-              const formDoc = await this.firestore.collection('forms').doc(formId).get();
+              const formDoc = await this.collection('forms').doc(formId).get();
               if (formDoc.exists) {
                 batch.delete(formDoc.ref);
                 cleanedForms++;
@@ -2037,7 +2067,7 @@ class GCPClient {
     try {
       console.log(`📋 Retrieving forms for user: ${userId}`);
       
-      const snapshot = await this.firestore
+      const snapshot = await this
         .collection('forms')
         .where('user_id', '==', userId)
         .get();
@@ -2108,7 +2138,7 @@ class GCPClient {
         onboardingProgress.lastUpdated = new Date();
       }
 
-      await this.firestore
+      await this
         .collection('users')
         .doc(userId)
         .set({
@@ -2130,7 +2160,7 @@ class GCPClient {
     try {
       console.log(`🔧 Correcting onboarding level for user: ${userId}`);
       
-      const userRef = this.firestore.collection('users').doc(userId);
+      const userRef = this.collection('users').doc(userId);
       const userDoc = await userRef.get();
       
       if (!userDoc.exists) {
@@ -2246,7 +2276,7 @@ class GCPClient {
     try {
       console.log(`📊 Getting onboarding progress for user: ${userId}`);
       
-      const userDoc = await this.firestore
+      const userDoc = await this
         .collection('users')
         .doc(userId)
         .get();
@@ -2275,7 +2305,7 @@ class GCPClient {
     try {
       console.log(`🎯 Updating onboarding progress for user: ${userId}, task: ${taskId}`);
       
-      const userDoc = await this.firestore
+      const userDoc = await this
         .collection('users')
         .doc(userId)
         .get();
@@ -2356,7 +2386,7 @@ class GCPClient {
       progress.lastUpdated = new Date();
 
       // Update user document
-      await this.firestore
+      await this
         .collection('users')
         .doc(userId)
         .set({
@@ -2379,7 +2409,7 @@ class GCPClient {
    */
   async logOnboardingEvent(userId, event, taskId = null, level = null, metadata = {}) {
     try {
-      const analyticsRef = this.firestore.collection('onboarding_analytics').doc();
+      const analyticsRef = this.collection('onboarding_analytics').doc();
       
       await analyticsRef.set({
         userId,
@@ -2407,7 +2437,7 @@ class GCPClient {
     try {
       console.log(`🏁 Updating onboarding flags for user: ${userId}`, flags);
       
-      const userRef = this.firestore.collection('users').doc(userId);
+      const userRef = this.collection('users').doc(userId);
       const userDoc = await userRef.get();
       
       if (!userDoc.exists) {
@@ -2448,7 +2478,7 @@ class GCPClient {
     try {
       console.log(`📚 Getting help article for task: ${taskId}`);
       
-      const snapshot = await this.firestore
+      const snapshot = await this
         .collection('help_articles')
         .where('task', '==', taskId)
         .limit(1)
@@ -2477,7 +2507,7 @@ class GCPClient {
       console.log(`📚 Upserting help article for task: ${taskId}`);
       
       // Check if article exists
-      const snapshot = await this.firestore
+      const snapshot = await this
         .collection('help_articles')
         .where('task', '==', taskId)
         .limit(1)
@@ -2496,7 +2526,7 @@ class GCPClient {
 
       if (snapshot.empty) {
         // Create new article
-        const articleRef = this.firestore.collection('help_articles').doc();
+        const articleRef = this.collection('help_articles').doc();
         await articleRef.set({
           id: articleRef.id,
           ...articleData
@@ -2524,7 +2554,7 @@ class GCPClient {
     try {
       console.log(`📊 Getting onboarding analytics for user: ${userId}`);
       
-      const snapshot = await this.firestore
+      const snapshot = await this
         .collection('onboarding_analytics')
         .where('userId', '==', userId)
         .get();
@@ -2548,7 +2578,7 @@ class GCPClient {
     try {
       console.log(`📝 Updating form metadata: ${formId}`);
       
-      await this.firestore
+      await this
         .collection('forms')
         .doc(formId)
         .update({
@@ -2572,7 +2602,7 @@ class GCPClient {
   async migrateAnonymousForms(userId, anonymousSessionId) {
     try {
       // Get anonymous forms
-      const snapshot = await this.firestore
+      const snapshot = await this
         .collection('forms')
         .where('anonymousSessionId', '==', anonymousSessionId)
         .get();
@@ -2595,7 +2625,7 @@ class GCPClient {
       await batch.commit();
 
       // Update user record
-      await this.firestore
+      await this
         .collection('users')
         .doc(userId)
         .update({
@@ -2622,7 +2652,7 @@ class GCPClient {
       console.log(`🗑️ Deleting form and all associated data: ${formId}`);
       
       // Get form data to check what needs to be deleted
-      const formDoc = await this.firestore.collection('forms').doc(formId).get();
+      const formDoc = await this.collection('forms').doc(formId).get();
       if (!formDoc.exists) {
         return { success: false, error: 'Form not found' };
       }
@@ -2636,7 +2666,7 @@ class GCPClient {
 
       // 2. Delete form submissions (if any exist)
       try {
-        const submissionsSnapshot = await this.firestore
+        const submissionsSnapshot = await this
           .collection('submissions')
           .where('form_id', '==', formId)
           .get();
@@ -2685,7 +2715,7 @@ class GCPClient {
       // 4. Remove form from user's forms list (if user exists)
       if (formData.user_id) {
         try {
-          const userDoc = await this.firestore.collection('users').doc(formData.user_id).get();
+          const userDoc = await this.collection('users').doc(formData.user_id).get();
           if (userDoc.exists) {
             const userData = userDoc.data();
             if (userData.forms && userData.forms.includes(formId)) {
@@ -2702,7 +2732,7 @@ class GCPClient {
       // 5. Remove form from anonymous session (if it was anonymous)
       if (formData.anonymousSessionId) {
         try {
-          const sessionDoc = await this.firestore.collection('anonymousSessions').doc(formData.anonymousSessionId).get();
+          const sessionDoc = await this.collection('anonymousSessions').doc(formData.anonymousSessionId).get();
           if (sessionDoc.exists) {
             const sessionData = sessionDoc.data();
             if (sessionData.forms && sessionData.forms.includes(formId)) {
@@ -2731,7 +2761,7 @@ class GCPClient {
     try {
       console.log(`🔍 Fetching form by ID: ${formId}`);
       
-      const doc = await this.firestore
+      const doc = await this
         .collection('forms')
         .doc(formId)
         .get();
@@ -2762,7 +2792,7 @@ class GCPClient {
     try {
       console.log(`💳 Storing Stripe account for user: ${userId}`);
       
-      const accountRef = this.firestore.collection('user_stripe_accounts').doc();
+      const accountRef = this.collection('user_stripe_accounts').doc();
       
       const accountDoc = {
         user_id: userId,
@@ -2798,7 +2828,7 @@ class GCPClient {
     try {
       console.log(`💳 Getting Stripe account for user: ${userId}`);
       
-      const accountQuery = await this.firestore
+      const accountQuery = await this
         .collection('user_stripe_accounts')
         .where('user_id', '==', userId)
         .get();
@@ -2835,7 +2865,7 @@ class GCPClient {
     try {
       console.log(`💰 Storing payment field for form: ${formId}, field: ${fieldId}`);
       
-      const fieldRef = this.firestore.collection('payment_fields').doc();
+      const fieldRef = this.collection('payment_fields').doc();
       
       const fieldDoc = {
         form_id: formId,
@@ -2867,7 +2897,7 @@ class GCPClient {
     try {
       console.log(`💰 Getting payment fields for form: ${formId}`);
       
-      const fieldsQuery = await this.firestore
+      const fieldsQuery = await this
         .collection('payment_fields')
         .where('form_id', '==', formId)
         .get();
@@ -2904,7 +2934,7 @@ class GCPClient {
     try {
       console.log(`💳 Storing payment transaction for submission: ${submissionId}`);
       
-      const transactionRef = this.firestore.collection('payment_transactions').doc();
+      const transactionRef = this.collection('payment_transactions').doc();
       
       const transactionDoc = {
         submission_id: submissionId,
@@ -2942,7 +2972,7 @@ class GCPClient {
     try {
       console.log(`💳 Updating Stripe account: ${accountId}`);
       
-      const accountRef = this.firestore.collection('user_stripe_accounts').doc(accountId);
+      const accountRef = this.collection('user_stripe_accounts').doc(accountId);
       await accountRef.update({
         ...updates,
         updated_at: new Date()
@@ -2963,7 +2993,7 @@ class GCPClient {
     try {
       console.log(`💳 Updating payment field for form: ${formId}, field: ${fieldId}`);
       
-      const fieldsQuery = await this.firestore
+      const fieldsQuery = await this
         .collection('payment_fields')
         .where('form_id', '==', formId)
         .where('field_id', '==', fieldId)
@@ -3033,7 +3063,7 @@ class GCPClient {
     try {
       console.log(`💳 Getting all Stripe accounts for user: ${userId}`);
       
-      const accountQuery = await this.firestore
+      const accountQuery = await this
         .collection('user_stripe_accounts')
         .where('user_id', '==', userId)
         .get();
@@ -3074,7 +3104,7 @@ class GCPClient {
       console.log(`🗑️ Deleting Stripe account ${accountId} for user: ${userId}`);
       
       // Get the specific account to verify ownership
-      const accountRef = this.firestore.collection('user_stripe_accounts').doc(accountId);
+      const accountRef = this.collection('user_stripe_accounts').doc(accountId);
       const accountDoc = await accountRef.get();
       
       if (!accountDoc.exists) {
@@ -3093,7 +3123,7 @@ class GCPClient {
       console.log(`✅ Deleted Stripe account record: ${accountId}`);
       
       // Clean up related payment fields for this specific account
-      const paymentFieldsQuery = await this.firestore
+      const paymentFieldsQuery = await this
         .collection('payment_fields')
         .where('stripe_account_id', '==', accountData.stripe_account_id)
         .get();
@@ -3123,7 +3153,7 @@ class GCPClient {
     try {
       console.log(`💳 Updating payment transaction: ${transactionId}`);
       
-      const transactionRef = this.firestore.collection('payment_transactions').doc(transactionId);
+      const transactionRef = this.collection('payment_transactions').doc(transactionId);
       
       const updateData = {
         ...updates,
@@ -3145,7 +3175,7 @@ class GCPClient {
     try {
       console.log(`💳 Getting payment transactions for submission: ${submissionId}`);
       
-      const transactionsQuery = await this.firestore
+      const transactionsQuery = await this
         .collection('payment_transactions')
         .where('submission_id', '==', submissionId)
         .get();
@@ -3166,7 +3196,7 @@ class GCPClient {
     try {
       console.log(`💳 Getting payment transaction by intent ID: ${paymentIntentId}`);
       
-      const transactionQuery = await this.firestore
+      const transactionQuery = await this
         .collection('payment_transactions')
         .where('stripe_payment_intent_id', '==', paymentIntentId)
         .limit(1)
@@ -3198,7 +3228,7 @@ class GCPClient {
     try {
       console.log(`📅 Storing Calendly account for user: ${userId}`);
       
-      const accountRef = this.firestore.collection('user_calendly_accounts').doc();
+      const accountRef = this.collection('user_calendly_accounts').doc();
       
       const accountDoc = {
         user_id: userId,
@@ -3227,7 +3257,7 @@ class GCPClient {
     try {
       console.log(`📅 Getting Calendly account for user: ${userId}`);
       
-      const accountQuery = await this.firestore
+      const accountQuery = await this
         .collection('user_calendly_accounts')
         .where('user_id', '==', userId)
         .limit(1)
@@ -3252,7 +3282,7 @@ class GCPClient {
     try {
       console.log(`📅 Getting all Calendly accounts for user: ${userId}`);
       
-      const accountsQuery = await this.firestore
+      const accountsQuery = await this
         .collection('user_calendly_accounts')
         .where('user_id', '==', userId)
         .get();
@@ -3284,7 +3314,7 @@ class GCPClient {
   async deleteCalendlyAccount(userId, accountId) {
     try {
       console.log(`🗑️ Deleting Calendly account ${accountId} for user: ${userId}`);
-      const ref = this.firestore.collection('user_calendly_accounts').doc(accountId);
+      const ref = this.collection('user_calendly_accounts').doc(accountId);
       const doc = await ref.get();
       if (!doc.exists) {
         console.log(`❌ Calendly account not found: ${accountId}`);
@@ -3325,7 +3355,7 @@ class GCPClient {
         throw new Error('Duration must be a positive number');
       }
       
-      const fieldRef = this.firestore.collection('calendar_fields').doc();
+      const fieldRef = this.collection('calendar_fields').doc();
       
       const fieldDoc = {
         form_id: formId,
@@ -3358,7 +3388,7 @@ class GCPClient {
     try {
       console.log(`📅 Getting calendar fields for form: ${formId}`);
       
-      const fieldsQuery = await this.firestore
+      const fieldsQuery = await this
         .collection('calendar_fields')
         .where('form_id', '==', formId)
         .get();
@@ -3379,7 +3409,7 @@ class GCPClient {
     try {
       console.log(`📅 Storing calendar booking for submission: ${submissionId}`);
       
-      const bookingRef = this.firestore.collection('calendar_bookings').doc();
+      const bookingRef = this.collection('calendar_bookings').doc();
       
       const bookingDoc = {
         submission_id: submissionId,
@@ -3416,7 +3446,7 @@ class GCPClient {
     try {
       console.log(`📅 Updating calendar booking: ${bookingId}`);
       
-      const bookingRef = this.firestore.collection('calendar_bookings').doc(bookingId);
+      const bookingRef = this.collection('calendar_bookings').doc(bookingId);
       
       const updateData = {
         ...updates,
@@ -3438,7 +3468,7 @@ class GCPClient {
     try {
       console.log(`📅 Getting calendar bookings for submission: ${submissionId}`);
       
-      const bookingsQuery = await this.firestore
+      const bookingsQuery = await this
         .collection('calendar_bookings')
         .where('submission_id', '==', submissionId)
         .get();
@@ -3461,7 +3491,7 @@ class GCPClient {
     try {
       console.log(`🖼️ Storing logo metadata: ${logoData.id}`);
       
-      const logoRef = this.firestore.collection('user_logos').doc(logoData.id);
+      const logoRef = this.collection('user_logos').doc(logoData.id);
       await logoRef.set(logoData);
       
       console.log(`✅ Logo metadata stored: ${logoData.id}`);
@@ -3480,7 +3510,7 @@ class GCPClient {
       console.log(`🖼️ Getting logos for user: ${userId}`);
       
       // Use a simpler query to avoid index requirements
-      const logosSnapshot = await this.firestore
+      const logosSnapshot = await this
         .collection('user_logos')
         .where('userId', '==', userId)
         .get();
@@ -3525,7 +3555,7 @@ class GCPClient {
       console.log(`🗑️ Deleting logo: ${logoId} for user: ${userId}`);
       
       // First, get the logo metadata to find the GCP file path
-      const logoRef = this.firestore.collection('user_logos').doc(logoId);
+      const logoRef = this.collection('user_logos').doc(logoId);
       const logoDoc = await logoRef.get();
       
       if (!logoDoc.exists) {
@@ -3578,7 +3608,7 @@ class GCPClient {
     try {
       console.log(`🖼️ Storing form image metadata: ${imageData.id}`);
       
-      const imageRef = this.firestore.collection('form_images').doc(imageData.id);
+      const imageRef = this.collection('form_images').doc(imageData.id);
       await imageRef.set(imageData);
       
       console.log(`✅ Form image metadata stored: ${imageData.id}`);
@@ -3596,7 +3626,7 @@ class GCPClient {
     try {
       console.log(`🖼️ Getting form images for form: ${formId}, field: ${fieldId}`);
       
-      const imagesSnapshot = await this.firestore
+      const imagesSnapshot = await this
         .collection('form_images')
         .where('formId', '==', formId)
         .where('fieldId', '==', fieldId)
@@ -3643,7 +3673,7 @@ class GCPClient {
       console.log(`🗑️ Deleting form image: ${imageId} for user: ${userId}`);
       
       // First, get the image metadata to find the GCP file path
-      const imageRef = this.firestore.collection('form_images').doc(imageId);
+      const imageRef = this.collection('form_images').doc(imageId);
       const imageDoc = await imageRef.get();
       
       if (!imageDoc.exists) {
@@ -3689,7 +3719,7 @@ class GCPClient {
     try {
       console.log(`🔄 Updating image sequence: ${imageId} to sequence ${sequence}`);
       
-      const imageRef = this.firestore.collection('form_images').doc(imageId);
+      const imageRef = this.collection('form_images').doc(imageId);
       await imageRef.update({
         sequence: sequence,
         updatedAt: new Date().toISOString()

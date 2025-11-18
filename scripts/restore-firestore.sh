@@ -20,7 +20,9 @@ if [ -z "$1" ]; then
 fi
 
 BACKUP_URI="$1"
-COLLECTIONS="${2:-users,forms,submissions,sessions,email_verification_tokens,user_calendly_accounts,calendar_fields}"
+# Default collections to restore (with dev_ prefix after migration)
+# For production, use non-prefixed names; for staging, use staging_ prefix
+COLLECTIONS="${2:-dev_users,dev_forms,dev_submissions,dev_anonymousSessions,dev_baa-agreements,dev_emailVerificationTokens,dev_passwordResetTokens,dev_user_logos,dev_form_images,dev_payment_fields,dev_user_stripe_accounts,dev_onboarding_analytics,dev_help_articles,dev_calendar_fields,dev_calendar_bookings,dev_user_calendly_accounts}"
 
 echo "⚠️  WARNING: This will restore Firestore data!"
 echo "📋 Project: ${PROJECT_ID}"

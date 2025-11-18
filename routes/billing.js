@@ -64,7 +64,7 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
       
       const GCPClient = require('../gcp-client');
       const gcpClient = new GCPClient();
-      await gcpClient.firestore.collection('users').doc(userId).update({
+      await gcpClient.collection('users').doc(userId).update({
         stripeCustomerId: customerId
       });
       console.log('🔍 Billing debug - user document updated successfully');
@@ -123,7 +123,7 @@ router.post('/create-trial-checkout-session', authenticateToken, async (req, res
     // Check trial eligibility
     const GCPClient = require('../gcp-client');
     const gcpClient = new GCPClient();
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not found' });
@@ -198,7 +198,7 @@ router.post('/create-trial-checkout-session', authenticateToken, async (req, res
         throw new Error('Invalid userId: ' + userId);
       }
       
-      await gcpClient.firestore.collection('users').doc(userId).update({
+      await gcpClient.collection('users').doc(userId).update({
         stripeCustomerId: customerId
       });
       console.log('🔍 Trial checkout debug - user document updated successfully');
@@ -261,7 +261,7 @@ router.get('/checkout-session', authenticateToken, async (req, res) => {
     // Get user's Stripe customer ID from database (JWT token doesn't include it)
     const GCPClient = require('../gcp-client');
     const gcpClient = new GCPClient();
-    const userDoc = await gcpClient.firestore.collection('users').doc(req.user.userId).get();
+    const userDoc = await gcpClient.collection('users').doc(req.user.userId).get();
     
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not found' });
@@ -299,7 +299,7 @@ router.post('/create-portal-session', authenticateToken, async (req, res) => {
     // Get user's Stripe customer ID from database (JWT token doesn't include it)
     const GCPClient = require('../gcp-client');
     const gcpClient = new GCPClient();
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
       console.log('🔍 Portal session - user not found');
@@ -335,7 +335,7 @@ router.get('/subscription', authenticateToken, async (req, res) => {
     // Get user's Stripe customer ID from database (JWT token doesn't include it)
     const GCPClient = require('../gcp-client');
     const gcpClient = new GCPClient();
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not found' });
@@ -529,7 +529,7 @@ router.post('/cancel-subscription', authenticateToken, async (req, res) => {
     // Get user's Stripe customer ID from database
     const GCPClient = require('../gcp-client');
     const gcpClient = new GCPClient();
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not found' });
@@ -672,7 +672,7 @@ router.post('/resume-subscription', authenticateToken, async (req, res) => {
     // Get user's Stripe customer ID from database
     const GCPClient = require('../gcp-client');
     const gcpClient = new GCPClient();
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not found' });
@@ -738,7 +738,7 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     // Get user's Stripe customer ID from database
     const GCPClient = require('../gcp-client');
     const gcpClient = new GCPClient();
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not found' });
@@ -1174,7 +1174,7 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
     // Get user's current subscription to determine plan
     const GCPClient = require('../gcp-client');
     const gcpClient = new GCPClient();
-    const userDoc = await gcpClient.firestore.collection('users').doc(userId).get();
+    const userDoc = await gcpClient.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'User not found' });

@@ -69,7 +69,7 @@ async function deleteUser(email) {
   
   try {
     // 1. Delete email verification tokens
-    const verificationTokensSnapshot = await gcpClient.firestore
+    const verificationTokensSnapshot = await gcpClient
       .collection('emailVerificationTokens')
       .where('userId', '==', userId)
       .get();
@@ -84,7 +84,7 @@ async function deleteUser(email) {
     }
     
     // 2. Delete password reset tokens
-    const resetTokensSnapshot = await gcpClient.firestore
+    const resetTokensSnapshot = await gcpClient
       .collection('passwordResetTokens')
       .where('userId', '==', userId)
       .get();
@@ -99,7 +99,7 @@ async function deleteUser(email) {
     }
     
     // 3. Delete user document
-    await gcpClient.firestore.collection('users').doc(userId).delete();
+    await gcpClient.collection('users').doc(userId).delete();
     console.log(`   ✅ Deleted user document`);
     
     console.log(`\n✅ Successfully deleted user: ${email}`);

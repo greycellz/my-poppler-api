@@ -13,7 +13,9 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_URI="gs://${BUCKET_NAME}/firestore-backups/${TIMESTAMP}"
 
 # Default collections to backup (can be overridden)
-COLLECTIONS="${1:-users,forms,submissions,sessions,email_verification_tokens,user_calendly_accounts,calendar_fields}"
+# Includes all 16 collections with dev_ prefix (after migration)
+# For production, use non-prefixed names; for staging, use staging_ prefix
+COLLECTIONS="${1:-dev_users,dev_forms,dev_submissions,dev_anonymousSessions,dev_baa-agreements,dev_emailVerificationTokens,dev_passwordResetTokens,dev_user_logos,dev_form_images,dev_payment_fields,dev_user_stripe_accounts,dev_onboarding_analytics,dev_help_articles,dev_calendar_fields,dev_calendar_bookings,dev_user_calendly_accounts}"
 
 echo "🔄 Starting Firestore backup..."
 echo "📋 Project: ${PROJECT_ID}"
