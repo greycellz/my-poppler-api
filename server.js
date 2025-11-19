@@ -3564,7 +3564,7 @@ app.post('/api/stripe/connect', async (req, res) => {
     console.log(`✅ Stripe Express account created: ${account.id}`);
 
     // Create account link for onboarding
-    const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com'
+    const frontendUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com'
     console.log(`🔗 Using frontend URL for redirects: ${frontendUrl}`);
     const accountLink = await stripe.accountLinks.create({
       account: account.id,
@@ -3707,12 +3707,12 @@ app.get('/api/stripe/connect-callback', async (req, res) => {
     console.log(`✅ Connected account stored: ${accountId}`);
 
     // Redirect back to settings page
-    const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com';
     res.redirect(`${frontendUrl}/settings?stripe_oauth_success=true`);
 
   } catch (error) {
     console.error('❌ Error handling OAuth callback:', error);
-    const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com';
     res.redirect(`${frontendUrl}/settings?stripe_oauth_error=true`);
   }
 });
@@ -3770,7 +3770,7 @@ app.post('/api/stripe/account-link', async (req, res) => {
     }
 
     // Create account link
-    const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com'
+    const frontendUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com'
     console.log(`🔗 Using frontend URL for redirects: ${frontendUrl}`);
     console.log(`🔗 Creating ${finalLinkType} link for account: ${stripeAccount.stripe_account_id}`);
     

@@ -81,8 +81,8 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
         },
       ],
       mode: 'subscription',
-      success_url: `${process.env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/pricing?canceled=true`,
+      success_url: `${process.env.FRONTEND_URL || 'https://www.chatterforms.com'}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL || 'https://www.chatterforms.com'}/pricing?canceled=true`,
       metadata: {
         userId: userId,
         planId: planId,
@@ -229,8 +229,8 @@ router.post('/create-trial-checkout-session', authenticateToken, async (req, res
           environment: process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV || 'development'
         }
       },
-      success_url: `${process.env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/pricing?canceled=true`,
+      success_url: `${process.env.FRONTEND_URL || 'https://www.chatterforms.com'}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL || 'https://www.chatterforms.com'}/pricing?canceled=true`,
       metadata: {
         userId: userId,
         planId: planId,
@@ -317,7 +317,7 @@ router.post('/create-portal-session', authenticateToken, async (req, res) => {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${process.env.FRONTEND_URL}/billing`,
+      return_url: `${process.env.FRONTEND_URL || 'https://www.chatterforms.com'}/billing`,
     });
 
     res.json({ url: session.url });

@@ -22,7 +22,7 @@ class EmailService {
 
       console.log(`📧 Sending form published email to: ${userEmail}`);
       
-      const dashboardUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+      const dashboardUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com';
       
       const data = await this.mg.messages.create(this.domain, {
         from: this.fromEmail,
@@ -73,7 +73,7 @@ class EmailService {
         ? `🔒 New HIPAA submission for "${formTitle}"`
         : `📝 New submission for "${formTitle}"`;
       
-      const dashboardUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+      const dashboardUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com';
       const submissionsUrl = formId ? `${dashboardUrl}/dashboard?formId=${formId}&tab=submissions` : `${dashboardUrl}/dashboard`;
       
       const content = isHipaa
@@ -128,7 +128,7 @@ class EmailService {
 
       console.log(`📧 Sending form deleted email to: ${userEmail}`);
       
-      const dashboardUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+      const dashboardUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com';
       
       const data = await this.mg.messages.create(this.domain, {
         from: this.fromEmail,
@@ -176,7 +176,7 @@ class EmailService {
 
       console.log(`📧 Sending password reset email to: ${userEmail}`);
       
-      const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+      const frontendUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com';
       const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
       
       const data = await this.mg.messages.create(this.domain, {
@@ -234,7 +234,7 @@ class EmailService {
 
       console.log(`📧 Sending verification email to: ${userEmail}`);
       
-      const frontendUrl = process.env.FRONTEND_URL || 'https://chatterforms.com';
+      const frontendUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com';
       const verifyUrl = `${frontendUrl}/verify-email?token=${verificationToken}`;
       
       const data = await this.mg.messages.create(this.domain, {
@@ -321,7 +321,7 @@ class EmailService {
                 Download Signed BAA
               </a>
             </p>
-            <p>You can also access your BAA anytime from your <a href="${process.env.FRONTEND_URL || 'https://chatterforms.com'}/billing" style="color: #6366f1; text-decoration: underline;">billing portal</a>.</p>
+            <p>You can also access your BAA anytime from your <a href="${process.env.FRONTEND_URL || 'https://www.chatterforms.com'}/billing" style="color: #6366f1; text-decoration: underline;">billing portal</a>.</p>
             <p style="color: #999; font-size: 12px; margin-top: 30px;">
               This agreement is required for HIPAA compliance and outlines how ChatterForms handles Protected Health Information (PHI) on your behalf.
             </p>
@@ -341,7 +341,7 @@ class EmailService {
         
           Download your signed BAA: ${signedUrl}
         
-          You can also access your BAA anytime from your billing portal: ${process.env.FRONTEND_URL || 'https://chatterforms.com'}/billing
+          You can also access your BAA anytime from your billing portal: ${process.env.FRONTEND_URL || 'https://www.chatterforms.com'}/billing
         
           This agreement is required for HIPAA compliance and outlines how ChatterForms handles Protected Health Information (PHI) on your behalf.
         
