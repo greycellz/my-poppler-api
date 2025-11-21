@@ -6,19 +6,20 @@ const { authenticateToken } = require('../auth/middleware');
 // Initialize Stripe with secret key
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-// Price ID mapping from your Stripe export
+// Price IDs from environment variables (allows switching test/live without code changes)
+// Falls back to test mode price IDs if environment variables are not set
 const PRICE_IDS = {
   basic: {
-    monthly: 'price_1S8PK8RsohPcZDimxfsFUWrB',
-    annual: 'price_1S8PO5RsohPcZDimYKy7PLNT'
+    monthly: process.env.STRIPE_PRICE_BASIC_MONTHLY || 'price_1S8PK8RsohPcZDimxfsFUWrB',
+    annual: process.env.STRIPE_PRICE_BASIC_ANNUAL || 'price_1S8PO5RsohPcZDimYKy7PLNT'
   },
   pro: {
-    monthly: 'price_1S8PQaRsohPcZDim8f6xylsh',
-    annual: 'price_1S8PVYRsohPcZDimF5L5l38A'
+    monthly: process.env.STRIPE_PRICE_PRO_MONTHLY || 'price_1S8PQaRsohPcZDim8f6xylsh',
+    annual: process.env.STRIPE_PRICE_PRO_ANNUAL || 'price_1S8PVYRsohPcZDimF5L5l38A'
   },
   enterprise: {
-    monthly: 'price_1S8PbBRsohPcZDim3rN4pRNX',
-    annual: 'price_1S8PbBRsohPcZDimuZvJDXY0'
+    monthly: process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY || 'price_1S8PbBRsohPcZDim3rN4pRNX',
+    annual: process.env.STRIPE_PRICE_ENTERPRISE_ANNUAL || 'price_1S8PbBRsohPcZDimuZvJDXY0'
   }
 };
 
@@ -1791,4 +1792,6 @@ router.post('/change-interval', authenticateToken, async (req, res) => {
   }
 });
 
+// Export PRICE_IDS for use in server.js webhook handlers
 module.exports = router;
+module.exports.PRICE_IDS = PRICE_IDS;

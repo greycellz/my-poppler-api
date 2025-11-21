@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 
 /**
- * Script to delete a user from Firestore for testing purposes
+ * Script to delete a user from Firestore
  * Handles both exact and normalized email lookups
+ * Supports environment-specific collections via --env flag
  * 
  * Usage:
- *   node scripts/delete-user.js <email>
- *   node scripts/delete-user.js jha.abhishek@gmail.com
- *   node scripts/delete-user.js jhaabhishek@gmail.com
+ *   node scripts/delete-user.js <email> [--env=dev|staging|production]
+ * 
+ * Examples:
+ *   node scripts/delete-user.js user@example.com                    # Defaults to dev
+ *   node scripts/delete-user.js user@example.com --env=dev         # Dev environment (dev_users)
+ *   node scripts/delete-user.js user@example.com --env=staging      # Staging environment (staging_users)
+ *   node scripts/delete-user.js user@example.com --env=production  # Production environment (users, no prefix)
  */
 
 const path = require('path');
@@ -29,7 +34,19 @@ const validator = require('validator');
 async function deleteUser(email) {
   const gcpClient = new GCPClient();
   
-  console.log(`🔍 Searching for user with email: ${email}`);
+  // Show which environment/collection we're targeting
+  const env = process.env.RAILWAY_ENVIRONMENT_NAME || 'dev';
+  const usersCollection = gcpClient.getCollectionName('users');
+  const tokensCollection = gcpClient.getCollectionName('emailVerificationTokens');
+  const resetTokensCollection = gcpClient.getCollectionName('passwordResetTokens');
+  
+  console.log(`\n⚠️  ENVIRONMENT CHECK:`);
+  console.log(`   Environment: ${env}`);
+  console.log(`   Target Collections:`);
+  console.log(`   - Users: ${usersCollection}`);
+  console.log(`   - Email Verification Tokens: ${tokensCollection}`);
+  console.log(`   - Password Reset Tokens: ${resetTokensCollection}`);
+  console.log(`\n🔍 Searching for user with email: ${email}`);
   
   // Try to find user by exact email first
   let user = await gcpClient.getUserByEmail(email, false);
@@ -64,8 +81,15 @@ async function deleteUser(email) {
   
   const userId = user.id;
   
+  // Safety check for production
+  if (env === 'production') {
+    console.log(`\n🚨 WARNING: You are about to delete from PRODUCTION collections!`);
+    console.log(`   This will permanently delete the user and cannot be undone.`);
+    console.log(`   Collections: ${usersCollection}, ${tokensCollection}, ${resetTokensCollection}`);
+  }
+  
   // Delete related data
-  console.log(`\n🗑️  Deleting related data...`);
+  console.log(`\n🗑️  Deleting related data from collection: ${usersCollection}...`);
   
   try {
     // 1. Delete email verification tokens
@@ -111,16 +135,30 @@ async function deleteUser(email) {
   }
 }
 
-// Main execution
-const email = process.argv[2];
+// Parse command line arguments
+const args = process.argv.slice(2);
+let email = null;
+let envFlag = null;
 
+// Parse arguments
+for (let i = 0; i < args.length; i++) {
+  if (args[i].startsWith('--env=')) {
+    envFlag = args[i].split('=')[1];
+  } else if (!email && !args[i].startsWith('--')) {
+    email = args[i];
+  }
+}
+
+// Validate email
 if (!email) {
   console.error('❌ Error: Email address is required');
   console.log('\nUsage:');
-  console.log('  node scripts/delete-user.js <email>');
+  console.log('  node scripts/delete-user.js <email> [--env=dev|staging|production]');
   console.log('\nExamples:');
-  console.log('  node scripts/delete-user.js jha.abhishek@gmail.com');
-  console.log('  node scripts/delete-user.js jhaabhishek@gmail.com');
+  console.log('  node scripts/delete-user.js user@example.com                    # Defaults to dev');
+  console.log('  node scripts/delete-user.js user@example.com --env=dev         # Dev environment');
+  console.log('  node scripts/delete-user.js user@example.com --env=staging      # Staging environment');
+  console.log('  node scripts/delete-user.js user@example.com --env=production  # Production environment');
   process.exit(1);
 }
 
@@ -129,6 +167,17 @@ if (!validator.isEmail(email)) {
   console.error(`❌ Error: Invalid email format: ${email}`);
   process.exit(1);
 }
+
+// Validate and set environment
+if (envFlag && !['dev', 'staging', 'production'].includes(envFlag)) {
+  console.error(`❌ Error: Invalid environment flag: ${envFlag}`);
+  console.log('   Valid values: dev, staging, production');
+  process.exit(1);
+}
+
+// Set environment (default to dev if not specified)
+const targetEnv = envFlag || 'dev';
+process.env.RAILWAY_ENVIRONMENT_NAME = targetEnv;
 
 deleteUser(email)
   .then(() => {
