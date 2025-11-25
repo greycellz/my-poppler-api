@@ -4112,13 +4112,35 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
 
     // Create payment intent
     console.log('🔍 PAYMENT DEBUG - Creating payment intent with account:', paymentField.stripe_account_id);
+    
+    // Verify connected account is ready for payments
+    try {
+      const connectedAccount = await stripe.accounts.retrieve(
+        paymentField.stripe_account_id
+      );
+
+      if (!connectedAccount.charges_enabled || !connectedAccount.payouts_enabled) {
+        console.error(`❌ Connected account ${paymentField.stripe_account_id} is not ready: charges=${connectedAccount.charges_enabled}, payouts=${connectedAccount.payouts_enabled}`);
+        return res.status(400).json({
+          success: false,
+          error: 'The merchant account is not fully set up to accept payments. Please contact the form owner.',
+          code: 'ACCOUNT_NOT_READY'
+        });
+      }
+    } catch (accError) {
+      console.error('❌ Error validating connected account:', accError);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid merchant account configuration',
+        code: 'INVALID_ACCOUNT'
+      });
+    }
+
+    // Create direct charge on connected account
     const paymentIntent = await stripe.paymentIntents.create({
       amount: paymentField.amount,
       currency: paymentField.currency,
-      application_fee_amount: 0, // No application fee for now
-      transfer_data: {
-        destination: paymentField.stripe_account_id
-      },
+      // application_fee_amount is removed for direct pass-through
       metadata: {
         form_id: formId,
         field_id: fieldId,
@@ -4126,6 +4148,8 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
         customer_name: customerName || ''
       },
       ...(customerEmail && { receipt_email: customerEmail }) // Only include if provided
+    }, {
+      stripeAccount: paymentField.stripe_account_id // Direct charge
     });
 
     console.log(`✅ Payment intent created: ${paymentIntent.id}`);
@@ -4187,7 +4211,13 @@ app.post('/api/stripe/payment-success', async (req, res) => {
     }
 
     // Get payment intent details from Stripe
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    // Must retrieve from the connected account that processed the charge
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      paymentIntentId,
+      {
+        stripeAccount: paymentField.stripe_account_id
+      }
+    );
     
     // Get payment field to get Stripe account ID
     const paymentFields = await gcpClient.getPaymentFields(formId);
