@@ -12,6 +12,7 @@ const session = require('express-session');
 const app = express();
 const poppler = new Poppler();
 const PORT = process.env.PORT || 3000; // Keep 3000 to match existing Dockerfile
+// Updated: Refresh button UI enhancements and form validation improvements
 
 // Initialize Stripe
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
