@@ -216,7 +216,8 @@ class GCPClient {
                     currency: field.currency || 'usd',
                     description: field.description || '',
                     product_name: field.productName || '',
-                    stripe_account_id: stripeAccountId
+                    stripe_account_id: stripeAccountId,
+                    publishable_key: stripeAccount.publishable_key || null
                   });
                 } else {
                   // Create new payment field
@@ -228,6 +229,7 @@ class GCPClient {
                     description: field.description || '',
                     product_name: field.productName || '',
                     stripe_account_id: stripeAccountId,
+                    publishable_key: stripeAccount.publishable_key || null,
                     isRequired: field.required || false
                   });
                 }
@@ -2791,7 +2793,21 @@ class GCPClient {
   async storeStripeAccount(userId, stripeAccountId, accountType, accountData, nickname = null) {
     try {
       console.log(`💳 Storing Stripe account for user: ${userId}`);
-      
+
+      let encryptedTokenBundle = null;
+      if (accountData.access_token || accountData.refresh_token) {
+        try {
+          const encrypted = await this.encryptData({
+            access_token: accountData.access_token || null,
+            refresh_token: accountData.refresh_token || null
+          }, 'stripe-token-key');
+          encryptedTokenBundle = encrypted.encryptedData;
+        } catch (tokenError) {
+          console.error('❌ Error encrypting Stripe tokens:', tokenError);
+          throw tokenError;
+        }
+      }
+
       const accountRef = this.collection('user_stripe_accounts').doc();
       
       const accountDoc = {
@@ -2807,6 +2823,8 @@ class GCPClient {
         country: accountData.country || 'US',
         default_currency: accountData.default_currency || 'usd',
         email: accountData.email || '',
+        publishable_key: accountData.publishable_key || null,
+        encrypted_token_bundle: encryptedTokenBundle,
         created_at: new Date(),
         updated_at: new Date(),
         last_sync_at: new Date()
@@ -2859,6 +2877,37 @@ class GCPClient {
   }
 
   /**
+   * Get Stripe account data by Stripe account ID
+   */
+  async getStripeAccountByStripeId(stripeAccountId) {
+    try {
+      console.log(`💳 Looking up Stripe account by Stripe ID: ${stripeAccountId}`);
+      
+      const accountQuery = await this
+        .collection('user_stripe_accounts')
+        .where('stripe_account_id', '==', stripeAccountId)
+        .limit(1)
+        .get();
+
+      if (accountQuery.empty) {
+        console.log(`❌ No Stripe account found for ID: ${stripeAccountId}`);
+        return null;
+      }
+
+      const accountData = {
+        id: accountQuery.docs[0].id,
+        ...accountQuery.docs[0].data()
+      };
+
+      console.log(`✅ Stripe account found for ID: ${stripeAccountId}`);
+      return accountData;
+    } catch (error) {
+      console.error('❌ Error getting Stripe account by Stripe ID:', error);
+      return null;
+    }
+  }
+
+  /**
    * Store payment field configuration for a form
    */
   async storePaymentField(formId, fieldId, paymentConfig) {
@@ -2875,6 +2924,7 @@ class GCPClient {
         description: paymentConfig.description || '',
         product_name: paymentConfig.product_name || '',
         stripe_account_id: paymentConfig.stripe_account_id,
+        publishable_key: paymentConfig.publishable_key || null,
         is_required: paymentConfig.isRequired !== false,
         metadata: paymentConfig.metadata || {},
         created_at: new Date(),
@@ -3084,6 +3134,7 @@ class GCPClient {
         country: doc.data().country,
         default_currency: doc.data().default_currency,
         email: doc.data().email,
+        publishable_key: doc.data().publishable_key || null,
         created_at: doc.data().created_at,
         last_sync_at: doc.data().last_sync_at
       }));

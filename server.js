@@ -15,7 +15,13 @@ const PORT = process.env.PORT || 3000; // Keep 3000 to match existing Dockerfile
 // Updated: Refresh button UI enhancements and form validation improvements
 
 // Initialize Stripe
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+if (!process.env.STRIPE_SECRET_KEY) {
+  throw new Error('Missing STRIPE_SECRET_KEY. Please set it in Railway/Vercel environment variables.');
+}
+
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2025-11-17.clover'
+});
 
 // Trust proxy for Railway deployment (fixes rate limiter warnings)
 app.set('trust proxy', 1);
@@ -1587,6 +1593,41 @@ app.get('/form/:formId', async (req, res) => {
         error: 'Form not found',
         timestamp: new Date().toISOString()
       });
+    }
+
+    // Enrich payment fields with stored configuration (amount, currency, publishable key)
+    if (formData?.structure?.fields && Array.isArray(formData.structure.fields)) {
+      const paymentFields = await gcpClient.getPaymentFields(formId);
+      if (paymentFields.length > 0) {
+        const paymentFieldMap = paymentFields.reduce((acc, field) => {
+          acc[field.field_id] = field;
+          return acc;
+        }, {});
+
+        formData.structure.fields = formData.structure.fields.map((field) => {
+          if (field.type !== 'payment') {
+            return field;
+          }
+
+          const storedConfig = paymentFieldMap[field.id];
+          if (!storedConfig) {
+            return {
+              ...field,
+              publishableKey: null
+            };
+          }
+
+          return {
+            ...field,
+            amount: typeof field.amount === 'number' ? field.amount : (storedConfig.amount || 0) / 100,
+            currency: field.currency || storedConfig.currency || 'usd',
+            description: field.description ?? storedConfig.description ?? '',
+            productName: field.productName ?? storedConfig.product_name ?? '',
+            stripeAccountId: storedConfig.stripe_account_id,
+            publishableKey: storedConfig.publishable_key || null
+          };
+        });
+      }
     }
 
     // Prevent any intermediary/proxy/browser caching
@@ -3535,11 +3576,21 @@ app.post('/api/stripe/connect', async (req, res) => {
       });
     }
 
-    // Create Express account
+    // Create connected account with controller configuration (no legacy `type`)
     const account = await stripe.accounts.create({
-      type: 'express',
-      country: country,
-      email: email,
+      country,
+      email,
+      controller: {
+        fees: {
+          payer: 'account'
+        },
+        losses: {
+          payments: 'stripe'
+        },
+        stripe_dashboard: {
+          type: 'full'
+        }
+      },
       capabilities: {
         card_payments: { requested: true },
         transfers: { requested: true }
@@ -3557,7 +3608,10 @@ app.post('/api/stripe/connect', async (req, res) => {
         capabilities: account.capabilities,
         country: account.country,
         default_currency: account.default_currency,
-        email: account.email
+        email: account.email,
+        publishable_key: null,
+        access_token: null,
+        refresh_token: null
       },
       nickname
     );
@@ -3700,7 +3754,10 @@ app.get('/api/stripe/connect-callback', async (req, res) => {
         capabilities: tokenData.stripe_publishable_key ? {} : {},
         country: tokenData.country || 'US',
         default_currency: tokenData.default_currency || 'usd',
-        email: tokenData.email || ''
+        email: tokenData.email || '',
+        publishable_key: tokenData.stripe_publishable_key || null,
+        access_token: tokenData.access_token || null,
+        refresh_token: tokenData.refresh_token || null
       },
       'Connected via OAuth'
     );
