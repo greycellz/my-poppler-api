@@ -1218,6 +1218,15 @@ class GCPClient {
   }
 
   /**
+   * Convenience helper specifically for Stripe token bundles
+   */
+  async decryptStripeTokenBundle(encryptedBundle) {
+    if (!encryptedBundle) return null;
+    const result = await this.decryptData(encryptedBundle, 'hipaa-data-key');
+    return result.decryptedData;
+  }
+
+  /**
    * Get signed URLs for all signature images for a submission
    */
   async getSignatureSignedUrls(submissionId) {
@@ -2800,7 +2809,7 @@ class GCPClient {
           const encrypted = await this.encryptData({
             access_token: accountData.access_token || null,
             refresh_token: accountData.refresh_token || null
-          }, 'stripe-token-key');
+          }, 'hipaa-data-key');
           encryptedTokenBundle = encrypted.encryptedData;
         } catch (tokenError) {
           console.error('❌ Error encrypting Stripe tokens:', tokenError);
