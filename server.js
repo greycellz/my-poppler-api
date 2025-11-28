@@ -12,9 +12,16 @@ const session = require('express-session');
 const app = express();
 const poppler = new Poppler();
 const PORT = process.env.PORT || 3000; // Keep 3000 to match existing Dockerfile
+// Updated: Refresh button UI enhancements and form validation improvements
 
 // Initialize Stripe
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+if (!process.env.STRIPE_SECRET_KEY) {
+  throw new Error('Missing STRIPE_SECRET_KEY. Please set it in Railway/Vercel environment variables.');
+}
+
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2025-11-17.clover'
+});
 
 // Trust proxy for Railway deployment (fixes rate limiter warnings)
 app.set('trust proxy', 1);
@@ -1588,6 +1595,54 @@ app.get('/form/:formId', async (req, res) => {
       });
     }
 
+    // Enrich payment fields with stored configuration (amount, currency, publishable key)
+    const paymentWarnings = [];
+    if (formData?.structure?.fields && Array.isArray(formData.structure.fields)) {
+      const paymentFields = await gcpClient.getPaymentFields(formId);
+      if (paymentFields.length > 0) {
+        const paymentFieldMap = paymentFields.reduce((acc, field) => {
+          acc[field.field_id] = field;
+          return acc;
+        }, {});
+
+        formData.structure.fields = formData.structure.fields.map((field) => {
+          if (field.type !== 'payment') {
+            return field;
+          }
+
+          const storedConfig = paymentFieldMap[field.id];
+          let paymentError;
+          if (!storedConfig) {
+            paymentError = 'Payment configuration missing. Please reconnect this Stripe account.';
+          } else if (!storedConfig.publishable_key) {
+            paymentError = 'Stripe account must be reconnected to refresh publishable keys.';
+          }
+
+          if (paymentError) {
+            const warning = {
+              fieldId: field.id,
+              reason: !storedConfig ? 'missing_payment_configuration' : 'missing_publishable_key'
+            };
+            paymentWarnings.push(warning);
+            console.warn(`⚠️ Payment field warning for form ${formId}:`, warning);
+          }
+
+          return {
+            ...field,
+            amount: storedConfig && typeof storedConfig.amount === 'number'
+              ? storedConfig.amount / 100
+              : field.amount,
+            currency: field.currency || storedConfig?.currency || 'usd',
+            description: field.description ?? storedConfig?.description ?? '',
+            productName: field.productName ?? storedConfig?.product_name ?? '',
+            stripeAccountId: storedConfig?.stripe_account_id,
+            publishableKey: storedConfig?.publishable_key || null,
+            paymentError
+          };
+        });
+      }
+    }
+
     // Prevent any intermediary/proxy/browser caching
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
     res.set('Pragma', 'no-cache');
@@ -1597,6 +1652,7 @@ app.get('/form/:formId', async (req, res) => {
     res.json({
       success: true,
       form: formData,
+      paymentWarnings,
       timestamp: new Date().toISOString()
     });
 
@@ -3520,73 +3576,54 @@ app.post('/api/emails/send-form-deleted', async (req, res) => {
 
 // ============== PAYMENT INTEGRATION ENDPOINTS ==============
 
-// Connect Stripe account (Express account creation)
+const buildStripeOAuthUrl = (userId) => {
+  const clientId = process.env.STRIPE_CONNECT_CLIENT_ID;
+  const redirectUri = process.env.STRIPE_CONNECT_REDIRECT_URI;
+
+  if (!clientId || !redirectUri) {
+    throw new Error('OAuth configuration missing (STRIPE_CONNECT_CLIENT_ID / STRIPE_CONNECT_REDIRECT_URI)');
+  }
+
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: clientId,
+    scope: 'read_write',
+    redirect_uri: redirectUri,
+    state: userId
+  });
+
+  return `https://connect.stripe.com/oauth/authorize?${params.toString()}`;
+};
+
+// Connect Stripe account (OAuth-only helper that returns URL)
 app.post('/api/stripe/connect', async (req, res) => {
   try {
-    console.log('💳 Stripe Connect request received');
+    console.log('💳 Stripe Connect (OAuth) request received');
     
-    const { userId, email, country = 'US', nickname } = req.body;
+    const { userId, nickname } = req.body;
     
-    if (!userId || !email) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        error: 'User ID and email are required'
+        error: 'User ID is required'
       });
     }
 
-    // Create Express account
-    const account = await stripe.accounts.create({
-      type: 'express',
-      country: country,
-      email: email,
-      capabilities: {
-        card_payments: { requested: true },
-        transfers: { requested: true }
-      }
-    });
+    if (req.session) {
+      req.session.oauthUserId = userId;
+      req.session.pendingStripeNickname = nickname?.trim() || null;
+    }
 
-    // Store account information
-    const accountId = await gcpClient.storeStripeAccount(
-      userId, 
-      account.id, 
-      'express', 
-      {
-        charges_enabled: false,
-        details_submitted: false,
-        capabilities: account.capabilities,
-        country: account.country,
-        default_currency: account.default_currency,
-        email: account.email
-      },
-      nickname
-    );
-
-    console.log(`✅ Stripe Express account created: ${account.id}`);
-
-    // Create account link for onboarding
-    const frontendUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com'
-    console.log(`🔗 Using frontend URL for redirects: ${frontendUrl}`);
-    const accountLink = await stripe.accountLinks.create({
-      account: account.id,
-      refresh_url: `${frontendUrl}/settings?stripe_refresh=true`,
-      return_url: `${frontendUrl}/settings?stripe_success=true`,
-      type: 'account_onboarding'
-    });
-
-    console.log(`🔗 Account link created: ${accountLink.url}`);
-
+    const authUrl = buildStripeOAuthUrl(userId);
     res.json({
       success: true,
-      accountId: account.id,
-      accountType: 'express',
-      onboardingUrl: accountLink.url
+      oauthUrl: authUrl
     });
-
   } catch (error) {
-    console.error('❌ Error creating Stripe account:', error);
+    console.error('❌ Error generating OAuth URL:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create Stripe account'
+      error: 'Failed to generate Stripe OAuth link'
     });
   }
 });
@@ -3605,26 +3642,11 @@ app.get('/api/stripe/connect-oauth', async (req, res) => {
       });
     }
 
-    const clientId = process.env.STRIPE_CONNECT_CLIENT_ID;
-    const redirectUri = process.env.STRIPE_CONNECT_REDIRECT_URI;
-    
-    if (!clientId || !redirectUri) {
-      return res.status(500).json({
-        success: false,
-        error: 'OAuth configuration missing'
-      });
+    if (req.session) {
+      req.session.oauthUserId = userId;
     }
 
-    // Store userId in session for callback
-    req.session.oauthUserId = userId;
-
-    const authUrl = `https://connect.stripe.com/oauth/authorize?` +
-      `response_type=code&` +
-      `client_id=${clientId}&` +
-      `scope=read_write&` +
-      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-      `state=${userId}`;
-
+    const authUrl = buildStripeOAuthUrl(userId);
     console.log(`🔗 Redirecting to OAuth: ${authUrl}`);
     res.redirect(authUrl);
 
@@ -3688,7 +3710,18 @@ app.get('/api/stripe/connect-callback', async (req, res) => {
 
     console.log(`✅ OAuth token exchange successful for user: ${userId}`);
 
+    if (!tokenData.stripe_publishable_key) {
+      console.error('❌ OAuth response missing publishable key. Cannot connect account.');
+      const frontendUrl = process.env.FRONTEND_URL || 'https://www.chatterforms.com';
+      return res.redirect(`${frontendUrl}/settings?stripe_oauth_error=missing_publishable_key`);
+    }
+
     // Store the connected account
+    const pendingNickname = req.session?.pendingStripeNickname || null;
+    if (req.session && req.session.pendingStripeNickname) {
+      delete req.session.pendingStripeNickname;
+    }
+
     const accountId = await gcpClient.storeStripeAccount(
       userId,
       tokenData.stripe_user_id,
@@ -3699,9 +3732,12 @@ app.get('/api/stripe/connect-callback', async (req, res) => {
         capabilities: tokenData.stripe_publishable_key ? {} : {},
         country: tokenData.country || 'US',
         default_currency: tokenData.default_currency || 'usd',
-        email: tokenData.email || ''
+        email: tokenData.email || '',
+        publishable_key: tokenData.stripe_publishable_key || null,
+        access_token: tokenData.access_token || null,
+        refresh_token: tokenData.refresh_token || null
       },
-      'Connected via OAuth'
+      pendingNickname || 'Connected via OAuth'
     );
 
     console.log(`✅ Connected account stored: ${accountId}`);
@@ -3838,7 +3874,10 @@ app.get('/api/stripe/accounts/:userId', async (req, res) => {
         const needsPayouts = stripeAccount.charges_enabled && !stripeAccount.payouts_enabled;
 
         return {
-          ...account,
+          id: account.id,
+          stripe_account_id: account.stripe_account_id,
+          account_type: account.account_type,
+          nickname: account.nickname,
           is_fully_setup: isFullySetup,
           charges_enabled: stripeAccount.charges_enabled,
           payouts_enabled: stripeAccount.payouts_enabled,
@@ -3849,11 +3888,26 @@ app.get('/api/stripe/accounts/:userId', async (req, res) => {
           needs_onboarding: needsOnboarding,
           needs_verification: needsVerification,
           needs_payouts: needsPayouts,
-          can_receive_payments: stripeAccount.charges_enabled && stripeAccount.payouts_enabled
+          can_receive_payments: stripeAccount.charges_enabled && stripeAccount.payouts_enabled,
+          has_publishable_key: Boolean(account.publishable_key),
+          needs_reconnect: !account.publishable_key
         };
       } catch (error) {
         console.error(`❌ Error syncing account ${account.stripe_account_id}:`, error);
-        return account; // Return original account if sync fails
+        return {
+          id: account.id,
+          stripe_account_id: account.stripe_account_id,
+          account_type: account.account_type,
+          nickname: account.nickname,
+          charges_enabled: account.charges_enabled,
+          payouts_enabled: account.payouts_enabled,
+          details_submitted: account.details_submitted,
+          country: account.country,
+          default_currency: account.default_currency,
+          email: account.email,
+          has_publishable_key: Boolean(account.publishable_key),
+          needs_reconnect: !account.publishable_key
+        };
       }
     }));
 
@@ -4112,13 +4166,35 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
 
     // Create payment intent
     console.log('🔍 PAYMENT DEBUG - Creating payment intent with account:', paymentField.stripe_account_id);
+    
+    // Verify connected account is ready for payments
+    try {
+      const connectedAccount = await stripe.accounts.retrieve(
+        paymentField.stripe_account_id
+      );
+
+      if (!connectedAccount.charges_enabled || !connectedAccount.payouts_enabled) {
+        console.error(`❌ Connected account ${paymentField.stripe_account_id} is not ready: charges=${connectedAccount.charges_enabled}, payouts=${connectedAccount.payouts_enabled}`);
+        return res.status(400).json({
+          success: false,
+          error: 'The merchant account is not fully set up to accept payments. Please contact the form owner.',
+          code: 'ACCOUNT_NOT_READY'
+        });
+      }
+    } catch (accError) {
+      console.error('❌ Error validating connected account:', accError);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid merchant account configuration',
+        code: 'INVALID_ACCOUNT'
+      });
+    }
+
+    // Create direct charge on connected account
     const paymentIntent = await stripe.paymentIntents.create({
       amount: paymentField.amount,
       currency: paymentField.currency,
-      application_fee_amount: 0, // No application fee for now
-      transfer_data: {
-        destination: paymentField.stripe_account_id
-      },
+      // application_fee_amount is removed for direct pass-through
       metadata: {
         form_id: formId,
         field_id: fieldId,
@@ -4126,6 +4202,8 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
         customer_name: customerName || ''
       },
       ...(customerEmail && { receipt_email: customerEmail }) // Only include if provided
+    }, {
+      stripeAccount: paymentField.stripe_account_id // Direct charge
     });
 
     console.log(`✅ Payment intent created: ${paymentIntent.id}`);
@@ -4187,7 +4265,13 @@ app.post('/api/stripe/payment-success', async (req, res) => {
     }
 
     // Get payment intent details from Stripe
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    // Must retrieve from the connected account that processed the charge
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      paymentIntentId,
+      {
+        stripeAccount: paymentField.stripe_account_id
+      }
+    );
     
     // Get payment field to get Stripe account ID
     const paymentFields = await gcpClient.getPaymentFields(formId);
