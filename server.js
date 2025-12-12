@@ -1004,21 +1004,26 @@ async function captureFormScreenshot(url, urlHash, options = {}) {
       'Accept-Language': 'en-US,en;q=0.9'
     });
 
-    console.log(`📄 Navigating to URL: ${url}`);
+    console.log(`📄 [DEBUG] Navigating to URL: ${url}`);
+    const navigationStartTime = Date.now();
     
     // Navigate with timeout
     await page.goto(url, { 
       waitUntil: 'networkidle0',
       timeout: 45000
     });
+    const navigationTime = Date.now() - navigationStartTime;
+    console.log(`⏱️ [DEBUG] Navigation completed in ${navigationTime}ms`);
 
     // Wait for dynamic content
     const waitTime = options.waitTime || 4000;
-    console.log(`⏳ Waiting ${waitTime}ms for dynamic content...`);
+    console.log(`⏳ [DEBUG] Waiting ${waitTime}ms for dynamic content...`);
     await new Promise(resolve => setTimeout(resolve, waitTime));
 
     // Scroll to load content and find forms
-    await page.evaluate(() => {
+    console.log('📜 [DEBUG] Scrolling page to load lazy content...');
+    const scrollStartTime = Date.now();
+    const scrollResult = await page.evaluate(() => {
       return new Promise((resolve) => {
         let totalHeight = 0;
         const distance = 100;
@@ -1031,17 +1036,38 @@ async function captureFormScreenshot(url, urlHash, options = {}) {
             clearInterval(timer);
             // Scroll back to top
             window.scrollTo(0, 0);
-            setTimeout(resolve, 1000);
+            setTimeout(() => {
+              resolve({
+                totalScrollHeight: scrollHeight,
+                scrollDistance: totalHeight
+              });
+            }, 1000);
           }
         }, 100);
       });
     });
+    const scrollTime = Date.now() - scrollStartTime;
+    console.log(`⏱️ [DEBUG] Scrolling completed in ${scrollTime}ms`);
+    console.log(`📊 [DEBUG] Scroll result:`, JSON.stringify(scrollResult, null, 2));
 
     // Get page metadata
     const pageTitle = await page.title();
     const finalUrl = page.url();
+    
+    // Get actual page dimensions
+    const pageDimensions = await page.evaluate(() => {
+      return {
+        width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, window.innerWidth),
+        height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, window.innerHeight),
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight
+      };
+    });
 
-    console.log('📸 Taking screenshot...');
+    console.log('📸 [DEBUG] Taking screenshot...');
+    console.log('📐 [DEBUG] Page dimensions:', JSON.stringify(pageDimensions, null, 2));
+    console.log('📐 [DEBUG] Viewport size:', options.viewport?.width || 1280, 'x', options.viewport?.height || 800);
+    console.log('📐 [DEBUG] Full page screenshot:', options.fullPage !== false);
     
     // Take screenshot
     await page.screenshot({ 
@@ -1052,12 +1078,27 @@ async function captureFormScreenshot(url, urlHash, options = {}) {
 
     const loadTime = Date.now() - startTime;
     const stats = fs.statSync(screenshotPath);
+    const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+    const fileSizeKB = (stats.size / 1024).toFixed(2);
 
-    console.log(`✅ Screenshot captured: ${urlHash} (${loadTime}ms)`);
+    console.log(`✅ [DEBUG] Screenshot captured: ${urlHash} (${loadTime}ms)`);
+    console.log(`📊 [DEBUG] Screenshot file size: ${fileSizeMB} MB (${fileSizeKB} KB)`);
+    console.log(`📊 [DEBUG] Screenshot dimensions: ${pageDimensions.width} x ${pageDimensions.height} pixels`);
+    
+    // Warn if screenshot is very large
+    if (stats.size > 20 * 1024 * 1024) { // 20 MB
+      console.warn(`⚠️ [DEBUG] WARNING: Screenshot exceeds 20 MB (${fileSizeMB} MB) - may cause issues with Vision API`);
+    } else if (stats.size > 10 * 1024 * 1024) { // 10 MB
+      console.warn(`⚠️ [DEBUG] WARNING: Screenshot is large (${fileSizeMB} MB) - consider optimization`);
+    }
 
     return {
       url: `${BASE_URL}/screenshots/${urlHash}/screenshot.png`,
       size: stats.size,
+      dimensions: {
+        width: pageDimensions.width,
+        height: pageDimensions.height
+      },
       pageTitle,
       finalUrl,
       loadTime,
@@ -1179,10 +1220,20 @@ app.post('/screenshot', async (req, res) => {
   const urlHash = generateUrlHash(normalizedUrl);
 
   try {
+    const endpointStartTime = Date.now();
+    console.log('📸 [DEBUG] ========== SCREENSHOT ENDPOINT START ==========');
+    console.log('📸 [DEBUG] Request URL:', normalizedUrl);
+    console.log('📸 [DEBUG] URL Hash:', urlHash);
+    console.log('📸 [DEBUG] Options:', JSON.stringify(options, null, 2));
+    
     // Check for cached screenshot
     const cached = getCachedScreenshot(urlHash);
     if (cached) {
-      console.log(`🎯 Cache hit for URL hash: ${urlHash}`);
+      const cacheTime = Date.now() - endpointStartTime;
+      const cachedSizeMB = (cached.size / (1024 * 1024)).toFixed(2);
+      console.log(`🎯 [DEBUG] Cache hit for URL hash: ${urlHash} (${cacheTime}ms)`);
+      console.log(`📊 [DEBUG] Cached screenshot size: ${cachedSizeMB} MB`);
+      console.log('📸 [DEBUG] ========== SCREENSHOT ENDPOINT END (CACHE) ==========');
       return res.json({
         success: true,
         urlHash: urlHash,
@@ -1196,10 +1247,14 @@ app.post('/screenshot', async (req, res) => {
       });
     }
 
-    console.log(`📸 Capturing new screenshot for: ${normalizedUrl}`);
+    console.log(`📸 [DEBUG] Capturing new screenshot for: ${normalizedUrl}`);
     
     // Capture new screenshot
     const screenshot = await captureFormScreenshot(normalizedUrl, urlHash, options);
+    const endpointTime = Date.now() - endpointStartTime;
+    
+    console.log(`⏱️ [DEBUG] Total endpoint processing time: ${endpointTime}ms`);
+    console.log('📸 [DEBUG] ========== SCREENSHOT ENDPOINT END ==========');
     
     res.json({
       success: true,
@@ -1213,7 +1268,8 @@ app.post('/screenshot', async (req, res) => {
         finalUrl: screenshot.finalUrl,
         pageTitle: screenshot.pageTitle,
         loadTime: screenshot.loadTime,
-        viewport: screenshot.viewport
+        viewport: screenshot.viewport,
+        dimensions: screenshot.dimensions
       },
       message: 'Screenshot captured successfully'
     });
