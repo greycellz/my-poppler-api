@@ -11,6 +11,7 @@
         "test:coverage": "jest --coverage",
         "test:gcp": "jest test/gcp-client.test.js",
         "test:integration": "jest test/gcp-integration.test.js",
+        "test:vision": "node test/test-vision-api.js",
         "postinstall": "echo 'Skipping Chromium download - using system Chrome'"
     },
     "dependencies": {
