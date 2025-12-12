@@ -3403,6 +3403,10 @@ const billingRoutes = require('./routes/billing');
 // Import BAA routes
 const baaRoutes = require('./routes/baa');
 
+// Import image analysis routes
+const imageAnalysisRoutes = require('./routes/image-analysis');
+const urlAnalysisRoutes = require('./routes/url-analysis');
+
 // Mount authentication routes
 app.use('/auth', authRoutes);
 
@@ -3411,6 +3415,10 @@ app.use('/api/billing', billingRoutes);
 
 // Mount BAA routes
 app.use('/api/baa', baaRoutes);
+
+// Mount image analysis routes
+app.use('/api', imageAnalysisRoutes);
+app.use('/api', urlAnalysisRoutes);
 
 // ============== AUTO-SAVE ENDPOINT ==============
 
