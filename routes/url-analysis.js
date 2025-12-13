@@ -133,17 +133,34 @@ router.post('/analyze-url', async (req, res) => {
             // Call GPT-4o Vision for this section
             const completionPromise = openai.chat.completions.create({
               model: 'gpt-4o',
+              response_format: { type: 'json_object' }, // Force JSON output
               messages: [
                 {
                   role: 'system',
-                  content: systemMessage || 'You are a form analysis expert. Extract all form fields from this section of a form.'
+                  content: systemMessage || `You are a form analysis expert. Extract all form fields from this section of a form. You MUST respond with ONLY valid JSON.`
                 },
                 {
                   role: 'user',
                   content: [
                     {
                       type: 'text',
-                      text: `Analyze this section (${sectionIndex + 1} of ${sections.length}) of the form and extract all visible form fields. This is part of a larger form that has been split into sections. Extract fields exactly as they appear.${additionalContext ? `\n\nAdditional context: ${additionalContext}` : ''}`
+                      text: `Analyze this section (${sectionIndex + 1} of ${sections.length}) of the form and extract all visible form fields. This is part of a larger form that has been split into sections.
+
+Return a JSON object with this exact structure:
+{
+  "fields": [
+    {
+      "label": "Field Name",
+      "type": "text",
+      "required": false,
+      "options": [],
+      "pageNumber": 1
+    }
+  ]
+}
+
+Field types: text, email, tel, textarea, select, date, radio-with-other, checkbox-with-other
+Extract fields exactly as they appear.${additionalContext ? `\n\nAdditional context: ${additionalContext}` : ''}`
                     },
                     {
                       type: 'image_url',
