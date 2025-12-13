@@ -402,14 +402,21 @@ async function extractFormFieldsFromDOM(page) {
       }
       
       // Detect rating fields - they have star buttons or emoji buttons
+      // Check before processing other elements to catch rating fields early
       const parentContainer = element.closest('div')
       if (parentContainer) {
-        // Check if this container has rating-like structure (star buttons, emoji buttons)
-        const hasStarButtons = parentContainer.querySelectorAll('button[aria-label*="star"], button[aria-label*="Star"]').length > 0
-        const hasEmojiButtons = parentContainer.textContent?.match(/[😞😕😐🙂😄]/) && 
-                                parentContainer.querySelectorAll('button').length >= 3
+        // Check if this container has rating-like structure
+        // Rating fields have multiple star buttons (★) or emoji buttons
+        const buttons = parentContainer.querySelectorAll('button')
+        const buttonText = Array.from(buttons).map(btn => btn.textContent || '').join('')
+        const hasStarSymbols = buttonText.includes('★') || buttonText.includes('☆')
+        const hasEmojiButtons = /[😞😕😐🙂😄]/.test(buttonText)
+        const hasStarAriaLabels = Array.from(buttons).some(btn => 
+          btn.getAttribute('aria-label')?.toLowerCase().includes('star')
+        )
         
-        if (hasStarButtons || hasEmojiButtons) {
+        // Rating fields typically have 3-10 buttons with stars/emojis
+        if ((hasStarSymbols || hasEmojiButtons || hasStarAriaLabels) && buttons.length >= 3 && buttons.length <= 10) {
           // Find the label for the rating field
           let ratingLabel = 'Rating'
           let isRequired = false
