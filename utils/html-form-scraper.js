@@ -263,6 +263,7 @@ async function extractFormFieldsFromDOM(page) {
         }
       })
       
+      // Only add one checkbox field per group (avoid duplicates)
       if (checkboxOptions.length > 0 || hasOther) {
         extractedFields.push({
           id: checkboxName,
@@ -307,11 +308,47 @@ async function extractFormFieldsFromDOM(page) {
       // Also skip buttons like "Preview"
       const elementText = element.value || element.textContent || ''
       const parentText = element.closest('div')?.textContent || ''
+      const placeholder = element.placeholder || ''
+      
+      // Skip buttons and preview elements
       if (elementText.toLowerCase().includes('preview') || 
           parentText.toLowerCase().includes('preview') ||
           element.closest('button') ||
           element.type === 'button') {
         return
+      }
+      
+      // Skip "Other" option text inputs (they're already part of radio/checkbox groups)
+      // These typically have placeholder "Please specify..." and are near radio/checkbox groups
+      if (element.type === 'text' && 
+          (placeholder.toLowerCase().includes('please specify') ||
+           placeholder.toLowerCase().includes('specify'))) {
+        // Check if this is near a radio/checkbox with "other" option
+        const parentDiv = element.closest('div')
+        if (parentDiv) {
+          const nearbyRadio = parentDiv.querySelector('input[type="radio"][value="other"]')
+          const nearbyCheckbox = parentDiv.querySelector('input[type="checkbox"][value="other"]')
+          if (nearbyRadio || nearbyCheckbox) {
+            // This is an "Other" option text input, skip it
+            return
+          }
+        }
+      }
+      
+      // Skip signature field placeholders
+      if (placeholder.toLowerCase().includes('enter your full name') ||
+          placeholder.toLowerCase().includes('sign here') ||
+          elementText.toLowerCase().includes('signature')) {
+        return
+      }
+      
+      // Skip date fields that are likely buttons (very short labels like "Date")
+      if (element.type === 'date') {
+        const labelText = element.previousElementSibling?.textContent?.trim() || ''
+        if (labelText.toLowerCase() === 'date' && labelText.length < 10) {
+          // Likely a button or signature date field, skip
+          return
+        }
       }
       
       // Find the associated label
