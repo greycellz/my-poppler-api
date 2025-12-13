@@ -53,18 +53,15 @@ async function testHtmlScraping() {
     }
 
     if (data.fields && data.fields.length > 0) {
-      console.log(`📋 Sample fields (first 10):`)
-      data.fields.slice(0, 10).forEach((field, i) => {
+      console.log(`📋 All extracted fields (${data.fields.length} total):\n`)
+      data.fields.forEach((field, i) => {
         const optionsStr = field.options && field.options.length > 0 
-          ? ` [${field.options.length} options]` 
+          ? ` [${field.options.length} options: ${field.options.slice(0, 3).join(', ')}${field.options.length > 3 ? '...' : ''}]` 
           : ''
         const requiredStr = field.required ? ' *' : ''
-        console.log(`  ${i + 1}. ${field.label}${requiredStr} (${field.type})${optionsStr}`)
+        const otherStr = field.allowOther ? ' [has Other option]' : ''
+        console.log(`  ${i + 1}. "${field.label}"${requiredStr} (${field.type})${optionsStr}${otherStr}`)
       })
-      
-      if (data.fields.length > 10) {
-        console.log(`  ... and ${data.fields.length - 10} more fields`)
-      }
       console.log('')
     } else {
       console.log('⚠️ No fields extracted')
