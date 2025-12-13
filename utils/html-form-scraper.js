@@ -19,18 +19,15 @@ async function extractFormFieldsFromDOM(page) {
     const processedRadioGroups = new Set()
     const processedCheckboxGroups = new Set()
     const processedInputIds = new Set()
+    const processedSignatureFields = new Set()
     
     // Helper function to find main question label for a field group
     const findMainQuestionLabel = (element) => {
-      // Look for a label element that's a parent or preceding sibling
-      // This should be the main question, not the option label
-      
       let current = element.parentElement
       let depth = 0
       const maxDepth = 5
       
       while (current && depth < maxDepth) {
-        // Check if current element has a label child that comes before the input
         const labels = current.querySelectorAll('label')
         for (const label of labels) {
           // Skip labels that contain radio/checkbox inputs (those are option labels)
@@ -45,7 +42,6 @@ async function extractFormFieldsFromDOM(page) {
           
           if (labelIndex >= 0 && (elementIndex < 0 || labelIndex < elementIndex)) {
             const labelClone = label.cloneNode(true)
-            // Remove any nested inputs/buttons from label
             labelClone.querySelectorAll('input, button, span[style*="color: #ef4444"]').forEach(el => el.remove())
             const text = labelClone.textContent?.trim() || ''
             if (text && text.length > 0) {
@@ -58,7 +54,6 @@ async function extractFormFieldsFromDOM(page) {
         let prevSibling = current.previousElementSibling
         while (prevSibling) {
           if (prevSibling.tagName === 'LABEL') {
-            // Skip if it contains radio/checkbox
             if (!prevSibling.querySelector('input[type="radio"], input[type="checkbox"]')) {
               const labelClone = prevSibling.cloneNode(true)
               labelClone.querySelectorAll('input, button, span[style*="color: #ef4444"]').forEach(el => el.remove())
@@ -94,202 +89,11 @@ async function extractFormFieldsFromDOM(page) {
       return { text, required: isFieldRequired }
     }
     
-    // First pass: Process radio and checkbox groups
-    const allRadios = document.querySelectorAll('input[type="radio"]')
-    const allCheckboxes = document.querySelectorAll('input[type="checkbox"]')
+    // Process ALL form elements in DOM order to preserve sequence
+    const allFormElements = document.querySelectorAll('input, textarea, select')
     
-    // Process radio groups
-    allRadios.forEach(radio => {
-      const radioName = radio.name
-      if (!radioName || processedRadioGroups.has(radioName)) return
-      
-      processedRadioGroups.add(radioName)
-      const allRadiosInGroup = document.querySelectorAll(`input[type="radio"][name="${radioName}"]`)
-      if (allRadiosInGroup.length === 0) return
-      
-      // Find main question label
-      let mainLabel = findMainQuestionLabel(radio)
-      if (!mainLabel) {
-        // Fallback: look for label with for attribute or parent label
-        const labelId = radio.id || radioName
-        const label = document.querySelector(`label[for="${labelId}"]`)
-        if (label && !label.querySelector('input[type="radio"]')) {
-          const extracted = extractLabelText(label)
-          if (extracted.text) {
-            mainLabel = extracted.text
-          }
-        }
-      }
-      
-      if (!mainLabel) {
-        // Last resort: use name or skip
-        return
-      }
-      
-      // Extract options
-      const radioOptions = []
-      let hasOther = false
-      let otherLabel = null
-      let otherPlaceholder = null
-      let isRequired = false
-      
-      allRadiosInGroup.forEach(radioInput => {
-        processedInputIds.add(radioInput.id || radioInput.name)
-        
-        const radioLabel = radioInput.closest('label')
-        let radioText = radioInput.value
-        
-        if (radioLabel) {
-          const labelClone = radioLabel.cloneNode(true)
-          const radioInClone = labelClone.querySelector('input[type="radio"]')
-          if (radioInClone) {
-            radioInClone.remove()
-          }
-          radioText = labelClone.textContent?.trim() || radioInput.value
-        }
-        
-        // Check required
-        if (radioInput.hasAttribute('required')) {
-          isRequired = true
-        }
-        
-        // Check if "other" option
-        const normalizedRadioText = radioText.toLowerCase().trim()
-        const isOtherOption = radioInput.value === 'other' || 
-          normalizedRadioText === 'other' ||
-          normalizedRadioText === 'other:' ||
-          (normalizedRadioText.startsWith('other') && normalizedRadioText.length < 20 && 
-           !normalizedRadioText.includes('mother') && !normalizedRadioText.includes('brother') &&
-           !normalizedRadioText.includes('father') && !normalizedRadioText.includes('another'))
-        
-        if (isOtherOption) {
-          hasOther = true
-          otherLabel = radioText
-          const otherInput = radioInput.closest('div')?.querySelector('input[type="text"]')
-          if (otherInput) {
-            otherPlaceholder = otherInput.placeholder || 'Please specify...'
-            processedInputIds.add(otherInput.id || otherInput.name)
-          }
-        } else {
-          radioOptions.push(radioText)
-        }
-      })
-      
-      if (radioOptions.length > 0 || hasOther) {
-        extractedFields.push({
-          id: radioName,
-          label: mainLabel,
-          type: hasOther ? 'radio-with-other' : 'radio',
-          required: isRequired,
-          placeholder: null,
-          options: radioOptions.length > 0 ? radioOptions : undefined,
-          allowOther: hasOther || undefined,
-          otherLabel: otherLabel || undefined,
-          otherPlaceholder: otherPlaceholder || undefined
-        })
-      }
-    })
-    
-    // Process checkbox groups
-    allCheckboxes.forEach(checkbox => {
-      const checkboxName = checkbox.name
-      if (!checkboxName || processedCheckboxGroups.has(checkboxName)) return
-      
-      processedCheckboxGroups.add(checkboxName)
-      const allCheckboxesInGroup = document.querySelectorAll(`input[type="checkbox"][name="${checkboxName}"]`)
-      if (allCheckboxesInGroup.length === 0) return
-      
-      // Find main question label
-      let mainLabel = findMainQuestionLabel(checkbox)
-      if (!mainLabel) {
-        const labelId = checkbox.id || checkboxName
-        const label = document.querySelector(`label[for="${labelId}"]`)
-        if (label && !label.querySelector('input[type="checkbox"]')) {
-          const extracted = extractLabelText(label)
-          if (extracted.text) {
-            mainLabel = extracted.text
-          }
-        }
-      }
-      
-      if (!mainLabel) {
-        return
-      }
-      
-      // Extract options
-      const checkboxOptions = []
-      let hasOther = false
-      let otherLabel = null
-      let otherPlaceholder = null
-      let isRequired = false
-      
-      allCheckboxesInGroup.forEach(checkboxInput => {
-        processedInputIds.add(checkboxInput.id || checkboxInput.name)
-        
-        const checkboxLabel = checkboxInput.closest('label')
-        let checkboxText = checkboxInput.value
-        
-        if (checkboxLabel) {
-          const labelClone = checkboxLabel.cloneNode(true)
-          const checkboxInClone = labelClone.querySelector('input[type="checkbox"]')
-          if (checkboxInClone) {
-            checkboxInClone.remove()
-          }
-          checkboxText = labelClone.textContent?.trim() || checkboxInput.value
-        }
-        
-        if (checkboxInput.hasAttribute('required')) {
-          isRequired = true
-        }
-        
-        const normalizedCheckboxText = checkboxText.toLowerCase().trim()
-        const isOtherOption = checkboxInput.value === 'other' || 
-          normalizedCheckboxText === 'other' ||
-          normalizedCheckboxText === 'other:' ||
-          (normalizedCheckboxText.startsWith('other') && normalizedCheckboxText.length < 20 && 
-           !normalizedCheckboxText.includes('mother') && !normalizedCheckboxText.includes('brother') &&
-           !normalizedCheckboxText.includes('father') && !normalizedCheckboxText.includes('another'))
-        
-        if (isOtherOption) {
-          hasOther = true
-          otherLabel = checkboxText
-          const otherInput = checkboxInput.closest('div')?.querySelector('input[type="text"]')
-          if (otherInput) {
-            otherPlaceholder = otherInput.placeholder || 'Please specify...'
-            processedInputIds.add(otherInput.id || otherInput.name)
-          }
-        } else {
-          checkboxOptions.push(checkboxText)
-        }
-      })
-      
-      // Only add one checkbox field per group (avoid duplicates)
-      if (checkboxOptions.length > 0 || hasOther) {
-        extractedFields.push({
-          id: checkboxName,
-          label: mainLabel,
-          type: hasOther ? 'checkbox-with-other' : 'checkbox',
-          required: isRequired,
-          placeholder: null,
-          options: checkboxOptions.length > 0 ? checkboxOptions : undefined,
-          allowOther: hasOther || undefined,
-          otherLabel: otherLabel || undefined,
-          otherPlaceholder: otherPlaceholder || undefined
-        })
-      }
-    })
-    
-    // Second pass: Process other form elements (skip radio/checkbox inputs we already processed)
-    const formElements = document.querySelectorAll('input, textarea, select')
-    
-    formElements.forEach((element, index) => {
-      // Skip if already processed as part of radio/checkbox group
-      const elementId = element.id || element.name
-      if (elementId && processedInputIds.has(elementId)) {
-        return
-      }
-      
-      // Skip hidden inputs and buttons
+    allFormElements.forEach((element, index) => {
+      // Skip hidden inputs and submit buttons
       if (element.type === 'hidden' || element.type === 'submit' || element.type === 'button') {
         return
       }
@@ -299,13 +103,255 @@ async function extractFormFieldsFromDOM(page) {
         return
       }
       
-      // Skip radio and checkbox inputs (already processed)
-      if (element.type === 'radio' || element.type === 'checkbox') {
+      // Check if this element is part of a signature field
+      const signatureContainer = element.closest('.signature-capture') || 
+                                 element.closest('div[class*="signature"]')
+      
+      if (signatureContainer) {
+        // Find the main label for the signature field (should be outside signature-capture)
+        let signatureLabel = 'Signature'
+        let signatureId = null
+        let isRequired = false
+        
+        // Look for label before the signature container
+        let current = signatureContainer.parentElement
+        let depth = 0
+        while (current && depth < 3) {
+          const label = current.querySelector('label')
+          if (label && !label.querySelector('input, canvas, button')) {
+            const extracted = extractLabelText(label)
+            if (extracted.text && extracted.text.toLowerCase() !== 'preview') {
+              signatureLabel = extracted.text
+              isRequired = extracted.required
+              break
+            }
+          }
+          current = current.parentElement
+          depth++
+        }
+        
+        // Use the first input's id/name as the signature field id
+        signatureId = element.id || element.name || `signature_${Date.now()}`
+        
+        // Only add signature field once per container
+        if (!processedSignatureFields.has(signatureContainer)) {
+          processedSignatureFields.add(signatureContainer)
+          // Mark all inputs in this signature container as processed
+          signatureContainer.querySelectorAll('input, canvas, button').forEach(el => {
+            if (el.id) processedInputIds.add(el.id)
+            if (el.name) processedInputIds.add(el.name)
+          })
+          
+          extractedFields.push({
+            id: signatureId,
+            label: signatureLabel,
+            type: 'signature',
+            required: isRequired,
+            placeholder: null,
+            options: undefined
+          })
+        }
+        
+        // Skip processing this element further (it's part of signature field)
         return
       }
       
-      // Skip signature fields (they might have specific classes or structure)
-      // Also skip buttons like "Preview"
+      // Skip if already processed as part of a group
+      const elementId = element.id || element.name
+      if (elementId && processedInputIds.has(elementId)) {
+        return
+      }
+      
+      // Process radio buttons
+      if (element.type === 'radio') {
+        const radioName = element.name
+        if (!radioName || processedRadioGroups.has(radioName)) {
+          return
+        }
+        
+        processedRadioGroups.add(radioName)
+        const allRadiosInGroup = document.querySelectorAll(`input[type="radio"][name="${radioName}"]`)
+        if (allRadiosInGroup.length === 0) return
+        
+        // Find main question label
+        let mainLabel = findMainQuestionLabel(element)
+        if (!mainLabel) {
+          const labelId = element.id || radioName
+          const label = document.querySelector(`label[for="${labelId}"]`)
+          if (label && !label.querySelector('input[type="radio"]')) {
+            const extracted = extractLabelText(label)
+            if (extracted.text) {
+              mainLabel = extracted.text
+            }
+          }
+        }
+        
+        if (!mainLabel) {
+          return
+        }
+        
+        // Extract options
+        const radioOptions = []
+        let hasOther = false
+        let otherLabel = null
+        let otherPlaceholder = null
+        let isRequired = false
+        
+        allRadiosInGroup.forEach(radioInput => {
+          const radioId = radioInput.id || radioInput.name
+          if (radioId) processedInputIds.add(radioId)
+          
+          const radioLabel = radioInput.closest('label')
+          let radioText = radioInput.value
+          
+          if (radioLabel) {
+            const labelClone = radioLabel.cloneNode(true)
+            const radioInClone = labelClone.querySelector('input[type="radio"]')
+            if (radioInClone) {
+              radioInClone.remove()
+            }
+            radioText = labelClone.textContent?.trim() || radioInput.value
+          }
+          
+          if (radioInput.hasAttribute('required')) {
+            isRequired = true
+          }
+          
+          const normalizedRadioText = radioText.toLowerCase().trim()
+          const isOtherOption = radioInput.value === 'other' || 
+            normalizedRadioText === 'other' ||
+            normalizedRadioText === 'other:' ||
+            (normalizedRadioText.startsWith('other') && normalizedRadioText.length < 20 && 
+             !normalizedRadioText.includes('mother') && !normalizedRadioText.includes('brother') &&
+             !normalizedRadioText.includes('father') && !normalizedRadioText.includes('another'))
+          
+          if (isOtherOption) {
+            hasOther = true
+            otherLabel = radioText
+            const otherInput = radioInput.closest('div')?.querySelector('input[type="text"]')
+            if (otherInput) {
+              otherPlaceholder = otherInput.placeholder || 'Please specify...'
+              const otherId = otherInput.id || otherInput.name
+              if (otherId) processedInputIds.add(otherId)
+            }
+          } else {
+            radioOptions.push(radioText)
+          }
+        })
+        
+        if (radioOptions.length > 0 || hasOther) {
+          extractedFields.push({
+            id: radioName,
+            label: mainLabel,
+            type: hasOther ? 'radio-with-other' : 'radio',
+            required: isRequired,
+            placeholder: null,
+            options: radioOptions.length > 0 ? radioOptions : undefined,
+            allowOther: hasOther || undefined,
+            otherLabel: otherLabel || undefined,
+            otherPlaceholder: otherPlaceholder || undefined
+          })
+        }
+        
+        return // Skip individual radio processing
+      }
+      
+      // Process checkboxes
+      if (element.type === 'checkbox') {
+        const checkboxName = element.name
+        if (!checkboxName || processedCheckboxGroups.has(checkboxName)) {
+          return
+        }
+        
+        processedCheckboxGroups.add(checkboxName)
+        const allCheckboxesInGroup = document.querySelectorAll(`input[type="checkbox"][name="${checkboxName}"]`)
+        if (allCheckboxesInGroup.length === 0) return
+        
+        // Find main question label
+        let mainLabel = findMainQuestionLabel(element)
+        if (!mainLabel) {
+          const labelId = element.id || checkboxName
+          const label = document.querySelector(`label[for="${labelId}"]`)
+          if (label && !label.querySelector('input[type="checkbox"]')) {
+            const extracted = extractLabelText(label)
+            if (extracted.text) {
+              mainLabel = extracted.text
+            }
+          }
+        }
+        
+        if (!mainLabel) {
+          return
+        }
+        
+        // Extract options
+        const checkboxOptions = []
+        let hasOther = false
+        let otherLabel = null
+        let otherPlaceholder = null
+        let isRequired = false
+        
+        allCheckboxesInGroup.forEach(checkboxInput => {
+          const checkboxId = checkboxInput.id || checkboxInput.name
+          if (checkboxId) processedInputIds.add(checkboxId)
+          
+          const checkboxLabel = checkboxInput.closest('label')
+          let checkboxText = checkboxInput.value
+          
+          if (checkboxLabel) {
+            const labelClone = checkboxLabel.cloneNode(true)
+            const checkboxInClone = labelClone.querySelector('input[type="checkbox"]')
+            if (checkboxInClone) {
+              checkboxInClone.remove()
+            }
+            checkboxText = labelClone.textContent?.trim() || checkboxInput.value
+          }
+          
+          if (checkboxInput.hasAttribute('required')) {
+            isRequired = true
+          }
+          
+          const normalizedCheckboxText = checkboxText.toLowerCase().trim()
+          const isOtherOption = checkboxInput.value === 'other' || 
+            normalizedCheckboxText === 'other' ||
+            normalizedCheckboxText === 'other:' ||
+            (normalizedCheckboxText.startsWith('other') && normalizedCheckboxText.length < 20 && 
+             !normalizedCheckboxText.includes('mother') && !normalizedCheckboxText.includes('brother') &&
+             !normalizedCheckboxText.includes('father') && !normalizedCheckboxText.includes('another'))
+          
+          if (isOtherOption) {
+            hasOther = true
+            otherLabel = checkboxText
+            const otherInput = checkboxInput.closest('div')?.querySelector('input[type="text"]')
+            if (otherInput) {
+              otherPlaceholder = otherInput.placeholder || 'Please specify...'
+              const otherId = otherInput.id || otherInput.name
+              if (otherId) processedInputIds.add(otherId)
+            }
+          } else {
+            checkboxOptions.push(checkboxText)
+          }
+        })
+        
+        // Only add one checkbox field per group
+        if (checkboxOptions.length > 0 || hasOther) {
+          extractedFields.push({
+            id: checkboxName,
+            label: mainLabel,
+            type: hasOther ? 'checkbox-with-other' : 'checkbox',
+            required: isRequired,
+            placeholder: null,
+            options: checkboxOptions.length > 0 ? checkboxOptions : undefined,
+            allowOther: hasOther || undefined,
+            otherLabel: otherLabel || undefined,
+            otherPlaceholder: otherPlaceholder || undefined
+          })
+        }
+        
+        return // Skip individual checkbox processing
+      }
+      
+      // Process other form elements (text, email, tel, textarea, select, date)
       const elementText = element.value || element.textContent || ''
       const parentText = element.closest('div')?.textContent || ''
       
@@ -317,17 +363,13 @@ async function extractFormFieldsFromDOM(page) {
         return
       }
       
-      // Skip "Other" option text inputs using DOM structure (more robust than placeholder matching)
-      // Strategy: Check if this text input is in the same container as a radio/checkbox group
-      // and appears to be associated with an "Other" option
+      // Skip "Other" option text inputs using DOM structure
       if (element.type === 'text') {
         const parentContainer = element.closest('div')
         if (parentContainer) {
-          // Look for radio/checkbox inputs in the same container
           const radiosInContainer = parentContainer.querySelectorAll('input[type="radio"]')
           const checkboxesInContainer = parentContainer.querySelectorAll('input[type="checkbox"]')
           
-          // Check if any radio/checkbox in this container has "other" value or label
           const hasOtherOption = Array.from(radiosInContainer).some(radio => {
             const radioValue = radio.value?.toLowerCase() || ''
             const radioLabel = radio.closest('label')
@@ -346,11 +388,7 @@ async function extractFormFieldsFromDOM(page) {
                    (labelText.startsWith('other') && labelText.length < 20)
           })
           
-          // If we found an "Other" option and this text input is in the same container,
-          // it's likely the "Other" text input - skip it
           if (hasOtherOption) {
-            // Additional check: make sure this text input comes after the radio/checkbox
-            // (typical structure: radio button, then text input for "Other")
             const allInputs = parentContainer.querySelectorAll('input')
             const elementIndex = Array.from(allInputs).indexOf(element)
             const otherRadioIndex = Array.from(allInputs).findIndex(input => {
@@ -366,7 +404,6 @@ async function extractFormFieldsFromDOM(page) {
               return false
             })
             
-            // If text input comes after the "Other" radio/checkbox, it's likely the associated input
             if (otherRadioIndex >= 0 && elementIndex > otherRadioIndex) {
               return // Skip this "Other" text input
             }
@@ -377,22 +414,6 @@ async function extractFormFieldsFromDOM(page) {
       // Extract placeholder early (used for multiple checks)
       const elementPlaceholder = element.placeholder || ''
       
-      // Skip signature field placeholders
-      if (elementPlaceholder.toLowerCase().includes('enter your full name') ||
-          elementPlaceholder.toLowerCase().includes('sign here') ||
-          elementText.toLowerCase().includes('signature')) {
-        return
-      }
-      
-      // Skip date fields that are likely buttons (very short labels like "Date")
-      if (element.type === 'date') {
-        const labelText = element.previousElementSibling?.textContent?.trim() || ''
-        if (labelText.toLowerCase() === 'date' && labelText.length < 10) {
-          // Likely a button or signature date field, skip
-          return
-        }
-      }
-      
       // Find the associated label
       let labelText = ''
       let isRequired = false
@@ -401,7 +422,7 @@ async function extractFormFieldsFromDOM(page) {
       const labelId = element.id || element.name
       if (labelId) {
         const label = document.querySelector(`label[for="${labelId}"]`)
-        if (label && !label.querySelector('input, button')) {
+        if (label && !label.querySelector('input, button, canvas')) {
           const extracted = extractLabelText(label)
           labelText = extracted.text
           isRequired = extracted.required
@@ -440,7 +461,7 @@ async function extractFormFieldsFromDOM(page) {
         const parentDiv = element.closest('div')
         if (parentDiv) {
           const labelInParent = parentDiv.querySelector('label')
-          if (labelInParent && !labelInParent.querySelector('input[type="radio"], input[type="checkbox"]')) {
+          if (labelInParent && !labelInParent.querySelector('input[type="radio"], input[type="checkbox"], canvas, button')) {
             const parentChildren = Array.from(parentDiv.children)
             const labelPosition = parentChildren.indexOf(labelInParent)
             const inputPosition = parentChildren.indexOf(element)
@@ -456,7 +477,7 @@ async function extractFormFieldsFromDOM(page) {
       
       // Method 5: Use placeholder or name as fallback
       if (!labelText) {
-        labelText = element.placeholder || element.name || `Field ${index + 1}`
+        labelText = elementPlaceholder || element.name || `Field ${index + 1}`
       }
       
       // Final check if required
@@ -490,7 +511,7 @@ async function extractFormFieldsFromDOM(page) {
         fieldType = 'text' // Map number to text
       }
       
-      // Create field object (use elementPlaceholder already declared above)
+      // Create field object
       const field = {
         id: element.id || element.name || `field_${Date.now()}_${index}`,
         label: labelText,
