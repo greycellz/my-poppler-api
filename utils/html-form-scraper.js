@@ -93,11 +93,17 @@ async function extractFormFieldsFromDOM(page) {
     // We need to detect them separately since they don't have input/textarea/select elements
     const allButtons = document.querySelectorAll('button[type="button"]')
     const processedRatingContainers = new Set()
+    const ratingFields = []
     
     allButtons.forEach(button => {
       // Check if this button is part of a rating field
       const parentContainer = button.closest('div')
       if (!parentContainer || processedRatingContainers.has(parentContainer)) {
+        return
+      }
+      
+      // Skip if this container has a select element (dropdowns have buttons too, but aren't ratings)
+      if (parentContainer.querySelector('select')) {
         return
       }
       
@@ -114,26 +120,42 @@ async function extractFormFieldsFromDOM(page) {
         btn.getAttribute('aria-label')?.toLowerCase().includes('star')
       )
       
-      if (hasStarSymbols || hasEmojiButtons || hasStarAriaLabels) {
+      // Must have stars/emojis AND star aria-labels to be a rating field (more specific)
+      if ((hasStarSymbols || hasEmojiButtons) && hasStarAriaLabels) {
         processedRatingContainers.add(parentContainer)
         
-        // Find the label for the rating field
+        // Find the label for the rating field - look more carefully
         let ratingLabel = 'Rating'
         let isRequired = false
         
-        // Look for label before the rating component
+        // Look for label in parent elements (rating field structure)
         let current = parentContainer.parentElement
         let depth = 0
-        while (current && depth < 3) {
-          const label = current.querySelector('label')
-          if (label && !label.querySelector('input, button, canvas')) {
-            const extracted = extractLabelText(label)
-            if (extracted.text && extracted.text.toLowerCase() !== 'rating') {
-              ratingLabel = extracted.text
-              isRequired = extracted.required
-              break
+        while (current && depth < 4) {
+          // Check for label that comes before this container
+          const labels = current.querySelectorAll('label')
+          for (const label of labels) {
+            if (label.querySelector('input, button, canvas')) {
+              continue // Skip labels that contain inputs/buttons
+            }
+            
+            // Check if label comes before the rating container in DOM
+            const children = Array.from(current.children)
+            const labelIndex = children.indexOf(label)
+            const containerIndex = children.indexOf(parentContainer)
+            
+            if (labelIndex >= 0 && containerIndex >= 0 && labelIndex < containerIndex) {
+              const extracted = extractLabelText(label)
+              if (extracted.text) {
+                ratingLabel = extracted.text
+                isRequired = extracted.required
+                break
+              }
             }
           }
+          
+          if (ratingLabel !== 'Rating') break
+          
           current = current.parentElement
           depth++
         }
@@ -143,18 +165,18 @@ async function extractFormFieldsFromDOM(page) {
           if (btn.id) processedInputIds.add(btn.id)
         })
         
-        // Add rating field (we'll insert it in the right position later)
-        // For now, add it to a separate array and we'll merge based on DOM position
-        extractedFields.push({
-          id: `rating_${Date.now()}_${extractedFields.length}`,
+        // Get DOM position for sorting (find first button's position in document)
+        const allElements = Array.from(document.querySelectorAll('input, textarea, select, button'))
+        const firstButtonIndex = allElements.indexOf(buttons[0])
+        
+        ratingFields.push({
+          id: `rating_${Date.now()}_${ratingFields.length}`,
           label: ratingLabel,
           type: 'rating',
           required: isRequired,
           placeholder: null,
           options: undefined,
-          _domPosition: parentContainer.compareDocumentPosition ? 
-            Array.from(document.querySelectorAll('input, textarea, select, button')).indexOf(buttons[0]) : 
-            -1
+          _domPosition: firstButtonIndex >= 0 ? firstButtonIndex : 999999
         })
       }
     })
