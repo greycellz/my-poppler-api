@@ -308,7 +308,6 @@ async function extractFormFieldsFromDOM(page) {
       // Also skip buttons like "Preview"
       const elementText = element.value || element.textContent || ''
       const parentText = element.closest('div')?.textContent || ''
-      const placeholder = element.placeholder || ''
       
       // Skip buttons and preview elements
       if (elementText.toLowerCase().includes('preview') || 
@@ -318,26 +317,67 @@ async function extractFormFieldsFromDOM(page) {
         return
       }
       
-      // Skip "Other" option text inputs (they're already part of radio/checkbox groups)
-      // These typically have placeholder "Please specify..." and are near radio/checkbox groups
-      if (element.type === 'text' && 
-          (placeholder.toLowerCase().includes('please specify') ||
-           placeholder.toLowerCase().includes('specify'))) {
-        // Check if this is near a radio/checkbox with "other" option
-        const parentDiv = element.closest('div')
-        if (parentDiv) {
-          const nearbyRadio = parentDiv.querySelector('input[type="radio"][value="other"]')
-          const nearbyCheckbox = parentDiv.querySelector('input[type="checkbox"][value="other"]')
-          if (nearbyRadio || nearbyCheckbox) {
-            // This is an "Other" option text input, skip it
-            return
+      // Skip "Other" option text inputs using DOM structure (more robust than placeholder matching)
+      // Strategy: Check if this text input is in the same container as a radio/checkbox group
+      // and appears to be associated with an "Other" option
+      if (element.type === 'text') {
+        const parentContainer = element.closest('div')
+        if (parentContainer) {
+          // Look for radio/checkbox inputs in the same container
+          const radiosInContainer = parentContainer.querySelectorAll('input[type="radio"]')
+          const checkboxesInContainer = parentContainer.querySelectorAll('input[type="checkbox"]')
+          
+          // Check if any radio/checkbox in this container has "other" value or label
+          const hasOtherOption = Array.from(radiosInContainer).some(radio => {
+            const radioValue = radio.value?.toLowerCase() || ''
+            const radioLabel = radio.closest('label')
+            const labelText = radioLabel ? radioLabel.textContent?.toLowerCase().trim() : ''
+            return radioValue === 'other' || 
+                   labelText === 'other' || 
+                   labelText === 'other:' ||
+                   (labelText.startsWith('other') && labelText.length < 20)
+          }) || Array.from(checkboxesInContainer).some(checkbox => {
+            const checkboxValue = checkbox.value?.toLowerCase() || ''
+            const checkboxLabel = checkbox.closest('label')
+            const labelText = checkboxLabel ? checkboxLabel.textContent?.toLowerCase().trim() : ''
+            return checkboxValue === 'other' || 
+                   labelText === 'other' || 
+                   labelText === 'other:' ||
+                   (labelText.startsWith('other') && labelText.length < 20)
+          })
+          
+          // If we found an "Other" option and this text input is in the same container,
+          // it's likely the "Other" text input - skip it
+          if (hasOtherOption) {
+            // Additional check: make sure this text input comes after the radio/checkbox
+            // (typical structure: radio button, then text input for "Other")
+            const allInputs = parentContainer.querySelectorAll('input')
+            const elementIndex = Array.from(allInputs).indexOf(element)
+            const otherRadioIndex = Array.from(allInputs).findIndex(input => {
+              if (input.type === 'radio' || input.type === 'checkbox') {
+                const value = input.value?.toLowerCase() || ''
+                const label = input.closest('label')
+                const labelText = label ? label.textContent?.toLowerCase().trim() : ''
+                return value === 'other' || 
+                       labelText === 'other' || 
+                       labelText === 'other:' ||
+                       (labelText.startsWith('other') && labelText.length < 20)
+              }
+              return false
+            })
+            
+            // If text input comes after the "Other" radio/checkbox, it's likely the associated input
+            if (otherRadioIndex >= 0 && elementIndex > otherRadioIndex) {
+              return // Skip this "Other" text input
+            }
           }
         }
       }
       
       // Skip signature field placeholders
-      if (placeholder.toLowerCase().includes('enter your full name') ||
-          placeholder.toLowerCase().includes('sign here') ||
+      const elementPlaceholder = element.placeholder || ''
+      if (elementPlaceholder.toLowerCase().includes('enter your full name') ||
+          elementPlaceholder.toLowerCase().includes('sign here') ||
           elementText.toLowerCase().includes('signature')) {
         return
       }
@@ -449,7 +489,7 @@ async function extractFormFieldsFromDOM(page) {
       }
       
       // Extract placeholder
-      const placeholder = element.placeholder || null
+      const elementPlaceholder = element.placeholder || null
       
       // Create field object
       const field = {
@@ -457,7 +497,7 @@ async function extractFormFieldsFromDOM(page) {
         label: labelText,
         type: fieldType,
         required: isRequired,
-        placeholder: placeholder,
+        placeholder: elementPlaceholder,
         options: options.length > 0 ? options : undefined
       }
       
