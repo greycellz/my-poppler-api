@@ -21,6 +21,7 @@ const TIMEOUTS = {
   IMAGE_COMPRESSION: 60_000,   // 60 seconds per image
   GPT_VISION_API: 180_000,     // 3 minutes (for 8-10 images)
   JSON_PARSING: 5_000,         // 5 seconds
+  DOM_EXTRACTION: 60_000,      // 60 seconds for DOM extraction
 }
 
 module.exports = {

@@ -3406,6 +3406,7 @@ const baaRoutes = require('./routes/baa');
 // Import image analysis routes
 const imageAnalysisRoutes = require('./routes/image-analysis');
 const urlAnalysisRoutes = require('./routes/url-analysis');
+const urlAnalysisHtmlRoutes = require('./routes/url-analysis-html');
 
 // Mount authentication routes
 app.use('/auth', authRoutes);
@@ -3419,6 +3420,7 @@ app.use('/api/baa', baaRoutes);
 // Mount image analysis routes
 app.use('/api', imageAnalysisRoutes);
 app.use('/api', urlAnalysisRoutes);
+app.use('/api', urlAnalysisHtmlRoutes);
 
 // ============== AUTO-SAVE ENDPOINT ==============
 

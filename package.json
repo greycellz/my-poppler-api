@@ -12,6 +12,9 @@
         "test:gcp": "jest test/gcp-client.test.js",
         "test:integration": "jest test/gcp-integration.test.js",
         "test:vision": "node test/test-vision-api.js",
+        "test:vision-endpoints": "jest test/vision-api-endpoints.test.js",
+        "test:vision-manual": "node test/test-vision-endpoints-manual.js",
+        "test:html-scraping": "node test/test-html-scraping.js",
         "postinstall": "echo 'Skipping Chromium download - using system Chrome'"
     },
     "dependencies": {
