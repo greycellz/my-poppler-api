@@ -45,19 +45,42 @@ async function splitTallImage(imageBuffer, maxHeight = SPLIT_CONFIG.MAX_HEIGHT, 
     console.log(`📐 Splitting image: ${width}x${height}px into ${numSections} sections (max ${maxHeight}px each)`)
     
     // Split into sections with overlap to avoid cutting fields in half
-    const sectionHeight = Math.ceil(height / numSections) + overlap
+    // Calculate base section height (without overlap)
+    const baseSectionHeight = Math.floor((height - overlap) / numSections) + overlap
     
     for (let i = 0; i < numSections; i++) {
-      const yOffset = i * (sectionHeight - overlap)
-      const sectionHeightActual = Math.min(sectionHeight, height - yOffset)
+      // Calculate Y offset for this section
+      // First section starts at 0, subsequent sections start with overlap
+      const yOffset = i === 0 ? 0 : i * (baseSectionHeight - overlap)
       
-      // Extract section
-      const sectionBuffer = await image
+      // Calculate height for this section
+      // Last section takes remaining height, others use baseSectionHeight
+      let sectionHeight
+      if (i === numSections - 1) {
+        // Last section: take all remaining height
+        sectionHeight = height - yOffset
+      } else {
+        // Other sections: use baseSectionHeight (includes overlap for next section)
+        sectionHeight = baseSectionHeight
+      }
+      
+      // Ensure we don't exceed image bounds
+      if (yOffset + sectionHeight > height) {
+        sectionHeight = height - yOffset
+      }
+      
+      if (sectionHeight <= 0 || yOffset >= height) {
+        console.warn(`⚠️ Section ${i + 1} has invalid dimensions (yOffset: ${yOffset}, height: ${sectionHeight}), skipping`)
+        continue
+      }
+      
+      // Create a new sharp instance for each section (can't reuse the same pipeline)
+      const sectionBuffer = await sharp(imageBuffer)
         .extract({
           left: 0,
           top: yOffset,
           width: width,
-          height: sectionHeightActual
+          height: sectionHeight
         })
         .toBuffer()
       
@@ -66,7 +89,7 @@ async function splitTallImage(imageBuffer, maxHeight = SPLIT_CONFIG.MAX_HEIGHT, 
         section: i === 0 ? 'top' : i === numSections - 1 ? 'bottom' : 'middle',
         sectionIndex: i,
         yOffset: yOffset,
-        height: sectionHeightActual,
+        height: sectionHeight,
         totalSections: numSections
       })
     }
