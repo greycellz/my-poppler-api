@@ -98,9 +98,59 @@ async function extractFormFieldsFromDOM(page) {
         return
       }
       
-      // Skip file inputs
+      // Process file inputs (they're standard HTML, just hidden in ModernFileUpload)
       if (element.type === 'file') {
-        return
+        // Find the label for the file upload field
+        let labelText = 'File upload'
+        let isRequired = false
+        
+        // Look for label in parent container (ModernFileUpload structure)
+        const parentContainer = element.closest('div')
+        if (parentContainer) {
+          // ModernFileUpload has a label before the drag-drop area
+          const label = parentContainer.querySelector('label')
+          if (label && !label.querySelector('input')) {
+            const extracted = extractLabelText(label)
+            labelText = extracted.text || 'File upload'
+            isRequired = extracted.required
+          }
+          
+          // Also check for label in parent of parent (if ModernFileUpload is nested)
+          const grandParent = parentContainer.parentElement
+          if (grandParent) {
+            const parentLabel = grandParent.querySelector('label')
+            if (parentLabel && !parentLabel.querySelector('input, canvas, button')) {
+              const extracted = extractLabelText(parentLabel)
+              if (extracted.text && extracted.text.toLowerCase() !== 'file upload') {
+                labelText = extracted.text
+                isRequired = extracted.required
+              }
+            }
+          }
+        }
+        
+        // Check if required
+        if (!isRequired) {
+          isRequired = element.hasAttribute('required')
+        }
+        
+        // Only add if we haven't already added this file field
+        const elementId = element.id || element.name
+        if (elementId && processedInputIds.has(elementId)) {
+          return
+        }
+        if (elementId) processedInputIds.add(elementId)
+        
+        extractedFields.push({
+          id: elementId || `file_${Date.now()}`,
+          label: labelText,
+          type: 'file',
+          required: isRequired,
+          placeholder: null,
+          options: undefined
+        })
+        
+        return // Skip further processing
       }
       
       // Check if this element is part of a signature field
@@ -349,6 +399,59 @@ async function extractFormFieldsFromDOM(page) {
         }
         
         return // Skip individual checkbox processing
+      }
+      
+      // Detect rating fields - they have star buttons or emoji buttons
+      const parentContainer = element.closest('div')
+      if (parentContainer) {
+        // Check if this container has rating-like structure (star buttons, emoji buttons)
+        const hasStarButtons = parentContainer.querySelectorAll('button[aria-label*="star"], button[aria-label*="Star"]').length > 0
+        const hasEmojiButtons = parentContainer.textContent?.match(/[😞😕😐🙂😄]/) && 
+                                parentContainer.querySelectorAll('button').length >= 3
+        
+        if (hasStarButtons || hasEmojiButtons) {
+          // Find the label for the rating field
+          let ratingLabel = 'Rating'
+          let isRequired = false
+          
+          // Look for label before the rating component
+          let current = parentContainer.parentElement
+          let depth = 0
+          while (current && depth < 3) {
+            const label = current.querySelector('label')
+            if (label && !label.querySelector('input, button, canvas')) {
+              const extracted = extractLabelText(label)
+              if (extracted.text && extracted.text.toLowerCase() !== 'rating') {
+                ratingLabel = extracted.text
+                isRequired = extracted.required
+                break
+              }
+            }
+            current = current.parentElement
+            depth++
+          }
+          
+          // Only add rating field once per container
+          if (!processedInputIds.has(`rating_${parentContainer.textContent?.substring(0, 20)}`)) {
+            processedInputIds.add(`rating_${parentContainer.textContent?.substring(0, 20)}`)
+            // Mark all buttons in this rating component as processed
+            parentContainer.querySelectorAll('button').forEach(btn => {
+              if (btn.id) processedInputIds.add(btn.id)
+            })
+            
+            extractedFields.push({
+              id: `rating_${Date.now()}_${extractedFields.length}`,
+              label: ratingLabel,
+              type: 'rating',
+              required: isRequired,
+              placeholder: null,
+              options: undefined
+            })
+          }
+          
+          // Skip processing this element (it's part of rating field)
+          return
+        }
       }
       
       // Process other form elements (text, email, tel, textarea, select, date)
