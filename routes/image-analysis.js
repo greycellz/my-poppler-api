@@ -180,17 +180,27 @@ router.post('/analyze-images', async (req, res) => {
           cleanedText = cleanedText.replace(/^```\s*/i, '').replace(/\s*```$/g, '')
         }
         
-        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/)
+        // Try to match JSON array first (most common for field extraction)
+        let jsonMatch = cleanedText.match(/\[[\s\S]*\]/)
         if (jsonMatch) {
           parsedResponse = JSON.parse(jsonMatch[0])
         } else {
-          parsedResponse = JSON.parse(cleanedText)
+          // Try to match JSON object
+          jsonMatch = cleanedText.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            parsedResponse = JSON.parse(jsonMatch[0])
+          } else {
+            // Try parsing the whole cleaned text
+            parsedResponse = JSON.parse(cleanedText)
+          }
         }
       } catch (parseError) {
         console.error('Failed to parse GPT response:', responseText)
         const openBraces = (responseText.match(/\{/g)?.length || 0)
         const closeBraces = (responseText.match(/\}/g)?.length || 0)
-        const isTruncated = openBraces > closeBraces
+        const openBrackets = (responseText.match(/\[/g)?.length || 0)
+        const closeBrackets = (responseText.match(/\]/g)?.length || 0)
+        const isTruncated = (openBraces > closeBraces) || (openBrackets > closeBrackets)
         
         if (isTruncated) {
           return res.status(413).json({
@@ -209,10 +219,21 @@ router.post('/analyze-images', async (req, res) => {
 
       console.log(`✅ Successfully analyzed ${validImages.length} images`)
 
+      // Handle both array response and object with fields property
+      let fields = []
+      if (Array.isArray(parsedResponse)) {
+        fields = parsedResponse
+      } else if (parsedResponse.fields && Array.isArray(parsedResponse.fields)) {
+        fields = parsedResponse.fields
+      } else if (parsedResponse && typeof parsedResponse === 'object') {
+        // If it's an object but no fields property, try to extract fields
+        console.warn('⚠️ Unexpected response format, attempting to extract fields')
+        fields = []
+      }
+
       return res.json({
         success: true,
-        fields: parsedResponse.fields || [],
-        rawResponse: responseText,
+        fields: fields,
         imagesAnalyzed: validImages.length
       })
 
