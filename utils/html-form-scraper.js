@@ -374,8 +374,10 @@ async function extractFormFieldsFromDOM(page) {
         }
       }
       
-      // Skip signature field placeholders
+      // Extract placeholder early (used for multiple checks)
       const elementPlaceholder = element.placeholder || ''
+      
+      // Skip signature field placeholders
       if (elementPlaceholder.toLowerCase().includes('enter your full name') ||
           elementPlaceholder.toLowerCase().includes('sign here') ||
           elementText.toLowerCase().includes('signature')) {
@@ -488,16 +490,13 @@ async function extractFormFieldsFromDOM(page) {
         fieldType = 'text' // Map number to text
       }
       
-      // Extract placeholder
-      const elementPlaceholder = element.placeholder || null
-      
-      // Create field object
+      // Create field object (use elementPlaceholder already declared above)
       const field = {
         id: element.id || element.name || `field_${Date.now()}_${index}`,
         label: labelText,
         type: fieldType,
         required: isRequired,
-        placeholder: elementPlaceholder,
+        placeholder: elementPlaceholder || null,
         options: options.length > 0 ? options : undefined
       }
       
