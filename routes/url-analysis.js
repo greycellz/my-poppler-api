@@ -34,8 +34,13 @@ router.post('/analyze-url', async (req, res) => {
     let screenshotImageUrl = screenshotUrl
     if (url && !screenshotUrl) {
       // Call Railway screenshot endpoint
-      const PUPPETEER_SERVICE_URL = process.env.PUPPETEER_SERVICE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-production.up.railway.app'
-      const screenshotResponse = await fetch(`${PUPPETEER_SERVICE_URL}/screenshot`, {
+      // Construct URL properly - ensure it has protocol
+      let puppeteerServiceUrl = process.env.PUPPETEER_SERVICE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-production.up.railway.app'
+      // If RAILWAY_PUBLIC_DOMAIN is set without protocol, add it
+      if (puppeteerServiceUrl && !puppeteerServiceUrl.startsWith('http')) {
+        puppeteerServiceUrl = `https://${puppeteerServiceUrl}`
+      }
+      const screenshotResponse = await fetch(`${puppeteerServiceUrl}/screenshot`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
