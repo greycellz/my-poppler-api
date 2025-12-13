@@ -89,6 +89,76 @@ async function extractFormFieldsFromDOM(page) {
       return { text, required: isFieldRequired }
     }
     
+    // First pass: Detect rating fields (they're buttons, not form inputs)
+    // We need to detect them separately since they don't have input/textarea/select elements
+    const allButtons = document.querySelectorAll('button[type="button"]')
+    const processedRatingContainers = new Set()
+    
+    allButtons.forEach(button => {
+      // Check if this button is part of a rating field
+      const parentContainer = button.closest('div')
+      if (!parentContainer || processedRatingContainers.has(parentContainer)) {
+        return
+      }
+      
+      // Check if this container has rating-like structure
+      const buttons = parentContainer.querySelectorAll('button[type="button"]')
+      if (buttons.length < 3 || buttons.length > 10) {
+        return
+      }
+      
+      const buttonText = Array.from(buttons).map(btn => btn.textContent || '').join('')
+      const hasStarSymbols = buttonText.includes('★') || buttonText.includes('☆')
+      const hasEmojiButtons = /[😞😕😐🙂😄]/.test(buttonText)
+      const hasStarAriaLabels = Array.from(buttons).some(btn => 
+        btn.getAttribute('aria-label')?.toLowerCase().includes('star')
+      )
+      
+      if (hasStarSymbols || hasEmojiButtons || hasStarAriaLabels) {
+        processedRatingContainers.add(parentContainer)
+        
+        // Find the label for the rating field
+        let ratingLabel = 'Rating'
+        let isRequired = false
+        
+        // Look for label before the rating component
+        let current = parentContainer.parentElement
+        let depth = 0
+        while (current && depth < 3) {
+          const label = current.querySelector('label')
+          if (label && !label.querySelector('input, button, canvas')) {
+            const extracted = extractLabelText(label)
+            if (extracted.text && extracted.text.toLowerCase() !== 'rating') {
+              ratingLabel = extracted.text
+              isRequired = extracted.required
+              break
+            }
+          }
+          current = current.parentElement
+          depth++
+        }
+        
+        // Mark all buttons in this rating component as processed
+        buttons.forEach(btn => {
+          if (btn.id) processedInputIds.add(btn.id)
+        })
+        
+        // Add rating field (we'll insert it in the right position later)
+        // For now, add it to a separate array and we'll merge based on DOM position
+        extractedFields.push({
+          id: `rating_${Date.now()}_${extractedFields.length}`,
+          label: ratingLabel,
+          type: 'rating',
+          required: isRequired,
+          placeholder: null,
+          options: undefined,
+          _domPosition: parentContainer.compareDocumentPosition ? 
+            Array.from(document.querySelectorAll('input, textarea, select, button')).indexOf(buttons[0]) : 
+            -1
+        })
+      }
+    })
+    
     // Process ALL form elements in DOM order to preserve sequence
     const allFormElements = document.querySelectorAll('input, textarea, select')
     
@@ -401,64 +471,10 @@ async function extractFormFieldsFromDOM(page) {
         return // Skip individual checkbox processing
       }
       
-      // Detect rating fields - they have star buttons or emoji buttons
-      // Check before processing other elements to catch rating fields early
+      // Skip if this element is inside a rating field container we already processed
       const parentContainer = element.closest('div')
-      if (parentContainer) {
-        // Check if this container has rating-like structure
-        // Rating fields have multiple star buttons (★) or emoji buttons
-        const buttons = parentContainer.querySelectorAll('button')
-        const buttonText = Array.from(buttons).map(btn => btn.textContent || '').join('')
-        const hasStarSymbols = buttonText.includes('★') || buttonText.includes('☆')
-        const hasEmojiButtons = /[😞😕😐🙂😄]/.test(buttonText)
-        const hasStarAriaLabels = Array.from(buttons).some(btn => 
-          btn.getAttribute('aria-label')?.toLowerCase().includes('star')
-        )
-        
-        // Rating fields typically have 3-10 buttons with stars/emojis
-        if ((hasStarSymbols || hasEmojiButtons || hasStarAriaLabels) && buttons.length >= 3 && buttons.length <= 10) {
-          // Find the label for the rating field
-          let ratingLabel = 'Rating'
-          let isRequired = false
-          
-          // Look for label before the rating component
-          let current = parentContainer.parentElement
-          let depth = 0
-          while (current && depth < 3) {
-            const label = current.querySelector('label')
-            if (label && !label.querySelector('input, button, canvas')) {
-              const extracted = extractLabelText(label)
-              if (extracted.text && extracted.text.toLowerCase() !== 'rating') {
-                ratingLabel = extracted.text
-                isRequired = extracted.required
-                break
-              }
-            }
-            current = current.parentElement
-            depth++
-          }
-          
-          // Only add rating field once per container
-          if (!processedInputIds.has(`rating_${parentContainer.textContent?.substring(0, 20)}`)) {
-            processedInputIds.add(`rating_${parentContainer.textContent?.substring(0, 20)}`)
-            // Mark all buttons in this rating component as processed
-            parentContainer.querySelectorAll('button').forEach(btn => {
-              if (btn.id) processedInputIds.add(btn.id)
-            })
-            
-            extractedFields.push({
-              id: `rating_${Date.now()}_${extractedFields.length}`,
-              label: ratingLabel,
-              type: 'rating',
-              required: isRequired,
-              placeholder: null,
-              options: undefined
-            })
-          }
-          
-          // Skip processing this element (it's part of rating field)
-          return
-        }
+      if (parentContainer && processedRatingContainers.has(parentContainer)) {
+        return
       }
       
       // Process other form elements (text, email, tel, textarea, select, date)
@@ -634,14 +650,34 @@ async function extractFormFieldsFromDOM(page) {
       extractedFields.push(field)
     })
     
-    // Deduplicate fields by id
+    // Sort fields by DOM position to preserve order
+    // Fields with _domPosition are rating fields, sort them appropriately
+    const fieldsWithPosition = extractedFields.map((field, index) => {
+      if (field._domPosition !== undefined) {
+        return { field, position: field._domPosition }
+      }
+      // For regular fields, use their index in the form elements array
+      // This is approximate but should work for most cases
+      return { field, position: index * 1000 }
+    })
+    
+    // Sort by position, then remove _domPosition
+    fieldsWithPosition.sort((a, b) => {
+      if (a.position < 0) return 1 // Rating fields without position go to end
+      if (b.position < 0) return -1
+      return a.position - b.position
+    })
+    
+    // Deduplicate fields by id and remove _domPosition
     const uniqueFields = []
     const seenIds = new Set()
     
-    extractedFields.forEach(field => {
+    fieldsWithPosition.forEach(({ field }) => {
       if (!seenIds.has(field.id)) {
         seenIds.add(field.id)
-        uniqueFields.push(field)
+        // Remove _domPosition before returning
+        const { _domPosition, ...cleanField } = field
+        uniqueFields.push(cleanField)
       }
     })
     
