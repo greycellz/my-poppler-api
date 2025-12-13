@@ -165,18 +165,49 @@ router.post('/analyze-url', async (req, res) => {
               `Section ${sectionIndex + 1} Vision API call timed out`
             )
             
+            // Check if we got a valid response
+            if (!completion || !completion.choices || !completion.choices[0]) {
+              console.error(`Section ${sectionIndex + 1}: Invalid completion structure:`, completion)
+              return { fields: [], sectionIndex }
+            }
+            
             // Parse response
-            const responseText = completion.choices[0].message.content
+            const responseText = completion.choices[0].message?.content
+            
+            if (!responseText) {
+              console.error(`Section ${sectionIndex + 1}: Empty response from Vision API`)
+              return { fields: [], sectionIndex }
+            }
+            
+            // Log first 200 chars for debugging
+            const preview = responseText.substring(0, 200)
+            console.log(`📝 Section ${sectionIndex + 1} response preview: ${preview}...`)
+            
             let parsedResponse
             try {
-              const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+              // Try to extract JSON from response (might have markdown code fences)
+              let cleanedText = responseText.trim()
+              
+              // Remove markdown code fences if present
+              if (cleanedText.startsWith('```json')) {
+                cleanedText = cleanedText.replace(/^```json\s*/i, '').replace(/\s*```$/g, '')
+              } else if (cleanedText.startsWith('```')) {
+                cleanedText = cleanedText.replace(/^```\s*/i, '').replace(/\s*```$/g, '')
+              }
+              
+              // Try to find JSON object in the response
+              const jsonMatch = cleanedText.match(/\{[\s\S]*\}/)
               if (jsonMatch) {
                 parsedResponse = JSON.parse(jsonMatch[0])
               } else {
-                parsedResponse = JSON.parse(responseText)
+                // If no JSON object found, try parsing the whole thing
+                parsedResponse = JSON.parse(cleanedText)
               }
             } catch (parseError) {
-              console.error(`Failed to parse section ${sectionIndex + 1} response:`, parseError)
+              console.error(`❌ Failed to parse section ${sectionIndex + 1} response:`)
+              console.error(`   Error: ${parseError.message}`)
+              console.error(`   Response starts with: ${responseText.substring(0, 100)}`)
+              console.error(`   Response length: ${responseText.length} chars`)
               return { fields: [], sectionIndex }
             }
             
