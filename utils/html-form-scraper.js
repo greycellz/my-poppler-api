@@ -120,11 +120,30 @@ async function extractFormFieldsFromDOM(page) {
         btn.getAttribute('aria-label')?.toLowerCase().includes('star')
       )
       
-      // Must have stars/emojis AND star aria-labels to be a rating field (more specific)
-      if ((hasStarSymbols || hasEmojiButtons) && hasStarAriaLabels) {
+      // Check for "Rating" label in parent - if we find it, this is likely a rating field
+      let hasRatingLabel = false
+      let current = parentContainer.parentElement
+      let depth = 0
+      while (current && depth < 4) {
+        const labels = current.querySelectorAll('label')
+        for (const label of labels) {
+          const labelText = label.textContent?.toLowerCase().trim() || ''
+          if (labelText === 'rating' && !label.querySelector('input, button, canvas')) {
+            hasRatingLabel = true
+            break
+          }
+        }
+        if (hasRatingLabel) break
+        current = current.parentElement
+        depth++
+      }
+      
+      // Must have stars/emojis AND (star aria-labels OR "Rating" label)
+      // This ensures we capture rating fields even if aria-labels aren't perfect
+      if ((hasStarSymbols || hasEmojiButtons) && (hasStarAriaLabels || hasRatingLabel)) {
         processedRatingContainers.add(parentContainer)
         
-        // Find the label for the rating field - look more carefully
+        // Find the label for the rating field - look for "Rating" label specifically
         let ratingLabel = 'Rating'
         let isRequired = false
         
@@ -139,17 +158,23 @@ async function extractFormFieldsFromDOM(page) {
               continue // Skip labels that contain inputs/buttons
             }
             
-            // Check if label comes before the rating container in DOM
-            const children = Array.from(current.children)
-            const labelIndex = children.indexOf(label)
-            const containerIndex = children.indexOf(parentContainer)
+            const extracted = extractLabelText(label)
+            const labelText = extracted.text?.toLowerCase().trim() || ''
             
-            if (labelIndex >= 0 && containerIndex >= 0 && labelIndex < containerIndex) {
-              const extracted = extractLabelText(label)
-              if (extracted.text) {
+            // Prefer "Rating" label if found, otherwise use any label before the container
+            if (labelText === 'rating') {
+              ratingLabel = extracted.text
+              isRequired = extracted.required
+              break
+            } else if (ratingLabel === 'Rating') {
+              // Check if label comes before the rating container in DOM
+              const children = Array.from(current.children)
+              const labelIndex = children.indexOf(label)
+              const containerIndex = children.indexOf(parentContainer)
+              
+              if (labelIndex >= 0 && containerIndex >= 0 && labelIndex < containerIndex) {
                 ratingLabel = extracted.text
                 isRequired = extracted.required
-                break
               }
             }
           }
