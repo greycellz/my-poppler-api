@@ -91,12 +91,17 @@ async function extractFormFieldsFromDOM(page) {
     
     // First pass: Detect rating fields by looking for "Rating" label with star buttons
     // Structure: <div><label>Rating</label><div><button>★</button>...</div></div>
+    // Keep it broad-based: if label is "Rating" and has star buttons nearby, treat as rating field
+    // If label is "Rating" but no star buttons, it will be captured as a text field later
     const allLabels = document.querySelectorAll('label')
-    const processedRatingContainers = new Set()
+    const processedRatingLabels = new Set()
+    const processedRatingContainers = new Set() // Track containers to prevent button reprocessing
     const ratingFields = []
     
     allLabels.forEach(label => {
       const labelText = label.textContent?.trim() || ''
+      // Exact match for "Rating" (case-insensitive, trimmed)
+      // This prevents false positives like "Your Rating" or "Rating Scale"
       if (labelText.toLowerCase() !== 'rating') {
         return
       }
@@ -106,36 +111,71 @@ async function extractFormFieldsFromDOM(page) {
         return
       }
       
-      // Find the parent container that might have rating buttons
-      const parentContainer = label.parentElement
-      if (!parentContainer || processedRatingContainers.has(parentContainer)) {
+      // Skip if we've already processed this label
+      if (processedRatingLabels.has(label)) {
         return
       }
       
-      // Look for star buttons in this container or nearby
-      const buttons = parentContainer.querySelectorAll('button[type="button"]')
-      if (buttons.length < 3 || buttons.length > 10) {
-        return
-      }
+      // Look for star buttons in parent containers (search up to 2 levels to keep it focused)
+      let current = label.parentElement
+      let depth = 0
+      let foundRatingButtons = null
+      let ratingContainer = null
       
-      // Check if buttons have star symbols or star aria-labels
-      const buttonText = Array.from(buttons).map(btn => btn.textContent || '').join('')
-      const hasStarSymbols = buttonText.includes('★') || buttonText.includes('☆')
-      const hasStarAriaLabels = Array.from(buttons).some(btn => 
-        btn.getAttribute('aria-label')?.toLowerCase().includes('star')
-      )
+      while (current && depth < 2) {
+        const buttons = current.querySelectorAll('button[type="button"]')
+        
+        // Check if buttons have star symbols or star aria-labels
+        if (buttons.length >= 3 && buttons.length <= 10) {
+          const buttonText = Array.from(buttons).map(btn => btn.textContent || '').join('')
+          const hasStarSymbols = buttonText.includes('★') || buttonText.includes('☆')
+          const hasStarAriaLabels = Array.from(buttons).some(btn => 
+            btn.getAttribute('aria-label')?.toLowerCase().includes('star')
+          )
+          
+          // If we found star buttons, verify they're in the same structural container as the label
+          if (hasStarSymbols || hasStarAriaLabels) {
+            // Verify label and buttons are in the same container structure
+            const labelContainer = label.closest('div')
+            const buttonContainer = buttons[0].closest('div')
+            const isProximate = labelContainer === current || 
+                              buttonContainer === current ||
+                              current.contains(label) && current.contains(buttons[0])
+            
+            if (isProximate) {
+              foundRatingButtons = buttons
+              ratingContainer = current
+              break
+            }
+          }
+        }
+        
+        current = current.parentElement
+        depth++
+      }
       
       // If we found "Rating" label and star buttons nearby, it's a rating field
-      if (hasStarSymbols || hasStarAriaLabels) {
-        processedRatingContainers.add(parentContainer)
+      if (foundRatingButtons) {
+        processedRatingLabels.add(label)
+        if (ratingContainer) {
+          processedRatingContainers.add(ratingContainer)
+        }
         
         const extracted = extractLabelText(label)
         const ratingLabel = extracted.text || 'Rating'
         const isRequired = extracted.required
         
-        // Mark all buttons in this rating component as processed
-        buttons.forEach(btn => {
-          if (btn.id) processedInputIds.add(btn.id)
+        // Mark all buttons in this rating component as processed (even without IDs)
+        foundRatingButtons.forEach((btn, btnIndex) => {
+          if (btn.id) {
+            processedInputIds.add(btn.id)
+          } else {
+            // Create unique identifier for buttons without IDs to prevent reprocessing
+            const parent = btn.parentElement
+            const siblings = parent ? Array.from(parent.children) : []
+            const btnPosition = siblings.indexOf(btn)
+            processedInputIds.add(`rating_btn_${ratingFields.length}_${btnIndex}_${btnPosition}`)
+          }
         })
         
         // Get DOM position for sorting (use label's position)
@@ -152,6 +192,8 @@ async function extractFormFieldsFromDOM(page) {
           _domPosition: labelIndex >= 0 ? labelIndex * 100 : 999999
         })
       }
+      // Note: If label is "Rating" but no star buttons found, it will be processed
+      // as a regular text field later, which is the desired fallback behavior
     })
     
     // Process ALL form elements in DOM order to preserve sequence
