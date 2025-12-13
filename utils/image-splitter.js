@@ -6,7 +6,7 @@ const sharp = require('sharp')
  */
 const SPLIT_CONFIG = {
   MAX_HEIGHT: parseInt(process.env.IMAGE_SPLIT_MAX_HEIGHT || '4000', 10), // Default: 4000px
-  OVERLAP: parseInt(process.env.IMAGE_SPLIT_OVERLAP || '200', 10) // Default: 200px
+  OVERLAP: parseInt(process.env.IMAGE_SPLIT_OVERLAP || '20', 10) // Default: 20px (reduced from 200px)
 }
 
 /**
@@ -119,53 +119,74 @@ async function splitTallImage(imageBuffer, maxHeight = SPLIT_CONFIG.MAX_HEIGHT, 
  * @returns {Array} Merged and deduplicated fields
  */
 function mergeFieldExtractions(sectionResults) {
+  // First, collect ALL fields before deduplication for logging
+  const allFieldsBeforeDedup = []
+  const sortedResults = [...sectionResults].sort((a, b) => a.sectionIndex - b.sectionIndex)
+  
+  for (const sectionResult of sortedResults) {
+    const fields = sectionResult.fields || []
+    allFieldsBeforeDedup.push(...fields.map(f => ({ ...f, fromSection: sectionResult.sectionIndex + 1 })))
+  }
+  
+  console.log(`📊 Total fields before deduplication: ${allFieldsBeforeDedup.length}`)
+  console.log(`📋 Field labels before deduplication:`)
+  allFieldsBeforeDedup.forEach((field, i) => {
+    console.log(`  ${i + 1}. [Section ${field.fromSection}] "${field.label}" (${field.type})`)
+  })
+  
+  // Now perform deduplication
   const allFields = []
   const seenFields = new Set()
-  
-  // Sort by section index to process in order
-  const sortedResults = [...sectionResults].sort((a, b) => a.sectionIndex - b.sectionIndex)
   
   for (const sectionResult of sortedResults) {
     const fields = sectionResult.fields || []
     
     for (const field of fields) {
-      // Strategy 1: Normalized label + type + required status
+      // Strategy 1: Normalized label + type + required status + options
+      // This is the most strict - only deduplicates if label, type, required, AND options all match
       const normalizedLabel = field.label?.toLowerCase().trim().replace(/\s+/g, ' ') || ''
-      const fieldKey1 = `${normalizedLabel}_${field.type}_${field.required ? 'req' : 'opt'}`
+      const optionsKey = field.options ? JSON.stringify(field.options.sort()) : ''
+      const fieldKey1 = `${normalizedLabel}_${field.type}_${field.required ? 'req' : 'opt'}_${optionsKey}`
       
-      // Strategy 2: Label + type (ignore required for exact matches)
-      const fieldKey2 = `${normalizedLabel}_${field.type}`
+      // Strategy 2: Label + type + options (ignore required status)
+      const fieldKey2 = `${normalizedLabel}_${field.type}_${optionsKey}`
       
-      // Strategy 3: Label only (for cases where same field appears with different types)
-      const fieldKey3 = normalizedLabel
+      // Strategy 3: Label + type only (most lenient - only for exact matches)
+      const fieldKey3 = `${normalizedLabel}_${field.type}`
       
-      // Check all strategies - if any match, consider it a duplicate
-      if (seenFields.has(fieldKey1) || seenFields.has(fieldKey2)) {
-        console.log(`🔄 Deduplicating field: "${field.label}" (appeared in overlap region)`)
+      // Check strategies - only deduplicate if we have a strong match
+      // Strategy 1: Exact match (label + type + required + options)
+      if (seenFields.has(fieldKey1)) {
+        console.log(`🔄 Deduplicating field: "${field.label}" (exact match: label + type + required + options)`)
         continue
       }
       
-      // For Strategy 3, only check if label is substantial (not empty/short)
-      if (normalizedLabel.length > 3 && seenFields.has(fieldKey3)) {
-        // Additional check: if options match, it's definitely a duplicate
-        if (field.options && field.options.length > 0) {
-          const existingField = allFields.find(f => 
-            f.label?.toLowerCase().trim() === normalizedLabel
-          )
-          if (existingField && existingField.options) {
-            const optionsMatch = JSON.stringify(existingField.options.sort()) === JSON.stringify(field.options.sort())
-            if (optionsMatch) {
-              console.log(`🔄 Deduplicating field: "${field.label}" (same label and options)`)
-              continue
-            }
+      // Strategy 2: Match with label + type + options (ignore required)
+      if (seenFields.has(fieldKey2)) {
+        console.log(`🔄 Deduplicating field: "${field.label}" (match: label + type + options)`)
+        continue
+      }
+      
+      // Strategy 3: Only for fields with options - if label + type + options match, it's a duplicate
+      // This prevents deduplicating fields like "Phone" for Mother vs Father if they have different options
+      if (field.options && field.options.length > 0 && seenFields.has(fieldKey3)) {
+        const existingField = allFields.find(f => 
+          f.label?.toLowerCase().trim() === normalizedLabel && f.type === field.type
+        )
+        if (existingField && existingField.options && existingField.options.length > 0) {
+          const optionsMatch = JSON.stringify(existingField.options.sort()) === JSON.stringify(field.options.sort())
+          if (optionsMatch) {
+            console.log(`🔄 Deduplicating field: "${field.label}" (same label, type, and options)`)
+            continue
           }
         }
       }
       
-      // Add to seen sets
+      // Add to seen sets (only add if we're keeping the field)
       seenFields.add(fieldKey1)
       seenFields.add(fieldKey2)
-      if (normalizedLabel.length > 3) {
+      // Only add fieldKey3 if field has options (to avoid false positives)
+      if (field.options && field.options.length > 0) {
         seenFields.add(fieldKey3)
       }
       

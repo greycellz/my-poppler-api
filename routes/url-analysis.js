@@ -13,7 +13,7 @@ const openai = new OpenAI({
 
 // Configuration
 const SPLIT_MAX_HEIGHT = parseInt(process.env.IMAGE_SPLIT_MAX_HEIGHT || '4000', 10)
-const SPLIT_OVERLAP = parseInt(process.env.IMAGE_SPLIT_OVERLAP || '200', 10)
+const SPLIT_OVERLAP = parseInt(process.env.IMAGE_SPLIT_OVERLAP || '20', 10) // Default: 20px (reduced from 200px)
 
 /**
  * POST /analyze-url
