@@ -89,110 +89,58 @@ async function extractFormFieldsFromDOM(page) {
       return { text, required: isFieldRequired }
     }
     
-    // First pass: Detect rating fields (they're buttons, not form inputs)
-    // We need to detect them separately since they don't have input/textarea/select elements
-    const allButtons = document.querySelectorAll('button[type="button"]')
+    // First pass: Detect rating fields by looking for "Rating" label with star buttons
+    // Structure: <div><label>Rating</label><div><button>★</button>...</div></div>
+    const allLabels = document.querySelectorAll('label')
     const processedRatingContainers = new Set()
     const ratingFields = []
     
-    allButtons.forEach(button => {
-      // Check if this button is part of a rating field
-      const parentContainer = button.closest('div')
+    allLabels.forEach(label => {
+      const labelText = label.textContent?.trim() || ''
+      if (labelText.toLowerCase() !== 'rating') {
+        return
+      }
+      
+      // Skip if label contains inputs/buttons (not a standalone label)
+      if (label.querySelector('input, button, canvas')) {
+        return
+      }
+      
+      // Find the parent container that might have rating buttons
+      const parentContainer = label.parentElement
       if (!parentContainer || processedRatingContainers.has(parentContainer)) {
         return
       }
       
-      // Skip if this container has a select element (dropdowns have buttons too, but aren't ratings)
-      if (parentContainer.querySelector('select')) {
-        return
-      }
-      
-      // Check if this container has rating-like structure
+      // Look for star buttons in this container or nearby
       const buttons = parentContainer.querySelectorAll('button[type="button"]')
       if (buttons.length < 3 || buttons.length > 10) {
         return
       }
       
+      // Check if buttons have star symbols or star aria-labels
       const buttonText = Array.from(buttons).map(btn => btn.textContent || '').join('')
       const hasStarSymbols = buttonText.includes('★') || buttonText.includes('☆')
-      const hasEmojiButtons = /[😞😕😐🙂😄]/.test(buttonText)
       const hasStarAriaLabels = Array.from(buttons).some(btn => 
         btn.getAttribute('aria-label')?.toLowerCase().includes('star')
       )
       
-      // Check for "Rating" label in parent - if we find it, this is likely a rating field
-      let hasRatingLabel = false
-      let current = parentContainer.parentElement
-      let depth = 0
-      while (current && depth < 4) {
-        const labels = current.querySelectorAll('label')
-        for (const label of labels) {
-          const labelText = label.textContent?.toLowerCase().trim() || ''
-          if (labelText === 'rating' && !label.querySelector('input, button, canvas')) {
-            hasRatingLabel = true
-            break
-          }
-        }
-        if (hasRatingLabel) break
-        current = current.parentElement
-        depth++
-      }
-      
-      // Must have stars/emojis AND (star aria-labels OR "Rating" label)
-      // This ensures we capture rating fields even if aria-labels aren't perfect
-      if ((hasStarSymbols || hasEmojiButtons) && (hasStarAriaLabels || hasRatingLabel)) {
+      // If we found "Rating" label and star buttons nearby, it's a rating field
+      if (hasStarSymbols || hasStarAriaLabels) {
         processedRatingContainers.add(parentContainer)
         
-        // Find the label for the rating field - look for "Rating" label specifically
-        let ratingLabel = 'Rating'
-        let isRequired = false
-        
-        // Look for label in parent elements (rating field structure)
-        let current = parentContainer.parentElement
-        let depth = 0
-        while (current && depth < 4) {
-          // Check for label that comes before this container
-          const labels = current.querySelectorAll('label')
-          for (const label of labels) {
-            if (label.querySelector('input, button, canvas')) {
-              continue // Skip labels that contain inputs/buttons
-            }
-            
-            const extracted = extractLabelText(label)
-            const labelText = extracted.text?.toLowerCase().trim() || ''
-            
-            // Prefer "Rating" label if found, otherwise use any label before the container
-            if (labelText === 'rating') {
-              ratingLabel = extracted.text
-              isRequired = extracted.required
-              break
-            } else if (ratingLabel === 'Rating') {
-              // Check if label comes before the rating container in DOM
-              const children = Array.from(current.children)
-              const labelIndex = children.indexOf(label)
-              const containerIndex = children.indexOf(parentContainer)
-              
-              if (labelIndex >= 0 && containerIndex >= 0 && labelIndex < containerIndex) {
-                ratingLabel = extracted.text
-                isRequired = extracted.required
-              }
-            }
-          }
-          
-          if (ratingLabel !== 'Rating') break
-          
-          current = current.parentElement
-          depth++
-        }
+        const extracted = extractLabelText(label)
+        const ratingLabel = extracted.text || 'Rating'
+        const isRequired = extracted.required
         
         // Mark all buttons in this rating component as processed
         buttons.forEach(btn => {
           if (btn.id) processedInputIds.add(btn.id)
         })
         
-        // Get DOM position for sorting (find first button's position in document)
-        const allElements = Array.from(document.querySelectorAll('input, textarea, select, button'))
-        const firstButtonIndex = allElements.indexOf(buttons[0])
+        // Get DOM position for sorting (use label's position)
+        const allElements = Array.from(document.querySelectorAll('input, textarea, select, label'))
+        const labelIndex = allElements.indexOf(label)
         
         ratingFields.push({
           id: `rating_${Date.now()}_${ratingFields.length}`,
@@ -201,7 +149,7 @@ async function extractFormFieldsFromDOM(page) {
           required: isRequired,
           placeholder: null,
           options: undefined,
-          _domPosition: firstButtonIndex >= 0 ? firstButtonIndex : 999999
+          _domPosition: labelIndex >= 0 ? labelIndex * 100 : 999999
         })
       }
     })
@@ -648,8 +596,29 @@ async function extractFormFieldsFromDOM(page) {
         }
       }
       
-      // Method 5: Use placeholder or name as fallback
-      if (!labelText) {
+      // Method 5: Look for "Rating" label in nearby elements (rating fields might not have standard inputs)
+      // This is a fallback to ensure we capture rating fields even if they're not detected as special components
+      if (!labelText || labelText === `Field ${index + 1}`) {
+        const parentDiv = element.closest('div')
+        if (parentDiv) {
+          // Check if there's a "Rating" label nearby
+          const nearbyLabels = parentDiv.parentElement?.querySelectorAll('label') || []
+          for (const label of nearbyLabels) {
+            const labelTextContent = label.textContent?.trim() || ''
+            if (labelTextContent.toLowerCase() === 'rating' && !label.querySelector('input, button, canvas')) {
+              const extracted = extractLabelText(label)
+              if (extracted.text) {
+                labelText = extracted.text
+                isRequired = extracted.required
+                break
+              }
+            }
+          }
+        }
+      }
+      
+      // Method 6: Use placeholder or name as fallback
+      if (!labelText || labelText === `Field ${index + 1}`) {
         labelText = elementPlaceholder || element.name || `Field ${index + 1}`
       }
       
