@@ -15,6 +15,7 @@
         "test:vision-endpoints": "jest test/vision-api-endpoints.test.js",
         "test:vision-manual": "node test/test-vision-endpoints-manual.js",
         "test:html-scraping": "node test/test-html-scraping.js",
+        "test:pdf-analysis": "node test/test-pdf-analysis.js",
         "postinstall": "echo 'Skipping Chromium download - using system Chrome'"
     },
     "dependencies": {
