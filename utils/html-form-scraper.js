@@ -116,13 +116,16 @@ async function extractFormFieldsFromDOM(page) {
         return
       }
       
-      // Look for star buttons in parent containers (search up to 2 levels to keep it focused)
+      // Look for star buttons in parent containers (search up to 3 levels to handle nested structures)
+      // The user's HTML shows: <div><label>Rating</label><div><div><buttons></div></div></div>
+      // So buttons can be 2-3 levels deep from the label
       let current = label.parentElement
       let depth = 0
       let foundRatingButtons = null
       let ratingContainer = null
       
-      while (current && depth < 2) {
+      while (current && depth < 3) {
+        // Use querySelectorAll to find all buttons in this container and its children
         const buttons = current.querySelectorAll('button[type="button"]')
         
         // Check if buttons have star symbols or star aria-labels
