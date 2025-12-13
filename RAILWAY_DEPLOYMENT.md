@@ -29,6 +29,129 @@ railway up
 
 Set these in your Railway project dashboard:
 
+### **Core Environment Variables**
+
+#### **GCP Configuration**
+```env
+GOOGLE_CLOUD_PROJECT=chatterforms
+GOOGLE_APPLICATION_CREDENTIALS=/app/chatterforms-app-key.json
+GOOGLE_APPLICATION_CREDENTIALS_JSON=<service-account-key-json-content>
+```
+
+#### **Railway Configuration**
+```env
+RAILWAY_PUBLIC_DOMAIN=my-poppler-api-dev.up.railway.app
+# Note: Do NOT include https:// prefix, it will be added automatically
+```
+
+#### **OpenAI API (for Vision API fallback)**
+```env
+OPENAI_API_KEY=sk-...
+# Required for Vision API-based URL analysis (fallback method)
+```
+
+### **URL Analysis & HTML Scraping Environment Variables**
+
+#### **Feature Flags (Vercel Frontend)**
+These should be set in **Vercel** (not Railway):
+```env
+USE_HTML_SCRAPING=TRUE
+# Set to 'TRUE' or 'true' to enable HTML scraping as primary method
+# If disabled or not set, falls back to Vision API
+
+USE_RAILWAY_VISION=TRUE
+# Set to 'TRUE' or 'true' to enable Railway backend Vision API processing
+# If disabled, uses Vercel-based processing (legacy)
+
+RAILWAY_BACKEND_URL=https://my-poppler-api-dev.up.railway.app
+# Railway backend URL for API calls
+# Used by Vercel to call Railway endpoints
+```
+
+#### **Image Splitting Configuration (Railway Backend)**
+For Vision API fallback when processing very tall screenshots:
+```env
+IMAGE_SPLIT_MAX_HEIGHT=4000
+# Maximum height (in pixels) before splitting images
+# Default: 4000px
+# Images taller than this will be split into sections
+
+IMAGE_SPLIT_OVERLAP=20
+# Overlap pixels between image sections (for deduplication)
+# Default: 20px
+# Lower values = less overlap, faster processing, but may miss fields at boundaries
+```
+
+#### **HTML Scraper Configuration (Railway Backend)**
+```env
+HTML_SCRAPER_WAIT_TIME=4000
+# Wait time (in milliseconds) for dynamic content to load
+# Default: 4000ms (4 seconds)
+# Increase if forms have slow-loading dynamic content
+
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+# Path to Chrome/Chromium executable (usually auto-detected)
+# Only set if using custom Chrome installation
+```
+
+#### **Puppeteer Service URL (Railway Backend)**
+```env
+PUPPETEER_SERVICE_URL=https://my-poppler-api-dev.up.railway.app
+# Internal URL for Puppeteer screenshot service
+# Falls back to RAILWAY_PUBLIC_DOMAIN if not set
+# Used for internal screenshot generation
+```
+
+### **Environment Variable Summary by Environment**
+
+#### **Development (Railway Dev)**
+```env
+# Railway Backend
+RAILWAY_PUBLIC_DOMAIN=my-poppler-api-dev.up.railway.app
+OPENAI_API_KEY=sk-...
+IMAGE_SPLIT_MAX_HEIGHT=4000
+IMAGE_SPLIT_OVERLAP=20
+HTML_SCRAPER_WAIT_TIME=4000
+GOOGLE_CLOUD_PROJECT=chatterforms
+GOOGLE_APPLICATION_CREDENTIALS_JSON=<dev-service-account-key>
+
+# Vercel Frontend
+USE_HTML_SCRAPING=TRUE
+USE_RAILWAY_VISION=TRUE
+RAILWAY_BACKEND_URL=https://my-poppler-api-dev.up.railway.app
+```
+
+#### **Production (Railway Production)**
+```env
+# Railway Backend
+RAILWAY_PUBLIC_DOMAIN=my-poppler-api-production.up.railway.app
+OPENAI_API_KEY=sk-...
+IMAGE_SPLIT_MAX_HEIGHT=4000
+IMAGE_SPLIT_OVERLAP=20
+HTML_SCRAPER_WAIT_TIME=4000
+GOOGLE_CLOUD_PROJECT=chatterforms
+GOOGLE_APPLICATION_CREDENTIALS_JSON=<prod-service-account-key>
+
+# Vercel Frontend
+USE_HTML_SCRAPING=TRUE
+USE_RAILWAY_VISION=TRUE
+RAILWAY_BACKEND_URL=https://my-poppler-api-production.up.railway.app
+```
+
+### **Feature Flag Behavior**
+
+#### **HTML Scraping (Primary Method)**
+- **Enabled**: `USE_HTML_SCRAPING=TRUE` on Vercel
+- **Behavior**: Attempts HTML scraping first via Railway `/api/analyze-url-html`
+- **Fallback**: If HTML scraping fails, falls back to Vision API
+- **Benefits**: Faster, more accurate, lower cost than Vision API
+
+#### **Vision API (Fallback Method)**
+- **Enabled**: `USE_RAILWAY_VISION=TRUE` on Vercel (or when HTML scraping disabled)
+- **Behavior**: Uses Railway `/api/analyze-url` endpoint with Vision API
+- **Fallback**: If Railway unavailable, uses Vercel-based processing (legacy)
+- **Use Case**: When HTML scraping fails or for non-web-form images
+
 ## 📊 BigQuery Setup for Analytics
 
 ### **1. Create BigQuery Dataset**
@@ -91,6 +214,36 @@ You need to add the service account key files to your Railway project:
 NODE_ENV=production
 ENABLE_GCP_TEST=true  # Only if you want to test GCP integration
 ```
+
+## 📝 URL Analysis & HTML Scraping Feature Documentation
+
+### **Overview**
+The system supports two methods for analyzing form URLs:
+1. **HTML Scraping** (Primary): Directly extracts fields from DOM structure
+2. **Vision API** (Fallback): Uses GPT-4o Vision to analyze screenshots
+
+### **HTML Scraping Architecture**
+- **Frontend (Vercel)**: `/api/analyze-url` route with feature flag logic
+- **Backend (Railway)**: `/api/analyze-url-html` endpoint using Puppeteer
+- **Flow**: Vercel → Railway HTML scraper → Returns extracted fields
+
+### **Vision API Architecture (Fallback)**
+- **Frontend (Vercel)**: `/api/analyze-url` route with fallback logic
+- **Backend (Railway)**: `/api/analyze-url` endpoint with image splitting
+- **Flow**: Vercel → Railway screenshot → Split if needed → Vision API → Returns fields
+
+### **Field Types Supported**
+- Standard HTML inputs: `text`, `email`, `tel`, `date`, `textarea`, `select`
+- Radio groups: `radio-with-other` (with "Other" option detection)
+- Checkbox groups: `checkbox`, `checkbox-with-other`
+- Special fields: `signature`, `file`, `rating`
+- All fields preserve question numbers and maintain DOM order
+
+### **Known Limitations & Future Enhancements**
+1. **Rating Field Detection**: Currently works for standard star-based rating fields. Future enhancement: Support for custom rating implementations (emoji-based, numeric scales, etc.)
+2. **Dynamic Content**: Forms with very slow-loading content may need increased `HTML_SCRAPER_WAIT_TIME`
+3. **Complex Nested Structures**: Some deeply nested form structures may require additional detection logic
+4. **Custom Field Types**: Non-standard field implementations may be captured as `text` fields (fallback behavior)
 
 ## 📋 Pre-Deployment Checklist
 
