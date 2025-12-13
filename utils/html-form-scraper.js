@@ -135,12 +135,9 @@ async function extractFormFieldsFromDOM(page) {
           
           // If we found star buttons, verify they're in the same structural container as the label
           if (hasStarSymbols || hasStarAriaLabels) {
-            // Verify label and buttons are in the same container structure
-            const labelContainer = label.closest('div')
-            const buttonContainer = buttons[0].closest('div')
-            const isProximate = labelContainer === current || 
-                              buttonContainer === current ||
-                              current.contains(label) && current.contains(buttons[0])
+            // Broad-based check: if current container contains both label and buttons, they're related
+            // This is intentionally flexible to handle various form structures
+            const isProximate = current.contains(label) && current.contains(buttons[0])
             
             if (isProximate) {
               foundRatingButtons = buttons
