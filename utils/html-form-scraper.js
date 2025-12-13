@@ -92,11 +92,12 @@ async function extractFormFieldsFromDOM(page) {
     // First pass: Detect rating fields by looking for "Rating" label with star buttons
     // Structure: <div><label>Rating</label><div><button>★</button>...</div></div>
     // Keep it broad-based: if label is "Rating" and has star buttons nearby, treat as rating field
-    // If label is "Rating" but no star buttons, it will be captured as a text field later
+    // If label is "Rating" but no star buttons, capture it as a text field (fallback)
     const allLabels = document.querySelectorAll('label')
     const processedRatingLabels = new Set()
     const processedRatingContainers = new Set() // Track containers to prevent button reprocessing
     const ratingFields = []
+    const ratingLabelsAsText = [] // Track "Rating" labels that should be captured as text fields
     
     allLabels.forEach(label => {
       const labelText = label.textContent?.trim() || ''
@@ -191,9 +192,20 @@ async function extractFormFieldsFromDOM(page) {
           options: undefined,
           _domPosition: labelIndex >= 0 ? labelIndex * 100 : 999999
         })
+      } else {
+        // Fallback: If label is "Rating" but no star buttons found, capture as text field
+        // Mark this label so we can add it as a text field later
+        processedRatingLabels.add(label)
+        const extracted = extractLabelText(label)
+        const allElements = Array.from(document.querySelectorAll('input, textarea, select, label'))
+        const labelIndex = allElements.indexOf(label)
+        
+        ratingLabelsAsText.push({
+          label: extracted.text || 'Rating',
+          required: extracted.required,
+          _domPosition: labelIndex >= 0 ? labelIndex * 100 : 999999
+        })
       }
-      // Note: If label is "Rating" but no star buttons found, it will be processed
-      // as a regular text field later, which is the desired fallback behavior
     })
     
     // Process ALL form elements in DOM order to preserve sequence
@@ -706,6 +718,22 @@ async function extractFormFieldsFromDOM(page) {
       }
       
       extractedFields.push(field)
+    })
+    
+    // Add rating fields (with star buttons detected) to extractedFields
+    extractedFields.push(...ratingFields)
+    
+    // Add "Rating" labels that didn't have star buttons as text fields (fallback)
+    ratingLabelsAsText.forEach((ratingLabelInfo, index) => {
+      extractedFields.push({
+        id: `rating_text_${Date.now()}_${index}`,
+        label: ratingLabelInfo.label,
+        type: 'text',
+        required: ratingLabelInfo.required,
+        placeholder: null,
+        options: undefined,
+        _domPosition: ratingLabelInfo._domPosition
+      })
     })
     
     // Sort fields by DOM position to preserve order
