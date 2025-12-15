@@ -73,14 +73,9 @@ router.post('/analyze-images', async (req, res) => {
             `📦 Image ${index + 1}: ${(compressionResult.originalSize / 1024).toFixed(1)}KB (no compression applied)`
           )
 
-          // Determine detail level using original metadata
-          const metadataAfterCompression = await sharp(originalBuffer).metadata()
-          const needsHighDetail = !quickComplexityCheck(
-            compressionResult.buffer,
-            metadataAfterCompression.width,
-            metadataAfterCompression.height
-          )
-          const detailLevel = needsHighDetail ? 'high' : 'low'
+          // For PDF page analysis, always request high detail to maximize fidelity.
+          // (Vision API supports "low" and "high" detail levels.)
+          const detailLevel = 'high'
           console.log(`🔍 Image ${index + 1}: Using detail="${detailLevel}"`)
 
           // Convert to base64
