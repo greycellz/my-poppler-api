@@ -1,0 +1,236 @@
+
+> chatterforms-api@1.1.0 test:html-scraping
+> node test/test-html-scraping.js
+
+🚀 Testing HTML Scraping Endpoint
+
+Railway URL: https://my-poppler-api-dev.up.railway.app
+Form URL: https://www.chatterforms.com/forms/form_1765518416011_bszeswqcu
+
+📤 Sending request to Railway /api/analyze-url-html...
+
+✅ Analysis completed
+
+Results:
+  Success: true
+  Fields extracted: 175
+  Method: html-scraping
+  Processing time: 27288ms
+  Total time: 27536ms
+
+Metadata:
+  URL: https://www.chatterforms.com/forms/form_1765518416011_bszeswqcu
+  Field count: 175
+  Field types: {
+  "text": 85,
+  "tel": 5,
+  "email": 1,
+  "radio-with-other": 45,
+  "date": 2,
+  "checkbox": 9,
+  "textarea": 28
+}
+
+📋 All extracted fields (175 total):
+
+  1. "Name" (text)
+  2. "Home Address" (text)
+  3. "Phone (Home)" (tel)
+  4. "Phone (Work)" (tel)
+  5. "Phone (Cell)" (tel)
+  6. "Phone (Other, please specify)" (tel)
+  7. "Email" (email)
+  8. "Emergency Contact (Name)" (text)
+  9. "Emergency Contact (Phone)" (tel)
+  10. "Emergency Contact (Relationship)" (text)
+  11. "Referred by" (text)
+  12. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  13. "Yes" (text)
+  14. "Yes" (radio-with-other) [3 options: Yes, No, please mail it to my home address] [has Other option]
+  15. "Yes" (text)
+  16. "1. Age" (text)
+  17. "2. Date of birth" (date)
+  18. "3. Gender" (text)
+  19. "Caucasian" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  20. "Black/African-American" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  21. "Hispanic" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  22. "South Asian" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  23. "Middle Eastern" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  24. "East Asian" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  25. "Southeast Asian" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  26. "Native American" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  27. "Pacific Islander" (checkbox) [9 options: Caucasian, Black/African-American, Hispanic...]
+  28. "Caucasian" (text)
+  29. "Protestant" (radio-with-other) [7 options: Protestant, Catholic, Jewish...] [has Other option]
+  30. "Protestant" (text)
+  31. "6. What is your sexual orientation?" (text)
+  32. "Single, never married" (radio-with-other) [6 options: Single, never married, Cohabiting, Married...] [has Other option]
+  33. "Single, never married" (text)
+  34. "8. If you have a partner or spouse, how long have you been together?" (text)
+  35. "9. If you have a partner or spouse, what is your spouse/partner's occupation?" (text)
+  36. "10. If divorced, when did you divorce and how long were you married?" (text)
+  37. "11. If you are widowed, when and how did your spouse die?" (text)
+  38. "12. If applicable, please list names and ages of your children" (textarea)
+  39. "13. Names of persons living in your home and your relationship to them" (textarea)
+  40. "1. Mother's First Name" (text)
+  41. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  42. "Yes" (text)
+  43. "Where was she born?" (text)
+  44. "If living, age and health status" (text)
+  45. "If living, where does she live now?" (text)
+  46. "If deceased, year and cause of death" (text)
+  47. "2. Father's First Name" (text)
+  48. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  49. "Yes" (text)
+  50. "Where was he born?" (text)
+  51. "If living, age and health status" (text)
+  52. "If living, where does he live now?" (text)
+  53. "If deceased, year and cause of death" (text)
+  54. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  55. "Yes" (text)
+  56. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  57. "Yes" (text)
+  58. "If yes, when?" (text)
+  59. "5. With whom did you primarily live while growing up?" (text)
+  60. "6. Siblings" (textarea)
+  61. "7. Where were you born?" (text)
+  62. "8. Where did you grow up?" (text)
+  63. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  64. "Yes" (text)
+  65. "If no, please specify first language" (text)
+  66. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  67. "Yes" (text)
+  68. "Full-time" (radio-with-other) [2 options: Full-time, Part-time] [has Other option]
+  69. "Full-time" (text)
+  70. "If yes, what are you studying?" (text)
+  71. "2. Number of years of education completed" (text)
+  72. "3. What is your highest degree and when did you earn it?" (text)
+  73. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  74. "Yes" (text)
+  75. "If yes, give details" (textarea)
+  76. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  77. "Yes" (text)
+  78. "If yes, give details" (textarea)
+  79. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  80. "Yes" (text)
+  81. "Full-time" (radio-with-other) [2 options: Full-time, Part-time] [has Other option]
+  82. "Full-time" (text)
+  83. "7. Recent Employment history" (textarea)
+  84. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  85. "Yes" (text)
+  86. "If yes, give details" (textarea)
+  87. "1. Please describe briefly what brings you in to see me" (textarea)
+  88. "a. When did you start having these problems?" (text)
+  89. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  90. "Yes" (text)
+  91. "If yes, when?" (text)
+  92. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  93. "Yes" (text)
+  94. "If yes, please provide the following info" (textarea)
+  95. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  96. "Yes" (text)
+  97. "If yes, please provide the following information" (textarea)
+  98. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  99. "Yes" (text)
+  100. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  101. "Yes" (text)
+  102. "If yes, please complete the following chart" (textarea)
+  103. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  104. "Yes" (text)
+  105. "If yes, please complete the following chart" (textarea)
+  106. "7. Are you currently involved in any other activities to help with your symptoms?" (textarea)
+  107. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  108. "Yes" (text)
+  109. "If yes, what do you take?" (textarea)
+  110. "9. Please list medications you have taken previously to treat mental or emotional difficulties" (textarea)
+  111. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  112. "Yes" (text)
+  113. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  114. "Yes" (text)
+  115. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  116. "Yes" (text)
+  117. "If yes, which family members and what types of problems?" (textarea)
+  118. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  119. "Yes" (text)
+  120. "If yes, please describe" (textarea)
+  121. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  122. "Yes" (text)
+  123. "If yes, please complete the following chart" (textarea)
+  124. "3. List dates of any hospitalizations for physical problems" (textarea)
+  125. "4. When was your last physical examination by a physician?" (text)
+  126. "What was the outcome?" (text)
+  127. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  128. "Yes" (text)
+  129. "If yes, how often?" (text)
+  130. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  131. "Yes" (text)
+  132. "If yes, how much do you smoke?" (text)
+  133. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  134. "Yes" (text)
+  135. "If yes, how many cups daily?" (text)
+  136. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  137. "Yes" (text)
+  138. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  139. "Yes" (text)
+  140. "If yes, please complete the following" (textarea)
+  141. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  142. "Yes" (text)
+  143. "If yes, please explain" (textarea)
+  144. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  145. "Yes" (text)
+  146. "If yes, how much do you drink?" (text)
+  147. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  148. "Yes" (text)
+  149. "If yes, please explain" (textarea)
+  150. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  151. "Yes" (text)
+  152. "If yes, please describe the provider/program, give dates and describe the outcome" (textarea)
+  153. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  154. "Yes" (text)
+  155. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  156. "Yes" (text)
+  157. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  158. "Yes" (text)
+  159. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  160. "Yes" (text)
+  161. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  162. "Yes" (text)
+  163. "If yes, please describe the circumstances and give dates" (textarea)
+  164. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  165. "Yes" (text)
+  166. "If yes, please describe the circumstances and give dates" (textarea)
+  167. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  168. "Yes" (text)
+  169. "If yes, please explain" (textarea)
+  170. "Yes" (radio-with-other) [2 options: Yes, No] [has Other option]
+  171. "Yes" (text)
+  172. "If yes, please provide that person’s name and contact information" (textarea)
+  173. "5. If there is any other information that would be helpful for me to know, please explain" (textarea)
+  174. "Preview" (text)
+  175. "Date" (date)
+
+📊 Field type breakdown:
+  text: 85
+  tel: 5
+  email: 1
+  radio-with-other: 45
+  date: 2
+  checkbox: 9
+  textarea: 28
+
+⏱️ Total time: 27.54s
+
+✅ Field count looks good (expected ~120, got 175)
+
+🔢 Question number preservation:
+  Fields with question numbers: 25 / 175
+  Sample numbered fields:
+    - "1. Age"
+    - "2. Date of birth"
+    - "3. Gender"
+    - "6. What is your sexual orientation?"
+    - "8. If you have a partner or spouse, how long have you been together?"
+
+✅ Field structure validation:
+  ✅ All fields have required properties (id, label, type)
+  Required fields: 0 / 175

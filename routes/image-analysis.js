@@ -114,11 +114,14 @@ router.post('/analyze-images', async (req, res) => {
 
     // Call GPT-4 Vision API with timeout
     try {
+      // Match production screenshot prompts (Vercel /api/analyze-images fallback)
+      // so we can compare behavior apples-to-apples.
       const completionPromise = openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
           {
             role: 'system',
+            // Use the same default as frontend's processWithCurrentImplementation
             content: systemMessage || 'You are a form analysis expert. Extract all form fields from the provided images.'
           },
           {
@@ -126,14 +129,17 @@ router.post('/analyze-images', async (req, res) => {
             content: [
               {
                 type: 'text',
+                // Same default user message as frontend
                 text: userMessage || 'Analyze these images and extract all form fields.'
               },
               ...validImages
             ]
           }
         ],
-        max_tokens: 15000,
+        max_tokens: 20000, // Increased for large forms (8+ pages)
         temperature: 0.1
+        // Note: Not using response_format: json_object because we need array/fields array,
+        // parsing logic below already handles both array and object-with-fields.
       })
 
       const completion = await withTimeout(

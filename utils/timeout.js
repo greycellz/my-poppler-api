@@ -19,7 +19,7 @@ function withTimeout(promise, timeoutMs, errorMessage) {
 const TIMEOUTS = {
   IMAGE_FETCH: 30_000,        // 30 seconds per image
   IMAGE_COMPRESSION: 60_000,   // 60 seconds per image
-  GPT_VISION_API: 180_000,     // 3 minutes (for 8-10 images)
+  GPT_VISION_API: 300_000,     // 5 minutes (for 8-10 images, large forms)
   JSON_PARSING: 5_000,         // 5 seconds
   DOM_EXTRACTION: 60_000,      // 60 seconds for DOM extraction
 }
