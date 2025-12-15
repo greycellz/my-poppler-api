@@ -136,7 +136,8 @@ router.post('/analyze-images', async (req, res) => {
             ]
           }
         ],
-        max_tokens: 20000, // Increased for large forms (8+ pages)
+        // Use a high but model-safe max_tokens (GPT-4o cap is 16384)
+        max_tokens: 16000,
         temperature: 0.1
         // Note: Not using response_format: json_object because we need array/fields array,
         // parsing logic below already handles both array and object-with-fields.
