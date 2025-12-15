@@ -59,20 +59,22 @@ router.post('/analyze-images', async (req, res) => {
           const originalBuffer = Buffer.from(arrayBuffer)
           const mimeType = response.headers.get('content-type') || 'image/png'
 
-          // Compress image (on Railway - no limits)
-          const compressionSettings = getCompressionSettings(mimeType)
-          const compressionPromise = compressImage(originalBuffer, compressionSettings)
-          const compressionResult = await withTimeout(
-            compressionPromise,
-            TIMEOUTS.IMAGE_COMPRESSION,
-            `Image ${index + 1} compression timed out`
+          // NOTE: For PDF analysis experiments, skip compression and send
+          // the original image buffer to Vision to preserve maximum detail.
+          // We still log size for visibility.
+          const compressionResult = {
+            buffer: originalBuffer,
+            mimeType,
+            originalSize: originalBuffer.length,
+            compressedSize: originalBuffer.length,
+            compressionRatio: '0.0'
+          }
+          console.log(
+            `📦 Image ${index + 1}: ${(compressionResult.originalSize / 1024).toFixed(1)}KB (no compression applied)`
           )
 
-          // Log compression stats
-          console.log(`📦 Image ${index + 1}: ${(compressionResult.originalSize / 1024).toFixed(1)}KB → ${(compressionResult.compressedSize / 1024).toFixed(1)}KB (${compressionResult.compressionRatio}% reduction)`)
-
-          // Determine detail level
-          const metadataAfterCompression = await sharp(compressionResult.buffer).metadata()
+          // Determine detail level using original metadata
+          const metadataAfterCompression = await sharp(originalBuffer).metadata()
           const needsHighDetail = !quickComplexityCheck(
             compressionResult.buffer,
             metadataAfterCompression.width,
