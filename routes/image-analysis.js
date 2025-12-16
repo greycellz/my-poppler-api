@@ -318,19 +318,20 @@ router.post('/analyze-images', async (req, res) => {
     console.log('🤖 Step 3: Sending OCR text to Groq API for field extraction...')
     const groqStartTime = Date.now()
 
-    // Build spatial context for Groq (limit to first 100 blocks to avoid token limits)
-    const maxBlocksForLLM = 100
-    const blocksToSend = spatialBlocks.slice(0, maxBlocksForLLM)
-    const spatialContextHint = blocksToSend.length > 0 
+    // Build spatial context for Groq
+    // Only send first 50 blocks as representative examples (not exhaustive list)
+    const maxSampleBlocks = 50
+    const sampleBlocks = spatialBlocks.slice(0, maxSampleBlocks)
+    const spatialContextHint = sampleBlocks.length > 0 
       ? `
 
-**SPATIAL LAYOUT DATA**:
-Below are ${blocksToSend.length} key text blocks with their positions and sizes. Use this spatial context to classify elements and understand the form structure.
+**SPATIAL LAYOUT DATA** (Sample for Context Only):
+Below are ${maxSampleBlocks} representative text blocks from ${spatialBlocks.length} total blocks. These are provided as CONTEXT ONLY to help you understand text sizes and layout patterns. DO NOT create a field for every block listed here. Instead, use this spatial information to inform your classification when extracting fields from the OCR TEXT below.
 
-${blocksToSend.map(b => 
+${sampleBlocks.map(b => 
   `Block ${b.index}: "${b.text.substring(0, 60)}${b.text.length > 60 ? '...' : ''}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`
 ).join('\n')}
-${spatialBlocks.length > maxBlocksForLLM ? `\n...and ${spatialBlocks.length - maxBlocksForLLM} more blocks (omitted to save tokens)` : ''}
+...(${spatialBlocks.length - maxSampleBlocks} more blocks exist but omitted here for brevity)
 
 **SPATIAL CLASSIFICATION RULES**:
 
@@ -370,6 +371,12 @@ ${spatialBlocks.length > maxBlocksForLLM ? `\n...and ${spatialBlocks.length - ma
 7. **Numbered Fields**:
    - Start with number (e.g., "1 Name of entity", "3a Check the box")
    - Number is part of label, keep it
+
+**⚠️ IMPORTANT - EXTRACTION STRATEGY**:
+The spatial blocks above are REFERENCE DATA for understanding layout patterns (text sizes, positions). 
+When extracting fields, work from the OCR TEXT below, NOT from the spatial block list.
+Use spatial data to INFORM your classification decisions (is this text a header? a label? an instruction?), but do NOT create a field for every spatial block shown above.
+Focus on extracting actual form fields (inputs, checkboxes, radios) and important structural elements (titles, section headers, instructions) from the OCR text.
 
 **CRITICAL RICHTEXT EXAMPLES**:
 
