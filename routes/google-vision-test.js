@@ -94,7 +94,8 @@ router.post('/test-google-vision', async (req, res) => {
       }
       const arrayBuffer = await response.arrayBuffer()
       const buffer = Buffer.from(arrayBuffer)
-      imageInput = { image: { content: buffer } }
+      // Google Vision API expects base64-encoded string for content
+      imageInput = { image: { content: buffer.toString('base64') } }
       console.log(`📄 Fetched image from URL: ${imageUrl}`)
       console.log(`📦 Image buffer size: ${buffer.length} bytes (${(buffer.length / 1024).toFixed(2)} KB)`)
     } else if (imageBuffer) {
@@ -102,7 +103,8 @@ router.post('/test-google-vision', async (req, res) => {
       const buffer = Buffer.isBuffer(imageBuffer) 
         ? imageBuffer 
         : Buffer.from(imageBuffer, 'base64')
-      imageInput = { image: { content: buffer } }
+      // Google Vision API expects base64-encoded string for content
+      imageInput = { image: { content: buffer.toString('base64') } }
       console.log(`📄 Using provided image buffer (${buffer.length} bytes)`)
     }
 
