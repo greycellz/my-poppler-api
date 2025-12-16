@@ -141,20 +141,20 @@ router.post('/analyze-images', async (req, res) => {
     // Use provided system message or default (text-focused prompt for OCR analysis)
     const defaultSystemMessage = systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages. Analyze this TEXT to extract ALL form fields with high accuracy.
 
-**NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields look similar (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
-- "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both look like phone inputs
+**NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
+- "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
 - Repeated "Yes/No" questions on different pages must each be separate fields
 - "If living, age and health status" for Mother vs Father must be separate fields
 
-**ALWAYS KEEP CONDITIONAL QUESTIONS**: Treat every "If yes, ...", "If no, ...", "If applicable, ...", "If you have used..., do you feel...", and every table/row instruction as its OWN field, not just explanation. Even if the wording is short and looks like a sub-clause, if it asks the user to provide information or choose an option, it must be a field.
+**ALWAYS KEEP CONDITIONAL QUESTIONS**: Treat every "If yes, ...", "If no, ...", "If applicable, ...", "If you have used..., do you feel...", and every table/row instruction as its OWN field, not just explanation. Even if the wording is short and appears to be a sub-clause, if it asks the user to provide information or choose an option, it must be a field.
 
 **GROUP OPTIONS WITH MAIN QUESTION**: For checkbox, radio, or dropdown options:
 - Identify the main question label (the line that describes what is being asked)
 - Attach ALL options for that question to a SINGLE field object in the "options" array
 - Do NOT create separate fields for each option; they must be grouped under the main question
-- CRITICAL: When you see Yes/No questions, ALWAYS include BOTH options. If you see "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array. Look carefully in the OCR text - if a question has "Yes" mentioned, search for the corresponding "No" option even if it's on a different line or has additional text like "No, please mail it to my home address"
-- If you see "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
-- CRITICAL: When you see patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if you see the same field label, it should only appear once.
+- CRITICAL: When the text contains Yes/No questions, ALWAYS include BOTH options. If the text shows "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array. Search carefully in the OCR text - if a question has "Yes" mentioned, search for the corresponding "No" option even if it's on a different line or has additional text like "No, please mail it to my home address"
+- If the text shows "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
+- CRITICAL: When the text shows patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if the same field label appears multiple times, it should only be extracted once.
 
 **ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. medication charts, hospitalization charts):
 - If each row asks for user input (e.g. Medication Name, Dosage, When Started), treat each column that expects text as a separate field
@@ -182,14 +182,14 @@ For each field you identify, determine:
    
    IMPORTANT: Do NOT infer field types from filled sample data in the OCR text. If a form field shows only a single value (even something like "Male"), use type "text", not "radio" or "select". Only use "select" or "radio" when the OCR text explicitly shows multiple choice options.
 
-3. **Required Status**: Look for text indicators in the OCR:
+3. **Required Status**: Find text indicators in the OCR:
    - Asterisks (*) near field labels
    - "(required)" text
    - "(optional)" text (mark as not required)
    - Default to false if no indicator found
 
 4. **Options Extraction**: When the OCR text shows multiple choice options, extract ALL of them and group with the main question label:
-   - CRITICAL: When you find Yes/No questions in the text, ALWAYS capture ALL options. If the text contains "Yes" and "No" or "Yes" and "No, please mail it to my home address", include ALL options in the array. Never drop the "No" option or its variations. Search the OCR text around the question - if you find "Yes", look for the corresponding "No" option even if it's on a different line or has additional text. If a question asks "is it OK to email statements to you?" and the text shows "Yes", you MUST also look for "No" or "No, please mail" - they are part of the same question's options.
+   - CRITICAL: When you find Yes/No questions in the text, ALWAYS capture ALL options. If the text contains "Yes" and "No" or "Yes" and "No, please mail it to my home address", include ALL options in the array. Never drop the "No" option or its variations. Search the OCR text around the question - if you find "Yes", search for the corresponding "No" option even if it's on a different line or has additional text. If a question asks "is it OK to email statements to you?" and the text shows "Yes", you MUST also search for "No" or "No, please mail" - they are part of the same question's options.
    - CRITICAL: allowOther should ALWAYS be false by default
    - ONLY set allowOther: true if the OCR text clearly shows an "Other" option (with or without colon) AND a text input field or blank line for text entry
    - If the text shows "Other" (with or without colon) with an input field, set allowOther: true and use that as otherLabel
@@ -211,7 +211,7 @@ Return ONLY a JSON array with this exact structure:
     "required": true/false,
     "placeholder": "Placeholder text if visible",
     "options": ["Option 1", "Option 2"] (for select/radio/checkbox),
-    "allowOther": true/false (ONLY true if you see "Other:" with text input),
+    "allowOther": true/false (ONLY true if the text shows "Other:" with text input),
     "otherLabel": "Other:" (ONLY if allowOther is true),
     "otherPlaceholder": "Please specify..." (ONLY if allowOther is true),
     "confidence": 0.95,
@@ -219,9 +219,9 @@ Return ONLY a JSON array with this exact structure:
   }
 ]
 
-IMPORTANT: For most fields, allowOther should be false. Only set to true when you clearly see "Other:" with a text input field.
+IMPORTANT: For most fields, allowOther should be false. Only set to true when the text clearly shows "Other:" with a text input field.
 
-EXAMPLE: If you see options like:
+EXAMPLE: If the text contains options like:
 - "No"
 - "Yes-Flu A" 
 - "Yes-Flu B"
