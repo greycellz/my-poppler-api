@@ -318,7 +318,7 @@ router.post('/test-google-vision-full', async (req, res) => {
 - Do NOT create separate fields for each option; they must be grouped under the main question
 - CRITICAL: When you see Yes/No questions, ALWAYS include BOTH options. If you see "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array. Look carefully in the OCR text - if a question has "Yes" mentioned, search for the corresponding "No" option even if it's on a different line or has additional text like "No, please mail it to my home address"
 - If you see "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
-- CRITICAL: When you see patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, not separate fields) and options ["Full-time", "Part-time"]. Do NOT create separate fields for each option. Do NOT create duplicate fields.
+- CRITICAL: When you see patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if you see the same field label, it should only appear once.
 
 **ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. medication charts, hospitalization charts):
 - If each row asks for user input (e.g. Medication Name, Dosage, When Started), treat each column that expects text as a separate field
@@ -353,7 +353,7 @@ For each field you identify, determine:
    - Red field borders or labels
 
 4. **Options Extraction**: For dropdowns/radio buttons/checkboxes, extract ALL visible options and group them with the main question label:
-   - CRITICAL: When extracting Yes/No questions, ALWAYS capture ALL options. If you see "Yes" and "No" or "Yes" and "No, please mail it to my home address" or similar, include ALL options in the array. Never drop the "No" option or its variations. Search the entire OCR text around the question - if you see "Yes", look for the corresponding "No" option even if it's on a different line, has additional text, or appears after other content
+   - CRITICAL: When extracting Yes/No questions, ALWAYS capture ALL options. If you see "Yes" and "No" or "Yes" and "No, please mail it to my home address" or similar, include ALL options in the array. Never drop the "No" option or its variations. Search the entire OCR text around the question - if you see "Yes", look for the corresponding "No" option even if it's on a different line, has additional text, or appears after other content. If a question asks "is it OK to email statements to you?" and you see "Yes", you MUST also look for "No" or "No, please mail" or similar variations - they are part of the same question's options.
    - CRITICAL: allowOther should ALWAYS be false by default
    - ONLY set allowOther: true if you can clearly see ANY "Other" option (with or without colon) AND a text input field
    - If you see "Other" (with or without colon) with a text input field, set allowOther: true and use that as otherLabel
