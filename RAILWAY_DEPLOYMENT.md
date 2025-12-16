@@ -44,10 +44,27 @@ RAILWAY_PUBLIC_DOMAIN=my-poppler-api-dev.up.railway.app
 # Note: Do NOT include https:// prefix, it will be added automatically
 ```
 
-#### **OpenAI API (for Vision API fallback)**
+#### **Google Vision API & Groq Configuration**
+```env
+GOOGLE_APPLICATION_CREDENTIALS_JSON=<service-account-key-json-content>
+# Required for Google Vision API (OCR)
+# Already set in existing deployments
+
+GROQ_API_KEY=gsk_...
+# Required for Groq API (field extraction from OCR text)
+# Get from https://console.groq.com/
+
+USE_GROQ_LLAMA=FALSE
+# Set to 'TRUE' to use llama-3.3-70b-versatile model
+# Default: FALSE (uses openai/gpt-oss-120b model)
+# Note: OSS model is slower but may have different rate limits
+```
+
+#### **OpenAI API (for legacy/fallback)**
 ```env
 OPENAI_API_KEY=sk-...
-# Required for Vision API-based URL analysis (fallback method)
+# Optional: Kept for backward compatibility
+# Google Vision + Groq is now the primary method
 ```
 
 ### **URL Analysis & HTML Scraping Environment Variables**
@@ -108,12 +125,14 @@ PUPPETEER_SERVICE_URL=https://my-poppler-api-dev.up.railway.app
 ```env
 # Railway Backend
 RAILWAY_PUBLIC_DOMAIN=my-poppler-api-dev.up.railway.app
-OPENAI_API_KEY=sk-...
+OPENAI_API_KEY=sk-...  # Optional: legacy/fallback
 IMAGE_SPLIT_MAX_HEIGHT=4000
 IMAGE_SPLIT_OVERLAP=20
 HTML_SCRAPER_WAIT_TIME=4000
 GOOGLE_CLOUD_PROJECT=chatterforms
 GOOGLE_APPLICATION_CREDENTIALS_JSON=<dev-service-account-key>
+GROQ_API_KEY=gsk_...
+USE_GROQ_LLAMA=FALSE  # Use OSS model by default
 
 # Vercel Frontend
 USE_HTML_SCRAPING=TRUE
@@ -125,12 +144,14 @@ RAILWAY_BACKEND_URL=https://my-poppler-api-dev.up.railway.app
 ```env
 # Railway Backend
 RAILWAY_PUBLIC_DOMAIN=my-poppler-api-production.up.railway.app
-OPENAI_API_KEY=sk-...
+OPENAI_API_KEY=sk-...  # Optional: legacy/fallback
 IMAGE_SPLIT_MAX_HEIGHT=4000
 IMAGE_SPLIT_OVERLAP=20
 HTML_SCRAPER_WAIT_TIME=4000
 GOOGLE_CLOUD_PROJECT=chatterforms
 GOOGLE_APPLICATION_CREDENTIALS_JSON=<prod-service-account-key>
+GROQ_API_KEY=gsk_...
+USE_GROQ_LLAMA=FALSE  # Use OSS model by default
 
 # Vercel Frontend
 USE_HTML_SCRAPING=TRUE
