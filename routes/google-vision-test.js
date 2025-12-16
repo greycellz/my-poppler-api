@@ -83,7 +83,7 @@ router.post('/test-google-vision', async (req, res) => {
           error: `Image file not found: ${fullPath}`
         })
       }
-      imageInput = { source: { filename: fullPath } }
+      imageInput = { image: { source: { filename: fullPath } } }
       console.log(`📄 Reading image from file: ${fullPath}`)
     } else if (imageUrl) {
       // Fetch from URL
@@ -94,7 +94,7 @@ router.post('/test-google-vision', async (req, res) => {
       }
       const arrayBuffer = await response.arrayBuffer()
       const buffer = Buffer.from(arrayBuffer)
-      imageInput = { content: buffer }
+      imageInput = { image: { content: buffer } }
       console.log(`📄 Fetched image from URL: ${imageUrl}`)
       console.log(`📦 Image buffer size: ${buffer.length} bytes (${(buffer.length / 1024).toFixed(2)} KB)`)
     } else if (imageBuffer) {
@@ -102,14 +102,14 @@ router.post('/test-google-vision', async (req, res) => {
       const buffer = Buffer.isBuffer(imageBuffer) 
         ? imageBuffer 
         : Buffer.from(imageBuffer, 'base64')
-      imageInput = { content: buffer }
+      imageInput = { image: { content: buffer } }
       console.log(`📄 Using provided image buffer (${buffer.length} bytes)`)
     }
 
     console.log('🔍 Calling Google Vision API documentTextDetection...')
-    console.log(`📋 Image input type: ${imageInput.source ? 'file' : 'buffer'}`)
-    if (imageInput.content) {
-      console.log(`📋 Buffer size: ${imageInput.content.length} bytes`)
+    console.log(`📋 Image input structure:`, JSON.stringify(Object.keys(imageInput.image || {}), null, 2))
+    if (imageInput.image?.content) {
+      console.log(`📋 Buffer size: ${imageInput.image.content.length} bytes`)
     }
     const startTime = Date.now()
 
