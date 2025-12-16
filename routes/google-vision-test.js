@@ -87,13 +87,16 @@ router.post('/test-google-vision', async (req, res) => {
       console.log(`📄 Reading image from file: ${fullPath}`)
     } else if (imageUrl) {
       // Fetch from URL
+      console.log(`📥 Fetching image from URL: ${imageUrl}`)
       const response = await fetch(imageUrl)
       if (!response.ok) {
-        throw new Error(`Failed to fetch image from URL: ${response.status}`)
+        throw new Error(`Failed to fetch image from URL: ${response.status} ${response.statusText}`)
       }
       const arrayBuffer = await response.arrayBuffer()
-      imageInput = { content: Buffer.from(arrayBuffer) }
+      const buffer = Buffer.from(arrayBuffer)
+      imageInput = { content: buffer }
       console.log(`📄 Fetched image from URL: ${imageUrl}`)
+      console.log(`📦 Image buffer size: ${buffer.length} bytes (${(buffer.length / 1024).toFixed(2)} KB)`)
     } else if (imageBuffer) {
       // Use provided buffer (base64 or buffer)
       const buffer = Buffer.isBuffer(imageBuffer) 
@@ -104,10 +107,17 @@ router.post('/test-google-vision', async (req, res) => {
     }
 
     console.log('🔍 Calling Google Vision API documentTextDetection...')
+    console.log(`📋 Image input type: ${imageInput.source ? 'file' : 'buffer'}`)
+    if (imageInput.content) {
+      console.log(`📋 Buffer size: ${imageInput.content.length} bytes`)
+    }
     const startTime = Date.now()
 
     // Call Google Vision API
     const [result] = await client.documentTextDetection(imageInput)
+    
+    console.log(`📊 Vision API response received`)
+    console.log(`📊 Full text annotation present: ${!!result.fullTextAnnotation}`)
 
     const processingTime = Date.now() - startTime
 
