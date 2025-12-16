@@ -57,6 +57,90 @@ if (!process.env.GROQ_API_KEY) {
 }
 
 /**
+ * Helper functions for spatial layout analysis
+ */
+
+// Extract text from a Vision API block
+function getBlockText(block) {
+  if (!block || !block.paragraphs) return ''
+  
+  return block.paragraphs
+    .flatMap(p => p.words || [])
+    .map(w => (w.symbols || []).map(s => s.text).join(''))
+    .join(' ')
+}
+
+// Calculate bounding box height
+function getBlockHeight(block) {
+  if (!block || !block.boundingBox || !block.boundingBox.vertices || block.boundingBox.vertices.length < 3) {
+    return 0
+  }
+  const vertices = block.boundingBox.vertices
+  return vertices[2].y - vertices[0].y
+}
+
+// Calculate average text height across all blocks
+function calculateAverageHeight(blocks) {
+  const heights = blocks
+    .map(b => getBlockHeight(b))
+    .filter(h => h > 0)
+  
+  if (heights.length === 0) return 0
+  return heights.reduce((sum, h) => sum + h, 0) / heights.length
+}
+
+// Detect section headers based on spatial and text properties
+function detectSectionHeaders(blocks) {
+  const headers = []
+  const avgHeight = calculateAverageHeight(blocks)
+  
+  if (avgHeight === 0) return headers
+  
+  console.log(`📏 Average text height: ${avgHeight.toFixed(1)}px`)
+  
+  blocks.forEach(block => {
+    const text = getBlockText(block).trim()
+    if (!text) return
+    
+    const height = getBlockHeight(block)
+    const relativeSize = height / avgHeight
+    
+    // Heuristics for section headers
+    const isLargerThanAverage = relativeSize > 1.5
+    const isAllCaps = text === text.toUpperCase() && text.length > 3
+    const hasNoColon = !text.includes(':')
+    const isNotTooLong = text.length < 60
+    const matchesPattern = /^(PART|SECTION|PATIENT|INFORMATION|CONTACT|EMERGENCY|HISTORY|MEDICAL|INSURANCE|AUTHORIZATION|CONSENT|DEMOGRAPHIC|PERSONAL|FINANCIAL|CHART|FORM|WELCOME|INTAKE)/i.test(text)
+    
+    // Section header if:
+    // - (Large + All Caps + No Colon + Not Too Long) OR (Pattern Match + Large)
+    if ((isLargerThanAverage && isAllCaps && hasNoColon && isNotTooLong) || (matchesPattern && relativeSize > 1.2)) {
+      const confidence = (isLargerThanAverage && matchesPattern) ? 'high' : 'medium'
+      
+      // Determine header level based on relative size
+      let headerLevel = 2  // default h2
+      if (relativeSize > 2.0) {
+        headerLevel = 1  // very large = h1
+      } else if (relativeSize < 1.5) {
+        headerLevel = 3  // slightly large = h3
+      }
+      
+      headers.push({
+        text: text,
+        height: height,
+        relativeSize: relativeSize,
+        headerLevel: headerLevel,
+        confidence: confidence
+      })
+      
+      console.log(`✨ Detected header: "${text}" (size: ${relativeSize.toFixed(1)}x, level: h${headerLevel}, confidence: ${confidence})`)
+    }
+  })
+  
+  return headers
+}
+
+/**
  * POST /analyze-images
  * Analyze multiple images with Google Vision API (OCR) + Groq (field extraction)
  * Replaces GPT-4o Vision for better performance and cost
@@ -109,11 +193,16 @@ router.post('/analyze-images', async (req, res) => {
           const imageTime = Date.now() - imageStartTime
           const extractedText = result.fullTextAnnotation?.text || ''
           
-          console.log(`✅ Image ${index + 1} processed in ${imageTime}ms (${extractedText.length} chars)`)
+          // Extract bounding box data for spatial analysis
+          const pages = result.fullTextAnnotation?.pages || []
+          const blocks = pages.flatMap(page => page.blocks || [])
+          
+          console.log(`✅ Image ${index + 1} processed in ${imageTime}ms (${extractedText.length} chars, ${blocks.length} blocks)`)
           
           return {
             page: index + 1,
             text: extractedText,
+            blocks: blocks,
             processingTime: imageTime
           }
         } catch (error) {
@@ -129,17 +218,60 @@ router.post('/analyze-images', async (req, res) => {
     console.log(`✅ All images processed in ${visionTotalTime}ms`)
     console.log(`📝 Total OCR text: ${totalCharacters} characters`)
 
-    // Step 2: Combine OCR text from all pages
+    // Step 2: Analyze spatial layout for section headers
+    console.log('🔍 Analyzing spatial layout for section headers...')
+    const allBlocks = visionResults.flatMap(r => r.blocks || [])
+    const sectionHeaders = detectSectionHeaders(allBlocks)
+    console.log(`✨ Detected ${sectionHeaders.length} section headers`)
+
+    // Step 3: Combine OCR text from all pages
     const combinedText = visionResults
       .map((result, index) => `=== PAGE ${result.page} ===\n${result.text}`)
       .join('\n\n')
 
-    // Step 3: Send to Groq API for field extraction
-    console.log('🤖 Step 2: Sending OCR text to Groq API for field extraction...')
+    // Step 4: Send to Groq API for field extraction
+    console.log('🤖 Step 3: Sending OCR text to Groq API for field extraction...')
     const groqStartTime = Date.now()
 
+    // Build section header hints for Groq
+    const sectionHeadersHint = sectionHeaders.length > 0 
+      ? `
+
+**DETECTED SECTION HEADERS (Spatial Analysis)**:
+The following texts are section headers (NOT input fields). They were detected based on font size and formatting:
+
+${sectionHeaders.map(h => 
+  `- "${h.text}" (relative size: ${h.relativeSize.toFixed(1)}x average, header level: h${h.headerLevel}, confidence: ${h.confidence})`
+).join('\n')}
+
+**IMPORTANT INSTRUCTIONS FOR SECTION HEADERS**:
+1. For each detected section header, create a richtext field (NOT a regular input field)
+2. Set type to "richtext"
+3. Set richTextContent based on header level:
+   - h1 (very large headers): "<h1>${h.text}</h1>"
+   - h2 (medium headers): "<h2>${h.text}</h2>"  
+   - h3 (small headers): "<h3>${h.text}</h3>"
+4. Set richTextMaxHeight to 0 (no scrolling for headers)
+5. Set required to false
+6. Set label to "Section Header" or similar
+7. Do NOT create a separate input field for these texts
+8. Section headers are for visual organization only, not for data collection
+
+EXAMPLE for "PATIENT INFORMATION" (h2):
+{
+  "label": "Section Header",
+  "type": "richtext",
+  "richTextContent": "<h2>PATIENT INFORMATION</h2>",
+  "richTextMaxHeight": 0,
+  "required": false,
+  "confidence": 0.95,
+  "pageNumber": 1
+}
+`
+      : ''
+
     // Use provided system message or default (text-focused prompt for OCR analysis)
-    const defaultSystemMessage = systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages. Analyze this TEXT to extract ALL form fields with high accuracy.
+    const defaultSystemMessage = (systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages. Analyze this TEXT to extract ALL form fields with high accuracy.`) + sectionHeadersHint + `
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
