@@ -289,8 +289,10 @@ router.post('/analyze-images', async (req, res) => {
       }
     })
     
-    const sectionHeaders = detectSectionHeaders(allBlocks)
-    console.log(`✨ Detected ${sectionHeaders.length} read-only text blocks`)
+    // TEMPORARILY DISABLED: Testing bounding box data before implementing LLM-based classification
+    // const sectionHeaders = detectSectionHeaders(allBlocks)
+    // console.log(`✨ Detected ${sectionHeaders.length} read-only text blocks`)
+    const sectionHeaders = []  // Empty for now, will be replaced with LLM-based detection
 
     // Step 3: Combine OCR text from all pages
     const combinedText = visionResults
