@@ -238,12 +238,19 @@ The correct extraction should be:
 
 Notice: "Other:" is NOT in the options array because it's handled by allowOther: true`
 
-    const groqUserMessage = userMessage || `Analyze this OCR text extracted from PDF form pages and extract all visible form fields.
+    // Build user message with OCR text
+    // IMPORTANT: Always include the OCR text, even if userMessage is provided
+    let groqUserMessage = `Analyze this OCR text extracted from PDF form pages and extract all visible form fields.
 
 OCR TEXT:
 ${combinedText}
 
 Extract all form fields with their exact labels, types, and options as they appear in the text.`
+    
+    // If user provided additional context, append it
+    if (userMessage) {
+      groqUserMessage += `\n\nAdditional context: ${userMessage}`
+    }
 
     const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
