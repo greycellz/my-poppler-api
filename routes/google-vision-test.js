@@ -316,9 +316,9 @@ router.post('/test-google-vision-full', async (req, res) => {
 - Identify the main question label (the line that describes what is being asked)
 - Attach ALL options for that question to a SINGLE field object in the "options" array
 - Do NOT create separate fields for each option; they must be grouped under the main question
-- CRITICAL: When you see Yes/No questions, ALWAYS include BOTH options. If you see "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array
+- CRITICAL: When you see Yes/No questions, ALWAYS include BOTH options. If you see "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array. Look carefully in the OCR text - if a question has "Yes" mentioned, search for the corresponding "No" option even if it's on a different line or has additional text like "No, please mail it to my home address"
 - If you see "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
-- CRITICAL: When you see patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" and options ["Full-time", "Part-time"]. Do NOT create separate fields for each option.
+- CRITICAL: When you see patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, not separate fields) and options ["Full-time", "Part-time"]. Do NOT create separate fields for each option. Do NOT create duplicate fields.
 
 **ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. medication charts, hospitalization charts):
 - If each row asks for user input (e.g. Medication Name, Dosage, When Started), treat each column that expects text as a separate field
@@ -335,16 +335,16 @@ For each field you identify, determine:
 1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Medication Name" not just "Medication Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
 
 2. **Field Type**: Choose the most appropriate type based on structure:
-   - text: for single-line text inputs (names, addresses, single values). CRITICAL: If a field label appears with a blank line or input field underneath it (even if OCR captured a filled-in value like "Male" for Gender), treat it as type "text" - do NOT infer radio/select types from filled sample data
+   - text: for single-line text inputs (names, addresses, single values). CRITICAL: If a field label appears with a blank line or input field underneath it (even if OCR captured a filled-in value like "Male" for Gender), treat it as type "text" - do NOT infer radio/select types from filled sample data. If you see a label like "3. Gender" followed by what appears to be a text input field (even with a sample value), use type "text", NOT "select" or "radio"
    - email: for email address fields
    - tel: for phone/telephone number fields  
    - textarea: for large text areas, comments, messages, or multi-line inputs
-   - select: for dropdown menus with arrow indicators
+   - select: ONLY for dropdown menus with arrow indicators OR when you see multiple distinct options listed (like "Yes", "No", "Maybe"). Do NOT use "select" for fields that appear to be free text inputs, even if OCR shows a sample value
    - radio-with-other: for radio buttons that include "Other:" with text input
    - checkbox-with-other: for checkbox groups that include "Other:" with text input
    - date: for date picker fields
    
-   IMPORTANT: Do NOT infer field types from filled sample data. If a form field appears as a blank text input (even if OCR shows a sample value filled in), use type "text", not "radio" or "select" based on that value.
+   IMPORTANT: Do NOT infer field types from filled sample data. If a form field appears as a blank text input (even if OCR shows a sample value filled in like "Male"), use type "text", not "radio" or "select" based on that value. Only use "select" or "radio" when you can clearly see multiple options presented as choices (Yes/No buttons, dropdown lists, etc.)
 
 3. **Required Status**: Look for visual indicators:
    - Red asterisks (*)
@@ -353,7 +353,7 @@ For each field you identify, determine:
    - Red field borders or labels
 
 4. **Options Extraction**: For dropdowns/radio buttons/checkboxes, extract ALL visible options and group them with the main question label:
-   - CRITICAL: When extracting Yes/No questions, ALWAYS capture ALL options. If you see "Yes" and "No" or "Yes" and "No, please mail it to my home address" or similar, include ALL options in the array. Never drop the "No" option or its variations.
+   - CRITICAL: When extracting Yes/No questions, ALWAYS capture ALL options. If you see "Yes" and "No" or "Yes" and "No, please mail it to my home address" or similar, include ALL options in the array. Never drop the "No" option or its variations. Search the entire OCR text around the question - if you see "Yes", look for the corresponding "No" option even if it's on a different line, has additional text, or appears after other content
    - CRITICAL: allowOther should ALWAYS be false by default
    - ONLY set allowOther: true if you can clearly see ANY "Other" option (with or without colon) AND a text input field
    - If you see "Other" (with or without colon) with a text input field, set allowOther: true and use that as otherLabel
@@ -361,7 +361,7 @@ For each field you identify, determine:
    - Most fields will have allowOther: false - only set to true when you see an actual "Other" with text input
    - IMPORTANT: If you set allowOther: true, do NOT include ANY "Other" option in the options array - it should only be in otherLabel
    - Extract "Yes-Other" as a regular option, but ANY "Other" with text input should trigger allowOther: true
-   - CRITICAL: When you see conditional options like "(If yes) Full-time" and "(If yes) Part-time" appearing together under the same question context, combine them into ONE field with both options ["Full-time", "Part-time"]. Do NOT create separate fields for each conditional option.
+   - CRITICAL: When you see conditional options like "(If yes) Full-time" and "(If yes) Part-time" appearing together under the same question context, combine them into ONE field with label "If yes, Full-time/Part-time" and options ["Full-time", "Part-time"]. Do NOT create separate fields for each conditional option. Do NOT create duplicate fields.
 
 5. **Page Number**: IMPORTANT - Include the page number where each field is found
 
