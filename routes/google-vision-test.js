@@ -303,31 +303,62 @@ router.post('/test-google-vision-full', async (req, res) => {
     console.log('🤖 Step 2: Sending OCR text to Groq API for field extraction...')
     const groqStartTime = Date.now()
 
-    const defaultSystemMessage = `You are a form analysis expert. Analyze OCR text extracted from PDF form pages and extract ALL visible form fields.
+    const defaultSystemMessage = `You are a form analysis expert. Analyze OCR text extracted from PDF form pages and extract ALL visible form fields with high accuracy.
 
-CRITICAL INSTRUCTIONS - READ CAREFULLY:
+**NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields look similar (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
+- "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both look like phone inputs
+- Repeated "Yes/No" questions on different pages must each be separate fields
+- "If living, age and health status" for Mother vs Father must be separate fields
 
-**NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields look similar (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects.
-
-**ALWAYS KEEP CONDITIONAL QUESTIONS**: Treat every "If yes, ...", "If no, ...", "If applicable, ...", and every table/row instruction as its OWN field.
+**ALWAYS KEEP CONDITIONAL QUESTIONS**: Treat every "If yes, ...", "If no, ...", "If applicable, ...", "If you have used..., do you feel...", and every table/row instruction as its OWN field, not just explanation. Even if the wording is short and looks like a sub-clause, if it asks the user to provide information or choose an option, it must be a field.
 
 **GROUP OPTIONS WITH MAIN QUESTION**: For checkbox, radio, or dropdown options:
-- Identify the main question label
+- Identify the main question label (the line that describes what is being asked)
 - Attach ALL options for that question to a SINGLE field object in the "options" array
-- If you see "Other: ______" below radio/checkboxes, set allowOther: true
+- Do NOT create separate fields for each option; they must be grouped under the main question
+- If you see "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
 
-**ROW-BASED STRUCTURES**: In tables or repeated rows:
-- If each row asks for user input, treat each column as a separate field
-- Include the question number or context in the label (e.g., "5. Medication Name (row 1)")
+**ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. medication charts, hospitalization charts):
+- If each row asks for user input (e.g. Medication Name, Dosage, When Started), treat each column that expects text as a separate field
+- Include the question number or context in the label (e.g. "5. Medication Name (row 1)", "5. Medication Name (row 2)")
+- Do NOT merge or deduplicate rows just because the column labels are the same
 
-**LABEL DISAMBIGUATION**: When two fields share the same base label but refer to different contexts, include that context in the label.
+**LABEL DISAMBIGUATION**: When two fields share the same base label but refer to different people or contexts, include that context in the label:
+- e.g. "Emergency Contact (Phone)" vs "Mother's Phone", "Father's Phone"
+- e.g. "Hospitalization date (physical)" vs "Hospitalization date (mental health)" if both exist
+- Prefer slightly longer, more specific labels over shorter generic ones to avoid collapsing distinct fields
 
 For each field you identify, determine:
-1. **Field Label**: The visible text label (exactly as shown, including question numbers)
-2. **Field Type**: text, email, tel, textarea, select, date, radio-with-other, checkbox-with-other
-3. **Required Status**: Look for asterisks, "(required)", "(optional)" text
-4. **Options Extraction**: For dropdowns/radio/checkboxes, extract ALL visible options
-5. **Page Number**: Include the page number where each field is found
+
+1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Medication Name" not just "Medication Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
+
+2. **Field Type**: Choose the most appropriate type based on structure:
+   - text: for single-line text inputs (names, addresses, single values)
+   - email: for email address fields
+   - tel: for phone/telephone number fields  
+   - textarea: for large text areas, comments, messages, or multi-line inputs
+   - select: for dropdown menus with arrow indicators
+   - radio-with-other: for radio buttons that include "Other:" with text input
+   - checkbox-with-other: for checkbox groups that include "Other:" with text input
+   - date: for date picker fields
+
+3. **Required Status**: Look for visual indicators:
+   - Red asterisks (*)
+   - "(required)" text
+   - "(optional)" text (mark as not required)
+   - Red field borders or labels
+
+4. **Options Extraction**: For dropdowns/radio buttons/checkboxes, extract ALL visible options and group them with the main question label:
+   - CRITICAL: allowOther should ALWAYS be false by default
+   - ONLY set allowOther: true if you can clearly see ANY "Other" option (with or without colon) AND a text input field
+   - If you see "Other" (with or without colon) with a text input field, set allowOther: true and use that as otherLabel
+   - Do NOT add "Other" options to fields that don't have them in the original form
+   - Most fields will have allowOther: false - only set to true when you see an actual "Other" with text input
+   - IMPORTANT: If you set allowOther: true, do NOT include ANY "Other" option in the options array - it should only be in otherLabel
+   - Extract "Yes-Other" as a regular option, but ANY "Other" with text input should trigger allowOther: true
+
+5. **Page Number**: IMPORTANT - Include the page number where each field is found
+
 6. **Confidence**: Rate 0.0-1.0 how confident you are about this field
 
 Return ONLY a JSON array with this exact structure:
@@ -337,14 +368,33 @@ Return ONLY a JSON array with this exact structure:
     "type": "text|email|tel|textarea|select|date|radio-with-other|checkbox-with-other",
     "required": true/false,
     "placeholder": "Placeholder text if visible",
-    "options": ["Option 1", "Option 2"],
-    "allowOther": true/false,
-    "otherLabel": "Other:",
-    "otherPlaceholder": "Please specify...",
+    "options": ["Option 1", "Option 2"] (for select/radio/checkbox),
+    "allowOther": true/false (ONLY true if you see "Other:" with text input),
+    "otherLabel": "Other:" (ONLY if allowOther is true),
+    "otherPlaceholder": "Please specify..." (ONLY if allowOther is true),
     "confidence": 0.95,
     "pageNumber": 1
   }
-]`
+]
+
+IMPORTANT: For most fields, allowOther should be false. Only set to true when you clearly see "Other:" with a text input field.
+
+EXAMPLE: If you see options like:
+- "No"
+- "Yes-Flu A" 
+- "Yes-Flu B"
+- "Yes-Other"
+- "Other:" (with text input field)
+
+The correct extraction should be:
+{
+  "options": ["No", "Yes-Flu A", "Yes-Flu B", "Yes-Other"],
+  "allowOther": true,
+  "otherLabel": "Other:",
+  "otherPlaceholder": "Please specify..."
+}
+
+Notice: "Other:" is NOT in the options array because it's handled by allowOther: true`
 
     const userMessage = `Analyze this OCR text extracted from PDF form pages and extract all visible form fields.
 
