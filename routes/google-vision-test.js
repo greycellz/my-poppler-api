@@ -416,7 +416,7 @@ Extract all form fields with their exact labels, types, and options as they appe
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         messages: [
           {
             role: 'system',
@@ -427,7 +427,7 @@ Extract all form fields with their exact labels, types, and options as they appe
             content: userMessage
           }
         ],
-        max_tokens: 32768,
+        max_completion_tokens: 32768,
         temperature: 0.1
       })
     })
