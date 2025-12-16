@@ -97,13 +97,22 @@ function detectSectionHeaders(blocks) {
   if (avgHeight === 0) return headers
   
   console.log(`📏 Average text height: ${avgHeight.toFixed(1)}px`)
+  console.log(`📏 Detection threshold (1.5x): ${(avgHeight * 1.5).toFixed(1)}px`)
   
-  blocks.forEach(block => {
+  // Log all blocks for debugging
+  console.log(`\n🔍 Analyzing ${blocks.length} blocks:`)
+  
+  blocks.forEach((block, index) => {
     const text = getBlockText(block).trim()
     if (!text) return
     
     const height = getBlockHeight(block)
     const relativeSize = height / avgHeight
+    
+    // Log first 10 blocks with details
+    if (index < 10) {
+      console.log(`  Block ${index + 1}: "${text.substring(0, 50)}" | ${height.toFixed(1)}px (${relativeSize.toFixed(2)}x)`)
+    }
     
     // Heuristics for section headers
     const isLargerThanAverage = relativeSize > 1.5
@@ -111,6 +120,14 @@ function detectSectionHeaders(blocks) {
     const hasNoColon = !text.includes(':')
     const isNotTooLong = text.length < 60
     const matchesPattern = /^(PART|SECTION|PATIENT|INFORMATION|CONTACT|EMERGENCY|HISTORY|MEDICAL|INSURANCE|AUTHORIZATION|CONSENT|DEMOGRAPHIC|PERSONAL|FINANCIAL|CHART|FORM|WELCOME|INTAKE)/i.test(text)
+    
+    // Log check results for potential headers
+    if (matchesPattern || isLargerThanAverage) {
+      console.log(`  🔎 Potential header: "${text.substring(0, 40)}"`)
+      console.log(`     - Size: ${relativeSize.toFixed(2)}x | Large? ${isLargerThanAverage}`)
+      console.log(`     - AllCaps? ${isAllCaps} | NoColon? ${hasNoColon}`)
+      console.log(`     - Length: ${text.length} | Pattern? ${matchesPattern}`)
+    }
     
     // Section header if:
     // - (Large + All Caps + No Colon + Not Too Long) OR (Pattern Match + Large)
