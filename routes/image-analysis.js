@@ -79,25 +79,31 @@ function getBlockHeight(block) {
   return vertices[2].y - vertices[0].y
 }
 
-// Calculate average text height across all blocks
-function calculateAverageHeight(blocks) {
+// Calculate median text height across all blocks (more robust than average)
+function calculateMedianHeight(blocks) {
   const heights = blocks
     .map(b => getBlockHeight(b))
     .filter(h => h > 0)
+    .sort((a, b) => a - b)
   
   if (heights.length === 0) return 0
-  return heights.reduce((sum, h) => sum + h, 0) / heights.length
+  
+  const mid = Math.floor(heights.length / 2)
+  if (heights.length % 2 === 0) {
+    return (heights[mid - 1] + heights[mid]) / 2
+  }
+  return heights[mid]
 }
 
-// Detect section headers based on spatial and text properties
+// Detect read-only text (headers, instructions, labels without inputs)
 function detectSectionHeaders(blocks) {
   const headers = []
-  const avgHeight = calculateAverageHeight(blocks)
+  const medianHeight = calculateMedianHeight(blocks)
   
-  if (avgHeight === 0) return headers
+  if (medianHeight === 0) return headers
   
-  console.log(`📏 Average text height: ${avgHeight.toFixed(1)}px`)
-  console.log(`📏 Detection threshold (1.5x): ${(avgHeight * 1.5).toFixed(1)}px`)
+  console.log(`📏 Median text height: ${medianHeight.toFixed(1)}px (more robust than average)`)
+  console.log(`📏 Large text threshold (1.3x): ${(medianHeight * 1.3).toFixed(1)}px`)
   
   // Log all blocks for debugging
   console.log(`\n🔍 Analyzing ${blocks.length} blocks:`)
@@ -107,39 +113,59 @@ function detectSectionHeaders(blocks) {
     if (!text) return
     
     const height = getBlockHeight(block)
-    const relativeSize = height / avgHeight
+    const relativeSize = height / medianHeight
     
     // Log first 10 blocks with details
     if (index < 10) {
-      console.log(`  Block ${index + 1}: "${text.substring(0, 50)}" | ${height.toFixed(1)}px (${relativeSize.toFixed(2)}x)`)
+      console.log(`  Block ${index + 1}: "${text.substring(0, 50)}" | ${height.toFixed(1)}px (${relativeSize.toFixed(2)}x median)`)
     }
     
-    // Heuristics for section headers
-    const isLargerThanAverage = relativeSize > 1.5
+    // Detect read-only text (headers, instructions, standalone labels)
+    // Key indicators:
+    // 1. Somewhat larger than typical (but not necessarily huge)
+    // 2. Looks like a heading/label (all caps, or matches common patterns)
+    // 3. NOT a field label (no colon like "Name:")
+    // 4. Reasonable length (not a full paragraph, not just 1-2 chars)
+    
+    const isLargerThanTypical = relativeSize > 1.3  // More lenient than 1.5
+    const isSignificantlyLarger = relativeSize > 1.8
     const isAllCaps = text === text.toUpperCase() && text.length > 3
     const hasNoColon = !text.includes(':')
-    const isNotTooLong = text.length < 60
-    const matchesPattern = /^(PART|SECTION|PATIENT|INFORMATION|CONTACT|EMERGENCY|HISTORY|MEDICAL|INSURANCE|AUTHORIZATION|CONSENT|DEMOGRAPHIC|PERSONAL|FINANCIAL|CHART|FORM|WELCOME|INTAKE)/i.test(text)
+    const isReasonableLength = text.length >= 4 && text.length < 100
+    const matchesHeaderPattern = /^(PART|SECTION|PATIENT|INFORMATION|CONTACT|EMERGENCY|HISTORY|MEDICAL|INSURANCE|AUTHORIZATION|CONSENT|DEMOGRAPHIC|PERSONAL|FINANCIAL|CHART|FORM|WELCOME|INTAKE|EDUCATION|EMPLOYMENT|FAMILY|SUBSTANCE|TRAUMA|LEGAL)/i.test(text)
     
-    // Log check results for potential headers
-    if (matchesPattern || isLargerThanAverage) {
-      console.log(`  🔎 Potential header: "${text.substring(0, 40)}"`)
-      console.log(`     - Size: ${relativeSize.toFixed(2)}x | Large? ${isLargerThanAverage}`)
+    // Log check results for potential read-only text
+    if (matchesHeaderPattern || isLargerThanTypical) {
+      console.log(`  🔎 Potential read-only text: "${text.substring(0, 40)}"`)
+      console.log(`     - Size: ${relativeSize.toFixed(2)}x | Larger? ${isLargerThanTypical}`)
       console.log(`     - AllCaps? ${isAllCaps} | NoColon? ${hasNoColon}`)
-      console.log(`     - Length: ${text.length} | Pattern? ${matchesPattern}`)
+      console.log(`     - Length: ${text.length} | HeaderPattern? ${matchesHeaderPattern}`)
     }
     
-    // Section header if:
-    // - (Large + All Caps + No Colon + Not Too Long) OR (Pattern Match + Large)
-    if ((isLargerThanAverage && isAllCaps && hasNoColon && isNotTooLong) || (matchesPattern && relativeSize > 1.2)) {
-      const confidence = (isLargerThanAverage && matchesPattern) ? 'high' : 'medium'
+    // Detection paths:
+    // Path 1: Large + structured (all caps or header pattern) + not field label
+    // Path 2: Very large + not field label (regardless of caps/pattern)
+    const structuredHeader = (isAllCaps || matchesHeaderPattern) && hasNoColon && isReasonableLength
+    const largeStructuredMatch = isLargerThanTypical && structuredHeader
+    const veryLargeMatch = isSignificantlyLarger && hasNoColon && isReasonableLength
+    
+    if (largeStructuredMatch || veryLargeMatch) {
+      // Determine confidence
+      let confidence = 'medium'
+      if (isSignificantlyLarger && matchesHeaderPattern && isAllCaps) {
+        confidence = 'high'
+      } else if (matchesHeaderPattern && isAllCaps) {
+        confidence = 'medium'
+      } else {
+        confidence = 'low'
+      }
       
       // Determine header level based on relative size
       let headerLevel = 2  // default h2
-      if (relativeSize > 2.0) {
-        headerLevel = 1  // very large = h1
-      } else if (relativeSize < 1.5) {
-        headerLevel = 3  // slightly large = h3
+      if (relativeSize > 1.8) {
+        headerLevel = 1  // significantly large = h1
+      } else if (relativeSize < 1.3) {
+        headerLevel = 3  // moderately large = h3
       }
       
       headers.push({
@@ -150,7 +176,7 @@ function detectSectionHeaders(blocks) {
         confidence: confidence
       })
       
-      console.log(`✨ Detected header: "${text}" (size: ${relativeSize.toFixed(1)}x, level: h${headerLevel}, confidence: ${confidence})`)
+      console.log(`✨ Detected read-only text: "${text}" (size: ${relativeSize.toFixed(2)}x, level: h${headerLevel}, confidence: ${confidence})`)
     }
   })
   
@@ -235,11 +261,11 @@ router.post('/analyze-images', async (req, res) => {
     console.log(`✅ All images processed in ${visionTotalTime}ms`)
     console.log(`📝 Total OCR text: ${totalCharacters} characters`)
 
-    // Step 2: Analyze spatial layout for section headers
-    console.log('🔍 Analyzing spatial layout for section headers...')
+    // Step 2: Analyze spatial layout for read-only text (headers, instructions, labels)
+    console.log('🔍 Analyzing spatial layout for read-only text (headers, instructions, labels)...')
     const allBlocks = visionResults.flatMap(r => r.blocks || [])
     const sectionHeaders = detectSectionHeaders(allBlocks)
-    console.log(`✨ Detected ${sectionHeaders.length} section headers`)
+    console.log(`✨ Detected ${sectionHeaders.length} read-only text blocks`)
 
     // Step 3: Combine OCR text from all pages
     const combinedText = visionResults
@@ -250,29 +276,29 @@ router.post('/analyze-images', async (req, res) => {
     console.log('🤖 Step 3: Sending OCR text to Groq API for field extraction...')
     const groqStartTime = Date.now()
 
-    // Build section header hints for Groq
+    // Build read-only text hints for Groq
     const sectionHeadersHint = sectionHeaders.length > 0 
       ? `
 
-**DETECTED SECTION HEADERS (Spatial Analysis)**:
-The following texts are section headers (NOT input fields). They were detected based on font size and formatting:
+**DETECTED READ-ONLY TEXT (Spatial Analysis)**:
+The following texts are read-only labels/headers/instructions (NOT input fields). They were detected based on font size and formatting:
 
 ${sectionHeaders.map(h => 
   `- "${h.text}" (relative size: ${h.relativeSize.toFixed(1)}x average, header level: h${h.headerLevel}, confidence: ${h.confidence})`
 ).join('\n')}
 
-**IMPORTANT INSTRUCTIONS FOR SECTION HEADERS**:
-1. For each detected section header, create a richtext field (NOT a regular input field)
+**IMPORTANT INSTRUCTIONS FOR READ-ONLY TEXT**:
+1. For each detected read-only text, create a richtext field (NOT a regular input field)
 2. Set type to "richtext"
 3. Set richTextContent based on header level:
-   - h1 (very large headers): "<h1>${h.text}</h1>"
-   - h2 (medium headers): "<h2>${h.text}</h2>"  
-   - h3 (small headers): "<h3>${h.text}</h3>"
-4. Set richTextMaxHeight to 0 (no scrolling for headers)
+   - h1 (major sections): "<h1>[TEXT]</h1>"
+   - h2 (subsections): "<h2>[TEXT]</h2>"  
+   - h3 (minor headings): "<h3>[TEXT]</h3>"
+4. Set richTextMaxHeight to 0 (no scrolling)
 5. Set required to false
-6. Set label to "Section Header" or similar
+6. Set label to "Section Header" or "Instructions" or similar
 7. Do NOT create a separate input field for these texts
-8. Section headers are for visual organization only, not for data collection
+8. Read-only text is for visual organization/instructions only, not for data collection
 
 EXAMPLE for "PATIENT INFORMATION" (h2):
 {
