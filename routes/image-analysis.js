@@ -138,8 +138,8 @@ router.post('/analyze-images', async (req, res) => {
     console.log('🤖 Step 2: Sending OCR text to Groq API for field extraction...')
     const groqStartTime = Date.now()
 
-    // Use provided system message or default (full detailed prompt from test endpoint)
-    const defaultSystemMessage = systemMessage || `You are a form analysis expert. Analyze OCR text extracted from PDF form pages and extract ALL visible form fields with high accuracy.
+    // Use provided system message or default (text-focused prompt for OCR analysis)
+    const defaultSystemMessage = systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages. Analyze this TEXT to extract ALL form fields with high accuracy.
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields look similar (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both look like phone inputs
@@ -170,34 +170,34 @@ For each field you identify, determine:
 
 1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Medication Name" not just "Medication Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
 
-2. **Field Type**: Choose the most appropriate type based on structure:
-   - text: for single-line text inputs (names, addresses, single values). CRITICAL: If a field label appears with a blank line or input field underneath it (even if OCR captured a filled-in value like "Male" for Gender), treat it as type "text" - do NOT infer radio/select types from filled sample data. If you see a label like "3. Gender" followed by what appears to be a text input field (even with a sample value), use type "text", NOT "select" or "radio"
+2. **Field Type**: Choose the most appropriate type based on what you find in the OCR text:
+   - text: for single-line text inputs (names, addresses, single values). CRITICAL: If the OCR text shows a field label with a blank line or filled value underneath, treat it as type "text" - do NOT infer radio/select types from filled sample data. If the text shows "3. Gender" followed by a value like "Male", use type "text", NOT "select" or "radio"
    - email: for email address fields
    - tel: for phone/telephone number fields  
    - textarea: for large text areas, comments, messages, or multi-line inputs
-   - select: ONLY for dropdown menus with arrow indicators OR when you see multiple distinct options listed (like "Yes", "No", "Maybe"). Do NOT use "select" for fields that appear to be free text inputs, even if OCR shows a sample value
-   - radio-with-other: for radio buttons that include "Other:" with text input
-   - checkbox-with-other: for checkbox groups that include "Other:" with text input
-   - date: for date picker fields
+   - select: ONLY when the OCR text shows multiple distinct options listed together (like "Yes", "No", "Maybe") indicating a dropdown or selection. Do NOT use "select" for fields that show only a single value
+   - radio-with-other: when the OCR text shows multiple radio button options AND includes "Other:" with a text input
+   - checkbox-with-other: when the OCR text shows multiple checkbox options AND includes "Other:" with a text input
+   - date: for date picker fields (usually shown as mm/dd/yyyy or similar)
    
-   IMPORTANT: Do NOT infer field types from filled sample data. If a form field appears as a blank text input (even if OCR shows a sample value filled in like "Male"), use type "text", not "radio" or "select" based on that value. Only use "select" or "radio" when you can clearly see multiple options presented as choices (Yes/No buttons, dropdown lists, etc.)
+   IMPORTANT: Do NOT infer field types from filled sample data in the OCR text. If a form field shows only a single value (even something like "Male"), use type "text", not "radio" or "select". Only use "select" or "radio" when the OCR text explicitly shows multiple choice options.
 
-3. **Required Status**: Look for visual indicators:
-   - Red asterisks (*)
+3. **Required Status**: Look for text indicators in the OCR:
+   - Asterisks (*) near field labels
    - "(required)" text
    - "(optional)" text (mark as not required)
-   - Red field borders or labels
+   - Default to false if no indicator found
 
-4. **Options Extraction**: For dropdowns/radio buttons/checkboxes, extract ALL visible options and group them with the main question label:
-   - CRITICAL: When extracting Yes/No questions, ALWAYS capture ALL options. If you see "Yes" and "No" or "Yes" and "No, please mail it to my home address" or similar, include ALL options in the array. Never drop the "No" option or its variations. Search the entire OCR text around the question - if you see "Yes", look for the corresponding "No" option even if it's on a different line, has additional text, or appears after other content. If a question asks "is it OK to email statements to you?" and you see "Yes", you MUST also look for "No" or "No, please mail" or similar variations - they are part of the same question's options.
+4. **Options Extraction**: When the OCR text shows multiple choice options, extract ALL of them and group with the main question label:
+   - CRITICAL: When you find Yes/No questions in the text, ALWAYS capture ALL options. If the text contains "Yes" and "No" or "Yes" and "No, please mail it to my home address", include ALL options in the array. Never drop the "No" option or its variations. Search the OCR text around the question - if you find "Yes", look for the corresponding "No" option even if it's on a different line or has additional text. If a question asks "is it OK to email statements to you?" and the text shows "Yes", you MUST also look for "No" or "No, please mail" - they are part of the same question's options.
    - CRITICAL: allowOther should ALWAYS be false by default
-   - ONLY set allowOther: true if you can clearly see ANY "Other" option (with or without colon) AND a text input field
-   - If you see "Other" (with or without colon) with a text input field, set allowOther: true and use that as otherLabel
-   - Do NOT add "Other" options to fields that don't have them in the original form
-   - Most fields will have allowOther: false - only set to true when you see an actual "Other" with text input
+   - ONLY set allowOther: true if the OCR text clearly shows an "Other" option (with or without colon) AND a text input field or blank line for text entry
+   - If the text shows "Other" (with or without colon) with an input field, set allowOther: true and use that as otherLabel
+   - Do NOT add "Other" options to fields that don't have them in the OCR text
+   - Most fields will have allowOther: false - only set to true when the text shows an actual "Other" with input capability
    - IMPORTANT: If you set allowOther: true, do NOT include ANY "Other" option in the options array - it should only be in otherLabel
    - Extract "Yes-Other" as a regular option, but ANY "Other" with text input should trigger allowOther: true
-   - CRITICAL: When you see conditional options like "(If yes) Full-time" and "(If yes) Part-time" appearing together under the same question context, combine them into ONE field with label "If yes, Full-time/Part-time" and options ["Full-time", "Part-time"]. Do NOT create separate fields for each conditional option. Do NOT create duplicate fields.
+   - CRITICAL: When the text shows conditional options like "(If yes) Full-time" and "(If yes) Part-time" together under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" and options ["Full-time", "Part-time"]. Do NOT create separate fields for each conditional option.
 
 5. **Page Number**: IMPORTANT - Include the page number where each field is found
 
