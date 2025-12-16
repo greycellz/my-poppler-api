@@ -369,28 +369,58 @@ ${spatialBlocks.length > 30 ? `\n...and ${spatialBlocks.length - 30} more blocks
    - Start with number (e.g., "1 Name of entity", "3a Check the box")
    - Number is part of label, keep it
 
-**IMPORTANT**:
-- Use spatial proximity (x, y coordinates) to understand field relationships
-- Use height to distinguish titles/headers (large) from regular fields (small)
-- Consider vertical ordering (y-coord) for proper field sequence
-- Create richtext fields for display-only text (titles, headers, instructions)
-- DO NOT create input fields for text that has no associated input area
+**CRITICAL RICHTEXT EXAMPLES**:
 
-EXAMPLE for "PATIENT INFORMATION" section header:
+Example 1 - Form Title (Block 1: "PATIENT INTAKE FORM" at y:225, h:30):
+{
+  "label": "Form Title",
+  "type": "richtext",
+  "richTextContent": "<h1>PATIENT INTAKE FORM</h1>",
+  "richTextMaxHeight": 0,
+  "required": false,
+  "confidence": 0.98,
+  "pageNumber": 1
+}
+
+Example 2 - Section Header (Block 4: "PATIENT DETAILS" at y:433, h:23):
 {
   "label": "Section Header",
   "type": "richtext",
-  "richTextContent": "<h2>PATIENT INFORMATION</h2>",
+  "richTextContent": "<h2>PATIENT DETAILS</h2>",
   "richTextMaxHeight": 0,
   "required": false,
   "confidence": 0.95,
   "pageNumber": 1
 }
+
+Example 3 - Disclaimer (Block 2: "Disclaimer: Thank you..." at y:302, h:89):
+{
+  "label": "Disclaimer",
+  "type": "richtext",
+  "richTextContent": "<p>Disclaimer: Thank you for your interest in being a patient of ___. This form is used to collect information...</p>",
+  "richTextMaxHeight": 0,
+  "required": false,
+  "confidence": 0.90,
+  "pageNumber": 1
+}
+
+**IMPORTANT**:
+- Use spatial proximity (x, y coordinates) to understand field relationships
+- Use height to distinguish titles/headers (large) from regular fields (small)
+- Consider vertical ordering (y-coord) for proper field sequence
+- CREATE RICHTEXT FIELDS FIRST (in order of y-coord), then input fields
+- DO NOT skip titles, headers, or instructions - they are essential for form structure
 `
       : ''
 
     // Use provided system message or default (text-focused prompt for OCR analysis)
-    const defaultSystemMessage = (systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages. Analyze this TEXT to extract ALL form fields with high accuracy.`) + spatialContextHint + `
+    const defaultSystemMessage = (systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages along with SPATIAL LAYOUT DATA.
+
+**YOUR TASK**: Analyze the text AND spatial data to extract:
+1. **Input fields** (text, email, phone, checkboxes, etc.) - for data collection
+2. **Richtext fields** (titles, section headers, instructions, legal text) - for display/organization
+
+IMPORTANT: Do NOT skip titles, headers, or instructions. These must be included as richtext fields to preserve the form structure.`) + spatialContextHint + `
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
@@ -422,14 +452,24 @@ For each field you identify, determine:
 1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Medication Name" not just "Medication Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
 
 2. **Field Type**: Choose the most appropriate type based on what you find in the OCR text:
+   
+   **Common types from OCR:**
    - text: for single-line text inputs (names, addresses, single values). CRITICAL: If the OCR text shows a field label with a blank line or filled value underneath, treat it as type "text" - do NOT infer radio/select types from filled sample data. If the text shows "3. Gender" followed by a value like "Male", use type "text", NOT "select" or "radio"
    - email: for email address fields
-   - tel: for phone/telephone number fields  
+   - tel: for phone/telephone number fields
+   - number: for numeric inputs (age, quantity, ID numbers)
    - textarea: for large text areas, comments, messages, or multi-line inputs
    - select: ONLY when the OCR text shows multiple distinct options listed together (like "Yes", "No", "Maybe") indicating a dropdown or selection. Do NOT use "select" for fields that show only a single value
    - radio-with-other: when the OCR text shows multiple radio button options AND includes "Other:" with a text input
    - checkbox-with-other: when the OCR text shows multiple checkbox options AND includes "Other:" with a text input
    - date: for date picker fields (usually shown as mm/dd/yyyy or similar)
+   - richtext: for display-only text (titles, section headers, instructions, legal disclaimers)
+   
+   **Advanced types** (rarely in scanned forms, use only if explicitly shown):
+   - rating: for star ratings or scale (1-5, 1-10)
+   - file: for file upload fields (rarely in scanned PDFs)
+   - signature: for signature fields (usually shown as "Signature: ___________")
+   - payment: for credit card, bank account, or payment information fields (e.g., "Card Number:", "Account Number:", "Routing Number:", "CVV:", "Expiration Date:")
    
    IMPORTANT: Do NOT infer field types from filled sample data in the OCR text. If a form field shows only a single value (even something like "Male"), use type "text", not "radio" or "select". Only use "select" or "radio" when the OCR text explicitly shows multiple choice options.
 
@@ -455,13 +495,21 @@ For each field you identify, determine:
 6. **Confidence**: Rate 0.0-1.0 how confident you are about this field
 
 Return ONLY a JSON array with this exact structure:
+
+**SUPPORTED FIELD TYPES**:
+- **Common types** (from OCR): text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other
+- **Display types**: richtext (for titles/headers/instructions)
+- **Advanced types** (rare): rating, file, signature, payment
+- **Manual types** (not from OCR): image, calendly
+
+**FOR INPUT FIELDS** (text, email, phone, checkboxes, etc.):
 [
   {
-    "label": "Field Label Text",
-    "type": "text|email|tel|textarea|select|date|radio-with-other|checkbox-with-other",
+    "label": "First Name",
+    "type": "text|email|tel|number|textarea|select|date|radio-with-other|checkbox-with-other|rating|file|signature|payment",
     "required": true/false,
     "placeholder": "Placeholder text if visible",
-    "options": ["Option 1", "Option 2"] (for select/radio/checkbox),
+    "options": ["Option 1", "Option 2"] (for select/radio/checkbox/rating),
     "allowOther": true/false (ONLY true if the text shows "Other:" with text input),
     "otherLabel": "Other:" (ONLY if allowOther is true),
     "otherPlaceholder": "Please specify..." (ONLY if allowOther is true),
@@ -470,9 +518,97 @@ Return ONLY a JSON array with this exact structure:
   }
 ]
 
+**FOR RICHTEXT FIELDS** (titles, headers, instructions):
+[
+  {
+    "label": "Form Title|Section Header|Disclaimer|Instructions",
+    "type": "richtext",
+    "richTextContent": "<h1>Title</h1>|<h2>Header</h2>|<p>Instructions...</p>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.95,
+    "pageNumber": 1
+  }
+]
+
+**NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, richtext). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
+
+**OUTPUT ORDER**: Create fields in VISUAL ORDER (sorted by y-coordinate):
+1. Form titles/headers first (top of page)
+2. Section headers in order
+3. Input fields in order
+4. Mix richtext and input fields based on their position
+
 IMPORTANT: For most fields, allowOther should be false. Only set to true when the text clearly shows "Other:" with a text input field.
 
-EXAMPLE: If the text contains options like:
+**COMPLETE EXAMPLE MIXING RICHTEXT AND INPUT FIELDS**:
+Given spatial data showing:
+- Block 1: "PATIENT INTAKE FORM" (y:225, h:30)
+- Block 2: "Disclaimer: ..." (y:302, h:89)
+- Block 3: "PATIENT DETAILS" (y:433, h:23)
+- Block 4: "First Name:" (y:505, h:21)
+- Block 5: "Last Name:" (y:506, h:19)
+
+Correct output (mixed, in visual order):
+[
+  {
+    "label": "Form Title",
+    "type": "richtext",
+    "richTextContent": "<h1>PATIENT INTAKE FORM</h1>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.98,
+    "pageNumber": 1
+  },
+  {
+    "label": "Disclaimer",
+    "type": "richtext",
+    "richTextContent": "<p>Disclaimer: ...</p>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.90,
+    "pageNumber": 1
+  },
+  {
+    "label": "Section Header",
+    "type": "richtext",
+    "richTextContent": "<h2>PATIENT DETAILS</h2>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.95,
+    "pageNumber": 1
+  },
+  {
+    "label": "First Name",
+    "type": "text",
+    "required": false,
+    "placeholder": "",
+    "options": [],
+    "allowOther": false,
+    "otherLabel": "",
+    "otherPlaceholder": "",
+    "confidence": 0.97,
+    "pageNumber": 1
+  },
+  {
+    "label": "Last Name",
+    "type": "text",
+    "required": false,
+    "placeholder": "",
+    "options": [],
+    "allowOther": false,
+    "otherLabel": "",
+    "otherPlaceholder": "",
+    "confidence": 0.97,
+    "pageNumber": 1
+  }
+]
+
+**CRITICAL**: 
+- Richtext fields do NOT need: placeholder, options, allowOther, otherLabel, otherPlaceholder
+- Input fields MUST have ALL fields even if empty: placeholder, options, allowOther, otherLabel, otherPlaceholder
+
+**OPTIONS EXTRACTION EXAMPLE**: If the text contains options like:
 - "No"
 - "Yes-Flu A" 
 - "Yes-Flu B"
@@ -491,12 +627,14 @@ Notice: "Other:" is NOT in the options array because it's handled by allowOther:
 
     // Build user message with OCR text
     // IMPORTANT: Always include the OCR text, even if userMessage is provided
-    let groqUserMessage = `Analyze this OCR text extracted from PDF form pages and extract all visible form fields.
+    let groqUserMessage = `Analyze this OCR text extracted from PDF form pages and extract BOTH:
+1. Richtext fields (titles, section headers, instructions, legal text)
+2. Input fields (text, email, phone, checkboxes, etc.)
 
 OCR TEXT:
 ${combinedText}
 
-Extract all form fields with their exact labels, types, and options as they appear in the text.`
+Extract ALL elements in visual order (top to bottom based on y-coordinates from spatial data). Include both richtext fields for display AND input fields for data collection.`
     
     // If user provided additional context, append it
     if (userMessage) {
