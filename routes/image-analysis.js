@@ -80,6 +80,11 @@ function getBlockHeight(block) {
 }
 
 // Calculate median text height across all blocks (more robust than average)
+/* 
+ * DEPRECATED: Heuristic-based detection replaced by LLM-based classification
+ * The functions below are preserved for reference but no longer used.
+ * LLM now uses spatial data directly to classify form elements contextually.
+ * 
 function calculateMedianHeight(blocks) {
   const heights = blocks
     .map(b => getBlockHeight(b))
@@ -187,6 +192,7 @@ function detectSectionHeaders(blocks) {
   
   return headers
 }
+*/
 
 /**
  * POST /analyze-images
@@ -266,33 +272,42 @@ router.post('/analyze-images', async (req, res) => {
     console.log(`✅ All images processed in ${visionTotalTime}ms`)
     console.log(`📝 Total OCR text: ${totalCharacters} characters`)
 
-    // Step 2: Analyze spatial layout data from Google Vision
-    console.log('🔍 Analyzing spatial layout data from Google Vision...')
+    // Step 2: Format spatial layout data for LLM
+    console.log('🔍 Formatting spatial layout data for LLM...')
     const allBlocks = visionResults.flatMap(r => r.blocks || [])
     console.log(`📦 Total blocks from Vision API: ${allBlocks.length}`)
     
-    // Log first 10 blocks with full spatial data for analysis
-    console.log('📊 Sample blocks with bounding data:')
-    allBlocks.slice(0, 10).forEach((block, idx) => {
+    // Format blocks with spatial information for LLM
+    const spatialBlocks = allBlocks.map((block, idx) => {
       const text = getBlockText(block).trim()
-      const height = getBlockHeight(block)
       const box = block.boundingBox
       
       if (box && box.vertices && box.vertices.length >= 4) {
         const topLeft = box.vertices[0]
         const bottomRight = box.vertices[2]
         const width = bottomRight.x - topLeft.x
-        console.log(`  Block ${idx + 1}: "${text.substring(0, 40)}"`)
-        console.log(`    Position: x=${topLeft.x}, y=${topLeft.y}, width=${width}, height=${height}`)
-      } else {
-        console.log(`  Block ${idx + 1}: "${text.substring(0, 40)}" - NO BOUNDING BOX`)
+        const height = Math.abs(bottomRight.y - topLeft.y)  // Use abs() to handle negative heights
+        
+        return {
+          index: idx + 1,
+          text: text,
+          x: topLeft.x,
+          y: topLeft.y,
+          width: width,
+          height: height
+        }
       }
-    })
+      
+      return null
+    }).filter(b => b !== null && b.text.length > 0)  // Remove null entries and empty text
     
-    // TEMPORARILY DISABLED: Testing bounding box data before implementing LLM-based classification
-    // const sectionHeaders = detectSectionHeaders(allBlocks)
-    // console.log(`✨ Detected ${sectionHeaders.length} read-only text blocks`)
-    const sectionHeaders = []  // Empty for now, will be replaced with LLM-based detection
+    console.log(`📊 Formatted ${spatialBlocks.length} blocks with spatial data for LLM`)
+    
+    // Log first 5 blocks as sample
+    console.log('📍 Sample spatial blocks:')
+    spatialBlocks.slice(0, 5).forEach(b => {
+      console.log(`  [${b.index}] "${b.text.substring(0, 40)}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`)
+    })
 
     // Step 3: Combine OCR text from all pages
     const combinedText = visionResults
@@ -303,31 +318,65 @@ router.post('/analyze-images', async (req, res) => {
     console.log('🤖 Step 3: Sending OCR text to Groq API for field extraction...')
     const groqStartTime = Date.now()
 
-    // Build read-only text hints for Groq
-    const sectionHeadersHint = sectionHeaders.length > 0 
+    // Build spatial context for Groq
+    const spatialContextHint = spatialBlocks.length > 0 
       ? `
 
-**DETECTED READ-ONLY TEXT (Spatial Analysis)**:
-The following texts are read-only labels/headers/instructions (NOT input fields). They were detected based on font size and formatting:
+**SPATIAL LAYOUT DATA**:
+Below are ${spatialBlocks.length} text blocks with their positions and sizes. Use this spatial context to classify elements and understand the form structure.
 
-${sectionHeaders.map(h => 
-  `- "${h.text}" (relative size: ${h.relativeSize.toFixed(1)}x average, header level: h${h.headerLevel}, confidence: ${h.confidence})`
+${spatialBlocks.slice(0, 30).map(b => 
+  `Block ${b.index}: "${b.text.substring(0, 60)}${b.text.length > 60 ? '...' : ''}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`
 ).join('\n')}
+${spatialBlocks.length > 30 ? `\n...and ${spatialBlocks.length - 30} more blocks` : ''}
 
-**IMPORTANT INSTRUCTIONS FOR READ-ONLY TEXT**:
-1. For each detected read-only text, create a richtext field (NOT a regular input field)
-2. Set type to "richtext"
-3. Set richTextContent based on header level:
-   - h1 (major sections): "<h1>[TEXT]</h1>"
-   - h2 (subsections): "<h2>[TEXT]</h2>"  
-   - h3 (minor headings): "<h3>[TEXT]</h3>"
-4. Set richTextMaxHeight to 0 (no scrolling)
-5. Set required to false
-6. Set label to "Section Header" or "Instructions" or similar
-7. Do NOT create a separate input field for these texts
-8. Read-only text is for visual organization/instructions only, not for data collection
+**SPATIAL CLASSIFICATION RULES**:
 
-EXAMPLE for "PATIENT INFORMATION" (h2):
+1. **Form Titles/Main Headers**: 
+   - Large height (typically >25px) OR large width (>400px)
+   - Near top of page (low y-value, typically <200)
+   - All caps or title case, no colon at end
+   → Create richtext field with <h1> tag
+
+2. **Section Headers**:
+   - Medium-large height (typically 18-25px)
+   - Standalone text with semantic meaning (e.g., "PATIENT DETAILS", "Contact Information", "Part I")
+   - No colon at end, not followed immediately by input
+   → Create richtext field with <h2> tag
+
+3. **Instructions/Legal Text/Disclaimers**:
+   - Multi-line (large height >40px) OR long text (>100 chars)
+   - Explanatory content (e.g., "Disclaimer:", "Before you begin", "Under penalties of perjury")
+   - Not a field label
+   → Create richtext field with <p> tag or <h3> tag if shorter
+
+4. **Field Labels**:
+   - Typically ends with ":" (e.g., "First Name:", "Address:")
+   - Small-medium height (12-20px)
+   - Followed by input area (next block at similar y-coord or slightly below)
+   → Extract as label for input field (remove the ":" from label)
+
+5. **Field Options/Checkboxes**:
+   - Contains ☐, ☑, or multiple choices separated by spaces
+   - Part of a parent field (e.g., "Gender: ☐ Male ☐ Female ☐ Other")
+   → Include as options array in the field
+
+6. **Horizontal Grouping**:
+   - Fields at similar y-coordinates (within 10px) are on the same row
+   - Create separate fields but note they're visually grouped
+
+7. **Numbered Fields**:
+   - Start with number (e.g., "1 Name of entity", "3a Check the box")
+   - Number is part of label, keep it
+
+**IMPORTANT**:
+- Use spatial proximity (x, y coordinates) to understand field relationships
+- Use height to distinguish titles/headers (large) from regular fields (small)
+- Consider vertical ordering (y-coord) for proper field sequence
+- Create richtext fields for display-only text (titles, headers, instructions)
+- DO NOT create input fields for text that has no associated input area
+
+EXAMPLE for "PATIENT INFORMATION" section header:
 {
   "label": "Section Header",
   "type": "richtext",
@@ -341,7 +390,7 @@ EXAMPLE for "PATIENT INFORMATION" (h2):
       : ''
 
     // Use provided system message or default (text-focused prompt for OCR analysis)
-    const defaultSystemMessage = (systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages. Analyze this TEXT to extract ALL form fields with high accuracy.`) + sectionHeadersHint + `
+    const defaultSystemMessage = (systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages. Analyze this TEXT to extract ALL form fields with high accuracy.`) + spatialContextHint + `
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
