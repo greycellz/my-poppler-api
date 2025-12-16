@@ -1368,29 +1368,28 @@ app.delete('/cleanup/screenshot/:urlHash', (req, res) => {
 // Scheduled cleanup (files older than specified time)
 app.get('/cleanup', (req, res) => {
   try {
-    const oneHourAgo = Date.now() - (60 * 60 * 1000);
-    const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
+    const twoHoursAgo = Date.now() - (2 * 60 * 60 * 1000);  // Increased to 2 hours for testing
     let cleanedCount = 0;
 
-    // Clean PDF uploads folder (1 hour)
+    // Clean PDF uploads folder (2 hours)
     if (fs.existsSync('./uploads')) {
       fs.readdirSync('./uploads').forEach(file => {
         const filePath = path.join('./uploads', file);
         const stats = fs.statSync(filePath);
-        if (stats.mtime.getTime() < oneHourAgo) {
+        if (stats.mtime.getTime() < twoHoursAgo) {
           fs.unlinkSync(filePath);
           cleanedCount++;
         }
       });
     }
 
-    // Clean PDF output folders (1 hour)
+    // Clean PDF output folders (2 hours)
     if (fs.existsSync('./output')) {
       fs.readdirSync('./output').forEach(folder => {
         const folderPath = path.join('./output', folder);
         if (fs.statSync(folderPath).isDirectory()) {
           const stats = fs.statSync(folderPath);
-          if (stats.mtime.getTime() < oneHourAgo) {
+          if (stats.mtime.getTime() < twoHoursAgo) {
             fs.rmSync(folderPath, { recursive: true, force: true });
             cleanedCount++;
           }
@@ -1398,13 +1397,13 @@ app.get('/cleanup', (req, res) => {
       });
     }
 
-    // Clean screenshot folders (30 minutes)
+    // Clean screenshot folders (2 hours)
     if (fs.existsSync('./screenshots')) {
       fs.readdirSync('./screenshots').forEach(folder => {
         const folderPath = path.join('./screenshots', folder);
         if (fs.statSync(folderPath).isDirectory()) {
           const stats = fs.statSync(folderPath);
-          if (stats.mtime.getTime() < thirtyMinutesAgo) {
+          if (stats.mtime.getTime() < twoHoursAgo) {
             fs.rmSync(folderPath, { recursive: true, force: true });
             cleanedCount++;
           }
@@ -1419,8 +1418,8 @@ app.get('/cleanup', (req, res) => {
       cleanedCount: cleanedCount,
       message: `Cleaned ${cleanedCount} old files/folders`,
       cleanupPolicy: {
-        pdfFiles: '1 hour',
-        screenshots: '30 minutes'
+        pdfFiles: '2 hours',
+        screenshots: '2 hours'
       }
     });
 
