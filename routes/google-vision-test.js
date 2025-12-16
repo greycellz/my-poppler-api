@@ -114,10 +114,20 @@ router.post('/test-google-vision', async (req, res) => {
     const startTime = Date.now()
 
     // Call Google Vision API
-    const [result] = await client.documentTextDetection(imageInput)
-    
-    console.log(`📊 Vision API response received`)
-    console.log(`📊 Full text annotation present: ${!!result.fullTextAnnotation}`)
+    let result
+    try {
+      [result] = await client.documentTextDetection(imageInput)
+      console.log(`📊 Vision API response received`)
+      console.log(`📊 Full text annotation present: ${!!result.fullTextAnnotation}`)
+      if (result.error) {
+        console.error(`❌ Vision API returned error:`, result.error)
+        throw new Error(result.error.message || 'Vision API error')
+      }
+    } catch (visionError) {
+      console.error(`❌ Vision API call failed:`, visionError)
+      console.error(`❌ Error details:`, JSON.stringify(visionError, null, 2))
+      throw visionError
+    }
 
     const processingTime = Date.now() - startTime
 
