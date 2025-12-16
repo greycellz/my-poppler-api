@@ -48,9 +48,9 @@ function initializeVisionClient() {
   }
 }
 
-// Groq model selection
+// Groq model selection - using OSS 20B for better speed and lower cost
 const USE_GROQ_LLAMA = process.env.USE_GROQ_LLAMA === 'TRUE'
-const GROQ_MODEL = USE_GROQ_LLAMA ? 'llama-3.3-70b-versatile' : 'openai/gpt-oss-120b'
+const GROQ_MODEL = USE_GROQ_LLAMA ? 'llama-3.3-70b-versatile' : 'openai/gpt-oss-20b'
 
 if (!process.env.GROQ_API_KEY) {
   console.error('⚠️ WARNING: GROQ_API_KEY not set in Railway environment')
