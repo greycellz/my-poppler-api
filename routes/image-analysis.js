@@ -130,6 +130,7 @@ function detectSectionHeaders(blocks) {
     const isLargerThanTypical = relativeSize > 1.3  // More lenient than 1.5
     const isSignificantlyLarger = relativeSize > 1.8
     const isAllCaps = text === text.toUpperCase() && text.length > 3
+    const isTitleCase = /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*$/.test(text)  // "Contact Information", "Personal Information"
     const hasNoColon = !text.includes(':')
     const isReasonableLength = text.length >= 4 && text.length < 100
     const matchesHeaderPattern = /^(PART|SECTION|PATIENT|INFORMATION|CONTACT|EMERGENCY|HISTORY|MEDICAL|INSURANCE|AUTHORIZATION|CONSENT|DEMOGRAPHIC|PERSONAL|FINANCIAL|CHART|FORM|WELCOME|INTAKE|EDUCATION|EMPLOYMENT|FAMILY|SUBSTANCE|TRAUMA|LEGAL)/i.test(text)
@@ -138,23 +139,27 @@ function detectSectionHeaders(blocks) {
     if (matchesHeaderPattern || isLargerThanTypical) {
       console.log(`  🔎 Potential read-only text: "${text.substring(0, 40)}"`)
       console.log(`     - Size: ${relativeSize.toFixed(2)}x | Larger? ${isLargerThanTypical}`)
-      console.log(`     - AllCaps? ${isAllCaps} | NoColon? ${hasNoColon}`)
+      console.log(`     - AllCaps? ${isAllCaps} | TitleCase? ${isTitleCase} | NoColon? ${hasNoColon}`)
       console.log(`     - Length: ${text.length} | HeaderPattern? ${matchesHeaderPattern}`)
     }
     
     // Detection paths:
-    // Path 1: Large + structured (all caps or header pattern) + not field label
-    // Path 2: Very large + not field label (regardless of caps/pattern)
+    // Path 1: Strong pattern match (pattern + (all caps OR title case) + no colon) - size-agnostic for short text
+    // Path 2: Large + structured (all caps OR pattern) + not field label
+    // Path 3: Very large + not field label + not too long (avoid paragraphs/options)
+    const strongPatternMatch = matchesHeaderPattern && (isAllCaps || isTitleCase) && hasNoColon && text.length < 50
     const structuredHeader = (isAllCaps || matchesHeaderPattern) && hasNoColon && isReasonableLength
     const largeStructuredMatch = isLargerThanTypical && structuredHeader
-    const veryLargeMatch = isSignificantlyLarger && hasNoColon && isReasonableLength
+    const veryLargeMatch = isSignificantlyLarger && hasNoColon && text.length < 60  // Stricter length to avoid "5. Religious background ( circle one ) Protestant..."
     
-    if (largeStructuredMatch || veryLargeMatch) {
+    if (strongPatternMatch || largeStructuredMatch || veryLargeMatch) {
       // Determine confidence
       let confidence = 'medium'
-      if (isSignificantlyLarger && matchesHeaderPattern && isAllCaps) {
+      if (strongPatternMatch) {
+        confidence = 'high'  // Strong structural signals (pattern + formatting)
+      } else if (isSignificantlyLarger && matchesHeaderPattern && (isAllCaps || isTitleCase)) {
         confidence = 'high'
-      } else if (matchesHeaderPattern && isAllCaps) {
+      } else if (matchesHeaderPattern && (isAllCaps || isTitleCase)) {
         confidence = 'medium'
       } else {
         confidence = 'low'
@@ -261,9 +266,29 @@ router.post('/analyze-images', async (req, res) => {
     console.log(`✅ All images processed in ${visionTotalTime}ms`)
     console.log(`📝 Total OCR text: ${totalCharacters} characters`)
 
-    // Step 2: Analyze spatial layout for read-only text (headers, instructions, labels)
-    console.log('🔍 Analyzing spatial layout for read-only text (headers, instructions, labels)...')
+    // Step 2: Analyze spatial layout data from Google Vision
+    console.log('🔍 Analyzing spatial layout data from Google Vision...')
     const allBlocks = visionResults.flatMap(r => r.blocks || [])
+    console.log(`📦 Total blocks from Vision API: ${allBlocks.length}`)
+    
+    // Log first 10 blocks with full spatial data for analysis
+    console.log('📊 Sample blocks with bounding data:')
+    allBlocks.slice(0, 10).forEach((block, idx) => {
+      const text = getBlockText(block).trim()
+      const height = getBlockHeight(block)
+      const box = block.boundingBox
+      
+      if (box && box.vertices && box.vertices.length >= 4) {
+        const topLeft = box.vertices[0]
+        const bottomRight = box.vertices[2]
+        const width = bottomRight.x - topLeft.x
+        console.log(`  Block ${idx + 1}: "${text.substring(0, 40)}"`)
+        console.log(`    Position: x=${topLeft.x}, y=${topLeft.y}, width=${width}, height=${height}`)
+      } else {
+        console.log(`  Block ${idx + 1}: "${text.substring(0, 40)}" - NO BOUNDING BOX`)
+      }
+    })
+    
     const sectionHeaders = detectSectionHeaders(allBlocks)
     console.log(`✨ Detected ${sectionHeaders.length} read-only text blocks`)
 
