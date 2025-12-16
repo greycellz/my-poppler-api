@@ -3407,6 +3407,7 @@ const baaRoutes = require('./routes/baa');
 const imageAnalysisRoutes = require('./routes/image-analysis');
 const urlAnalysisRoutes = require('./routes/url-analysis');
 const urlAnalysisHtmlRoutes = require('./routes/url-analysis-html');
+const googleVisionTestRoutes = require('./routes/google-vision-test');
 
 // Mount authentication routes
 app.use('/auth', authRoutes);
@@ -3421,6 +3422,7 @@ app.use('/api/baa', baaRoutes);
 app.use('/api', imageAnalysisRoutes);
 app.use('/api', urlAnalysisRoutes);
 app.use('/api', urlAnalysisHtmlRoutes);
+app.use('/api', googleVisionTestRoutes);
 
 // ============== AUTO-SAVE ENDPOINT ==============
 
