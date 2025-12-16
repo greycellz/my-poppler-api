@@ -318,17 +318,19 @@ router.post('/analyze-images', async (req, res) => {
     console.log('🤖 Step 3: Sending OCR text to Groq API for field extraction...')
     const groqStartTime = Date.now()
 
-    // Build spatial context for Groq
-    const spatialContextHint = spatialBlocks.length > 0 
+    // Build spatial context for Groq (limit to first 100 blocks to avoid token limits)
+    const maxBlocksForLLM = 100
+    const blocksToSend = spatialBlocks.slice(0, maxBlocksForLLM)
+    const spatialContextHint = blocksToSend.length > 0 
       ? `
 
 **SPATIAL LAYOUT DATA**:
-Below are ${spatialBlocks.length} text blocks with their positions and sizes. Use this spatial context to classify elements and understand the form structure.
+Below are ${blocksToSend.length} key text blocks with their positions and sizes. Use this spatial context to classify elements and understand the form structure.
 
-${spatialBlocks.slice(0, 30).map(b => 
+${blocksToSend.map(b => 
   `Block ${b.index}: "${b.text.substring(0, 60)}${b.text.length > 60 ? '...' : ''}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`
 ).join('\n')}
-${spatialBlocks.length > 30 ? `\n...and ${spatialBlocks.length - 30} more blocks` : ''}
+${spatialBlocks.length > maxBlocksForLLM ? `\n...and ${spatialBlocks.length - maxBlocksForLLM} more blocks (omitted to save tokens)` : ''}
 
 **SPATIAL CLASSIFICATION RULES**:
 
@@ -659,7 +661,7 @@ Extract ALL elements in visual order (top to bottom based on y-coordinates from 
             content: groqUserMessage
           }
         ],
-        max_completion_tokens: 32768,
+        max_completion_tokens: 65536,  // Increased for complex forms with many fields
         temperature: 0.1
       })
     })
@@ -678,6 +680,14 @@ Extract ALL elements in visual order (top to bottom based on y-coordinates from 
     const choice = groqData.choices?.[0]
     if (!choice) {
       throw new Error('No response from Groq API')
+    }
+
+    // Check if response was truncated due to token limit
+    const finishReason = choice.finish_reason
+    console.log(`🏁 Groq finish_reason: ${finishReason}`)
+    if (finishReason === 'length') {
+      console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
+      console.warn('⚠️ Consider reducing form complexity or increasing token limit')
     }
 
     const responseText = choice.message?.content || ''
