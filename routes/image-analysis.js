@@ -382,7 +382,7 @@ Focus on extracting actual form fields (inputs, checkboxes, radios) and importan
 
 Example 1 - Form Title (Block 1: "PATIENT INTAKE FORM" at y:225, h:30):
 {
-  "label": "Form Title",
+  "label": "PATIENT INTAKE FORM",
   "type": "richtext",
   "richTextContent": "<h1>PATIENT INTAKE FORM</h1>",
   "richTextMaxHeight": 0,
@@ -393,7 +393,7 @@ Example 1 - Form Title (Block 1: "PATIENT INTAKE FORM" at y:225, h:30):
 
 Example 2 - Section Header (Block 4: "PATIENT DETAILS" at y:433, h:23):
 {
-  "label": "Section Header",
+  "label": "PATIENT DETAILS",
   "type": "richtext",
   "richTextContent": "<h2>PATIENT DETAILS</h2>",
   "richTextMaxHeight": 0,
@@ -404,7 +404,7 @@ Example 2 - Section Header (Block 4: "PATIENT DETAILS" at y:433, h:23):
 
 Example 3 - Disclaimer (Block 2: "Disclaimer: Thank you..." at y:302, h:89):
 {
-  "label": "Disclaimer",
+  "label": "Disclaimer: Thank you for your interest in being a patient of ___. This form is used to collect information...",
   "type": "richtext",
   "richTextContent": "<p>Disclaimer: Thank you for your interest in being a patient of ___. This form is used to collect information...</p>",
   "richTextMaxHeight": 0,
@@ -530,7 +530,7 @@ Return ONLY a JSON array with this exact structure:
 **FOR RICHTEXT FIELDS** (titles, headers, instructions):
 [
   {
-    "label": "Form Title|Section Header|Disclaimer|Instructions",
+    "label": "The actual text content (e.g., 'PATIENT INFORMATION', 'Welcome to our practice', 'Please fill out this form...')",
     "type": "richtext",
     "richTextContent": "<h1>Title</h1>|<h2>Header</h2>|<p>Instructions...</p>",
     "richTextMaxHeight": 0,
@@ -539,6 +539,8 @@ Return ONLY a JSON array with this exact structure:
     "pageNumber": 1
   }
 ]
+
+**IMPORTANT FOR RICHTEXT**: The "label" field should contain the ACTUAL TEXT CONTENT from the form, not generic descriptions like "Form Title" or "Section Header". Extract the real text and use it as the label.
 
 **NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, richtext). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
 
