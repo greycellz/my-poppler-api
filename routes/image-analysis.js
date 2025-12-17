@@ -687,7 +687,7 @@ ${combinedText}
             content: groqUserMessage
           }
         ],
-        max_completion_tokens: 65536,  // Increased for complex forms with many fields
+        max_completion_tokens: 32768,  // Reduced from 65536 - Groq may have issues at exact max
         temperature: 0.1
       })
     })
@@ -711,6 +711,14 @@ ${combinedText}
     // Check if response was truncated due to token limit
     const finishReason = choice.finish_reason
     console.log(`🏁 Groq finish_reason: ${finishReason}`)
+    
+    // Debug: Log the entire choice object if content is missing
+    if (!choice.message?.content) {
+      console.error('❌ Groq response has no content!')
+      console.error('📋 Full choice object:', JSON.stringify(choice, null, 2))
+      console.error('📋 Full groqData:', JSON.stringify(groqData, null, 2))
+    }
+    
     if (finishReason === 'length') {
       console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
       console.warn('⚠️ Consider reducing form complexity or increasing token limit')
