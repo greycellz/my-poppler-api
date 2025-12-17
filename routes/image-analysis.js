@@ -339,19 +339,19 @@ ${sampleBlocks.map(b =>
    - Large height (typically >25px) OR large width (>400px)
    - Near top of page (low y-value, typically <200)
    - All caps or title case, no colon at end
-   → Create richtext field with <h1> tag
+   → Create label field with <h1> tag
 
 2. **Section Headers**:
    - Medium-large height (typically 18-25px)
    - Standalone text with semantic meaning (e.g., "APPLICANT DETAILS", "Contact Information", "Part I")
    - No colon at end, not followed immediately by input
-   → Create richtext field with <h2> tag
+   → Create label field with <h2> tag
 
 3. **Instructions/Legal Text/Disclaimers**:
    - Multi-line (large height >40px) OR long text (>100 chars)
    - Explanatory content (e.g., "Disclaimer:", "Before you begin", "Under penalties of perjury")
    - Not a field label
-   → Create richtext field with <p> tag or <h3> tag if shorter
+   → Create label field with <p> tag or <h3> tag if shorter
 
 4. **Field Labels**:
    - Typically ends with ":" (e.g., "First Name:", "Address:")
@@ -417,7 +417,7 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 - Use spatial proximity (x, y coordinates) to understand field relationships
 - Use height to distinguish titles/headers (large) from regular fields (small)
 - Sort ALL fields (label AND input) by y-coordinate - DO NOT separate label and input fields
-- Mix richtext and input fields in the order they appear vertically on the page
+- Mix label and input fields in the order they appear vertically on the page
 - DO NOT skip titles, headers, or instructions - they are essential for form structure
 `
       : ''
@@ -427,7 +427,7 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 
 **YOUR TASK**: Analyze the text AND spatial data to identify the form's structure and create a digital version:
 1. **Input fields** (text boxes, email fields, phone numbers, checkboxes, etc.) - where users will enter data
-2. **Richtext fields** (titles, section headers, instructions, legal text) - for display/organization
+2. **Label fields** (titles, section headers, instructions, legal text) - for display/organization
 
 IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, not extracting data from a filled form. Do NOT skip titles, headers, or instructions. These must be included as label fields to preserve the form structure.`) + spatialContextHint + `
 
@@ -472,7 +472,7 @@ For each field you identify, determine:
    - radio-with-other: when the OCR text shows multiple radio button options AND includes "Other:" with a text input
    - checkbox-with-other: when the OCR text shows multiple checkbox options AND includes "Other:" with a text input
    - date: for date picker fields (usually shown as mm/dd/yyyy or similar)
-   - richtext: for display-only text (titles, section headers, instructions, legal disclaimers)
+   - label: for display-only text (titles, section headers, instructions, legal disclaimers)
    
    **Advanced types** (rarely in scanned forms, use only if explicitly shown):
    - rating: for star ratings or scale (1-5, 1-10)
@@ -569,7 +569,7 @@ DO NOT group by section or field type. Return fields in the exact order they app
 
 IMPORTANT: For most fields, allowOther should be false. Only set to true when the text clearly shows "Other:" with a text input field.
 
-**COMPLETE EXAMPLE MIXING RICHTEXT AND INPUT FIELDS**:
+**COMPLETE EXAMPLE MIXING LABEL AND INPUT FIELDS**:
 Given spatial data showing:
 - Block 1: "REGISTRATION FORM" (y:225, h:30)
 - Block 2: "Instructions: ..." (y:302, h:89)
@@ -633,7 +633,7 @@ Correct output (mixed, in visual order BY Y-COORDINATE):
 ]
 
 **CRITICAL**: 
-- Richtext fields do NOT need: placeholder, options, allowOther, otherLabel, otherPlaceholder
+- Label fields do NOT need: placeholder, options, allowOther, otherLabel, otherPlaceholder
 - Input fields MUST have ALL fields even if empty: placeholder, options, allowOther, otherLabel, otherPlaceholder
 
 **OPTIONS DETECTION EXAMPLE**: If the text contains options like:
