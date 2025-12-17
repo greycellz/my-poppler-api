@@ -314,8 +314,8 @@ router.post('/analyze-images', async (req, res) => {
       .map((result, index) => `=== PAGE ${result.page} ===\n${result.text}`)
       .join('\n\n')
 
-    // Step 4: Send to Groq API for field extraction
-    console.log('🤖 Step 3: Sending OCR text to Groq API for field extraction...')
+    // Step 4: Send to Groq API for field identification
+    console.log('🤖 Step 3: Sending OCR text to Groq API for field identification...')
     const groqStartTime = Date.now()
 
     // Build spatial context for Groq
@@ -343,7 +343,7 @@ ${sampleBlocks.map(b =>
 
 2. **Section Headers**:
    - Medium-large height (typically 18-25px)
-   - Standalone text with semantic meaning (e.g., "PATIENT DETAILS", "Contact Information", "Part I")
+   - Standalone text with semantic meaning (e.g., "APPLICANT DETAILS", "Contact Information", "Part I")
    - No colon at end, not followed immediately by input
    → Create richtext field with <h2> tag
 
@@ -357,7 +357,7 @@ ${sampleBlocks.map(b =>
    - Typically ends with ":" (e.g., "First Name:", "Address:")
    - Small-medium height (12-20px)
    - Followed by input area (next block at similar y-coord or slightly below)
-   → Extract as label for input field (remove the ":" from label)
+   → Use as label for input field (remove the ":" from label)
 
 5. **Field Options/Checkboxes**:
    - Contains ☐, ☑, or multiple choices separated by spaces
@@ -380,33 +380,33 @@ Focus on identifying the form's input fields (text boxes, checkboxes, radios) an
 
 **CRITICAL RICHTEXT EXAMPLES**:
 
-Example 1 - Form Title (Block 1: "PATIENT INTAKE FORM" at y:225, h:30):
+Example 1 - Form Title (Block 1: "APPLICATION FORM" at y:225, h:30):
 {
-  "label": "PATIENT INTAKE FORM",
+  "label": "APPLICATION FORM",
   "type": "richtext",
-  "richTextContent": "<h1>PATIENT INTAKE FORM</h1>",
+  "richTextContent": "<h1>APPLICATION FORM</h1>",
   "richTextMaxHeight": 0,
   "required": false,
   "confidence": 0.98,
   "pageNumber": 1
 }
 
-Example 2 - Section Header (Block 4: "PATIENT DETAILS" at y:433, h:23):
+Example 2 - Section Header (Block 4: "CONTACT INFORMATION" at y:433, h:23):
 {
-  "label": "PATIENT DETAILS",
+  "label": "CONTACT INFORMATION",
   "type": "richtext",
-  "richTextContent": "<h2>PATIENT DETAILS</h2>",
+  "richTextContent": "<h2>CONTACT INFORMATION</h2>",
   "richTextMaxHeight": 0,
   "required": false,
   "confidence": 0.95,
   "pageNumber": 1
 }
 
-Example 3 - Disclaimer (Block 2: "Disclaimer: Thank you..." at y:302, h:89):
+Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h:89):
 {
-  "label": "Disclaimer: Thank you for your interest in being a patient of ___. This form is used to collect information...",
+  "label": "Please complete all sections of this form. Fields marked with an asterisk (*) are required...",
   "type": "richtext",
-  "richTextContent": "<p>Disclaimer: Thank you for your interest in being a patient of ___. This form is used to collect information...</p>",
+  "richTextContent": "<p>Please complete all sections of this form. Fields marked with an asterisk (*) are required...</p>",
   "richTextMaxHeight": 0,
   "required": false,
   "confidence": 0.90,
@@ -434,7 +434,7 @@ IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
 - Repeated "Yes/No" questions on different pages must each be separate fields
-- "If living, age and health status" for Mother vs Father must be separate fields
+- "Current Address" vs "Mailing Address" must be separate fields even if both collect the same type of data
 
 **ALWAYS KEEP CONDITIONAL QUESTIONS**: Treat every "If yes, ...", "If no, ...", "If applicable, ...", "If you have used..., do you feel...", and every table/row instruction as its OWN field, not just explanation. Even if the wording is short and appears to be a sub-clause, if it asks the user to provide information or choose an option, it must be a field.
 
@@ -444,21 +444,21 @@ IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, 
 - Do NOT create separate fields for each option; they must be grouped under the main question
 - CRITICAL: When the text contains Yes/No questions, ALWAYS include BOTH options. If the text shows "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array. Search carefully in the OCR text - if a question has "Yes" mentioned, search for the corresponding "No" option even if it's on a different line or has additional text like "No, please mail it to my home address"
 - If the text shows "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
-- CRITICAL: When the text shows patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if the same field label appears multiple times, it should only be extracted once.
+- CRITICAL: When the text shows patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if the same field label appears multiple times, it should only be identified once.
 
-**ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. medication charts, hospitalization charts):
-- If each row asks for user input (e.g. Medication Name, Dosage, When Started), treat each column that expects text as a separate field
-- Include the question number or context in the label (e.g. "5. Medication Name (row 1)", "5. Medication Name (row 2)")
+**ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. product lists, item tables, experience charts):
+- If each row asks for user input (e.g. Item Name, Quantity, Date), treat each column that expects text as a separate field
+- Include the question number or context in the label (e.g. "5. Item Name (row 1)", "5. Item Name (row 2)")
 - Do NOT merge or deduplicate rows just because the column labels are the same
 
 **LABEL DISAMBIGUATION**: When two fields share the same base label but refer to different people or contexts, include that context in the label:
-- e.g. "Emergency Contact (Phone)" vs "Mother's Phone", "Father's Phone"
-- e.g. "Hospitalization date (physical)" vs "Hospitalization date (mental health)" if both exist
+- e.g. "Emergency Contact (Phone)" vs "Primary Contact (Phone)", "Secondary Contact (Phone)"
+- e.g. "Employment Start Date (Current Job)" vs "Employment Start Date (Previous Job)" if both exist
 - Prefer slightly longer, more specific labels over shorter generic ones to avoid collapsing distinct fields
 
 For each field you identify, determine:
 
-1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Medication Name" not just "Medication Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
+1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Item Name" not just "Item Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
 
 2. **Field Type**: Choose the most appropriate type based on what you find in the OCR text:
    
@@ -530,7 +530,7 @@ Return ONLY a JSON array with this exact structure:
 **FOR RICHTEXT FIELDS** (titles, headers, instructions):
 [
   {
-    "label": "The actual text content (e.g., 'PATIENT INFORMATION', 'Welcome to our practice', 'Please fill out this form...')",
+    "label": "The actual text content (e.g., 'APPLICATION FORM', 'Contact Information', 'Please fill out this form completely...')",
     "type": "richtext",
     "richTextContent": "<h1>Title</h1>|<h2>Header</h2>|<p>Instructions...</p>",
     "richTextMaxHeight": 0,
@@ -540,7 +540,7 @@ Return ONLY a JSON array with this exact structure:
   }
 ]
 
-**IMPORTANT FOR RICHTEXT**: The "label" field should contain the ACTUAL TEXT CONTENT from the form, not generic descriptions like "Form Title" or "Section Header". Extract the real text and use it as the label.
+**IMPORTANT FOR RICHTEXT**: The "label" field should contain the ACTUAL TEXT CONTENT from the form, not generic descriptions like "Form Title" or "Section Header". Identify the real text and use it as the label.
 
 **NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, richtext). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
 
@@ -554,36 +554,36 @@ IMPORTANT: For most fields, allowOther should be false. Only set to true when th
 
 **COMPLETE EXAMPLE MIXING RICHTEXT AND INPUT FIELDS**:
 Given spatial data showing:
-- Block 1: "PATIENT INTAKE FORM" (y:225, h:30)
-- Block 2: "Disclaimer: ..." (y:302, h:89)
-- Block 3: "PATIENT DETAILS" (y:433, h:23)
+- Block 1: "REGISTRATION FORM" (y:225, h:30)
+- Block 2: "Instructions: ..." (y:302, h:89)
+- Block 3: "APPLICANT INFORMATION" (y:433, h:23)
 - Block 4: "First Name:" (y:505, h:21)
 - Block 5: "Last Name:" (y:506, h:19)
 
 Correct output (mixed, in visual order):
 [
   {
-    "label": "Form Title",
+    "label": "REGISTRATION FORM",
     "type": "richtext",
-    "richTextContent": "<h1>PATIENT INTAKE FORM</h1>",
+    "richTextContent": "<h1>REGISTRATION FORM</h1>",
     "richTextMaxHeight": 0,
     "required": false,
     "confidence": 0.98,
     "pageNumber": 1
   },
   {
-    "label": "Disclaimer",
+    "label": "Instructions: Please complete all fields below",
     "type": "richtext",
-    "richTextContent": "<p>Disclaimer: ...</p>",
+    "richTextContent": "<p>Instructions: Please complete all fields below</p>",
     "richTextMaxHeight": 0,
     "required": false,
     "confidence": 0.90,
     "pageNumber": 1
   },
   {
-    "label": "Section Header",
+    "label": "APPLICANT INFORMATION",
     "type": "richtext",
-    "richTextContent": "<h2>PATIENT DETAILS</h2>",
+    "richTextContent": "<h2>APPLICANT INFORMATION</h2>",
     "richTextMaxHeight": 0,
     "required": false,
     "confidence": 0.95,
@@ -619,16 +619,16 @@ Correct output (mixed, in visual order):
 - Richtext fields do NOT need: placeholder, options, allowOther, otherLabel, otherPlaceholder
 - Input fields MUST have ALL fields even if empty: placeholder, options, allowOther, otherLabel, otherPlaceholder
 
-**OPTIONS EXTRACTION EXAMPLE**: If the text contains options like:
+**OPTIONS DETECTION EXAMPLE**: If the text contains options like:
 - "No"
-- "Yes-Flu A" 
-- "Yes-Flu B"
+- "Yes-Option A" 
+- "Yes-Option B"
 - "Yes-Other"
 - "Other:" (with text input field)
 
-The correct extraction should be:
+The correct output should be:
 {
-  "options": ["No", "Yes-Flu A", "Yes-Flu B", "Yes-Other"],
+  "options": ["No", "Yes-Option A", "Yes-Option B", "Yes-Other"],
   "allowOther": true,
   "otherLabel": "Other:",
   "otherPlaceholder": "Please specify..."
@@ -638,7 +638,7 @@ Notice: "Other:" is NOT in the options array because it's handled by allowOther:
 
     // Build user message with OCR text
     // IMPORTANT: Always include the OCR text, even if userMessage is provided
-    let groqUserMessage = `Analyze this OCR text extracted from PDF form pages and extract BOTH:
+    let groqUserMessage = `Analyze this OCR text from a blank form template and identify BOTH:
 1. Richtext fields (titles, section headers, instructions, legal text)
 2. Input fields (text, email, phone, checkboxes, etc.)
 
