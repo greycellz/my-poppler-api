@@ -687,8 +687,11 @@ ${combinedText}
             content: groqUserMessage
           }
         ],
-        max_completion_tokens: 32768,  // Reduced from 65536 - Groq may have issues at exact max
-        temperature: 0.1
+        max_completion_tokens: 65536,  // Increased back - reasoning was consuming all tokens
+        temperature: 0.1,
+        // Disable reasoning feature to prevent token waste on internal thinking
+        // (Model was spending all tokens on reasoning field instead of content)
+        response_format: { type: "json_object" }  // Force JSON output, no reasoning
       })
     })
 
