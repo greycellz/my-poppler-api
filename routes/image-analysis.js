@@ -416,8 +416,8 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 **IMPORTANT**:
 - Use spatial proximity (x, y coordinates) to understand field relationships
 - Use height to distinguish titles/headers (large) from regular fields (small)
-- Consider vertical ordering (y-coord) for proper field sequence
-- CREATE RICHTEXT FIELDS FIRST (in order of y-coord), then input fields
+- Sort ALL fields (richtext AND input) by y-coordinate - DO NOT separate richtext and input fields
+- Mix richtext and input fields in the order they appear vertically on the page
 - DO NOT skip titles, headers, or instructions - they are essential for form structure
 `
       : ''
