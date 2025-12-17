@@ -378,12 +378,12 @@ When identifying form fields, work from the OCR TEXT below, NOT from the spatial
 Use spatial data to INFORM your classification decisions (is this text a header? a label? an instruction?), but do NOT create a field for every spatial block shown above.
 Focus on identifying the form's input fields (text boxes, checkboxes, radios) and structural elements (titles, section headers, instructions) from the OCR text.
 
-**CRITICAL RICHTEXT EXAMPLES**:
+**CRITICAL LABEL EXAMPLES**:
 
 Example 1 - Form Title (Block 1: "APPLICATION FORM" at y:225, h:30):
 {
   "label": "",
-  "type": "richtext",
+  "type": "label",
   "richTextContent": "<h1>APPLICATION FORM</h1>",
   "richTextMaxHeight": 0,
   "required": false,
@@ -394,7 +394,7 @@ Example 1 - Form Title (Block 1: "APPLICATION FORM" at y:225, h:30):
 Example 2 - Section Header (Block 4: "CONTACT INFORMATION" at y:433, h:23):
 {
   "label": "",
-  "type": "richtext",
+  "type": "label",
   "richTextContent": "<h2>CONTACT INFORMATION</h2>",
   "richTextMaxHeight": 0,
   "required": false,
@@ -405,7 +405,7 @@ Example 2 - Section Header (Block 4: "CONTACT INFORMATION" at y:433, h:23):
 Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h:89):
 {
   "label": "",
-  "type": "richtext",
+  "type": "label",
   "richTextContent": "<p>Please complete all sections of this form. Fields marked with an asterisk (*) are required...</p>",
   "richTextMaxHeight": 0,
   "required": false,
@@ -416,7 +416,7 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 **IMPORTANT**:
 - Use spatial proximity (x, y coordinates) to understand field relationships
 - Use height to distinguish titles/headers (large) from regular fields (small)
-- Sort ALL fields (richtext AND input) by y-coordinate - DO NOT separate richtext and input fields
+- Sort ALL fields (label AND input) by y-coordinate - DO NOT separate label and input fields
 - Mix richtext and input fields in the order they appear vertically on the page
 - DO NOT skip titles, headers, or instructions - they are essential for form structure
 `
@@ -429,7 +429,7 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 1. **Input fields** (text boxes, email fields, phone numbers, checkboxes, etc.) - where users will enter data
 2. **Richtext fields** (titles, section headers, instructions, legal text) - for display/organization
 
-IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, not extracting data from a filled form. Do NOT skip titles, headers, or instructions. These must be included as richtext fields to preserve the form structure.`) + spatialContextHint + `
+IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, not extracting data from a filled form. Do NOT skip titles, headers, or instructions. These must be included as label fields to preserve the form structure.`) + spatialContextHint + `
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
@@ -507,9 +507,9 @@ Return ONLY a JSON array with this exact structure:
 
 **SUPPORTED FIELD TYPES**:
 - **Common types** (from OCR): text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other
-- **Display types**: richtext (for titles/headers/instructions)
+- **Display types**: label (for titles/headers/instructions - display-only form text)
 - **Advanced types** (rare): rating, file, signature, payment
-- **Manual types** (not from OCR): image, calendly
+- **Manual types** (not from OCR): image, calendly, richtext (user-editable rich content)
 
 **FOR INPUT FIELDS** (text, email, phone, checkboxes, etc.):
 [
@@ -527,11 +527,11 @@ Return ONLY a JSON array with this exact structure:
   }
 ]
 
-**FOR RICHTEXT FIELDS** (titles, headers, instructions):
+**FOR LABEL FIELDS** (titles, headers, instructions - display-only form text):
 [
   {
     "label": "",
-    "type": "richtext",
+    "type": "label",
     "richTextContent": "<h1>APPLICATION FORM</h1>|<h2>Contact Information</h2>|<p>Please fill out this form completely...</p>",
     "richTextMaxHeight": 0,
     "required": false,
@@ -540,19 +540,19 @@ Return ONLY a JSON array with this exact structure:
   }
 ]
 
-**CRITICAL FOR RICHTEXT**: 
-- The "label" field MUST be an EMPTY STRING ("") for richtext fields
+**CRITICAL FOR LABEL FIELDS**: 
+- The "label" field MUST be an EMPTY STRING ("") for label fields
 - The actual text content goes ONLY in "richTextContent" with proper HTML tags
 - Do NOT put the text in both label and richTextContent
-- Richtext is for display only - the content itself is what users see, not a label
+- Label fields are for display only - the content itself is what users see, not a label input
 
-**NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, richtext). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
+**NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, label). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
 
 **🚨 CRITICAL: OUTPUT ORDER - SORT BY Y-COORDINATE 🚨**:
 
 You MUST return fields in STRICT VISUAL ORDER from top to bottom of the page. This means:
 
-1. **Sort ALL fields (richtext AND input) by their y-coordinate value** (vertical position on the page)
+1. **Sort ALL fields (label AND input) by their y-coordinate value** (vertical position on the page)
 2. **Lower y-value = higher on page = should appear FIRST in the array**
 3. **Process the form from top to bottom**, not by field type or by the OCR text sequence
 
@@ -581,7 +581,7 @@ Correct output (mixed, in visual order BY Y-COORDINATE):
 [
   {
     "label": "",
-    "type": "richtext",
+    "type": "label",
     "richTextContent": "<h1>REGISTRATION FORM</h1>",
     "richTextMaxHeight": 0,
     "required": false,
@@ -590,7 +590,7 @@ Correct output (mixed, in visual order BY Y-COORDINATE):
   },
   {
     "label": "",
-    "type": "richtext",
+    "type": "label",
     "richTextContent": "<p>Instructions: Please complete all fields below</p>",
     "richTextMaxHeight": 0,
     "required": false,
@@ -599,7 +599,7 @@ Correct output (mixed, in visual order BY Y-COORDINATE):
   },
   {
     "label": "",
-    "type": "richtext",
+    "type": "label",
     "richTextContent": "<h2>APPLICANT INFORMATION</h2>",
     "richTextMaxHeight": 0,
     "required": false,
@@ -656,7 +656,7 @@ Notice: "Other:" is NOT in the options array because it's handled by allowOther:
     // Build user message with OCR text
     // IMPORTANT: Always include the OCR text, even if userMessage is provided
     let groqUserMessage = `Analyze this OCR text from a blank form template and identify BOTH:
-1. Richtext fields (titles, section headers, instructions, legal text)
+1. Label fields (titles, section headers, instructions, legal text - display-only form text)
 2. Input fields (text, email, phone, checkboxes, etc.)
 
 OCR TEXT:
