@@ -138,7 +138,7 @@ function detectSectionHeaders(blocks) {
     const isTitleCase = /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*$/.test(text)  // "Contact Information", "Personal Information"
     const hasNoColon = !text.includes(':')
     const isReasonableLength = text.length >= 4 && text.length < 100
-    const matchesHeaderPattern = /^(PART|SECTION|PATIENT|INFORMATION|CONTACT|EMERGENCY|HISTORY|MEDICAL|INSURANCE|AUTHORIZATION|CONSENT|DEMOGRAPHIC|PERSONAL|FINANCIAL|CHART|FORM|WELCOME|INTAKE|EDUCATION|EMPLOYMENT|FAMILY|SUBSTANCE|TRAUMA|LEGAL)/i.test(text)
+    const matchesHeaderPattern = /^(PART|SECTION|INFORMATION|CONTACT|EMERGENCY|HISTORY|AUTHORIZATION|CONSENT|DEMOGRAPHIC|PERSONAL|FINANCIAL|FORM|WELCOME|EDUCATION|EMPLOYMENT|FAMILY|LEGAL|APPLICATION|REGISTRATION|DETAILS|BACKGROUND|EXPERIENCE)/i.test(text)
     
     // Log check results for potential read-only text
     if (matchesHeaderPattern || isLargerThanTypical) {
