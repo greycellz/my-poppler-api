@@ -708,18 +708,31 @@ Identify ALL form elements in visual order (top to bottom based on y-coordinates
     
     let fields = []
 
-    // Helper function to strip JavaScript-style comments from JSON
-    const stripComments = (jsonString) => {
-      // Remove /* ... */ style comments
-      let cleaned = jsonString.replace(/\/\*[\s\S]*?\*\//g, '')
-      // Remove // ... style comments (but preserve URLs like https://)
+    // Helper function to sanitize LLM-generated JSON
+    const sanitizeJSON = (jsonString) => {
+      let cleaned = jsonString
+      
+      // 1. Remove /* ... */ style comments
+      cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '')
+      
+      // 2. Remove // ... style comments (but preserve URLs like https://)
       cleaned = cleaned.replace(/([^:])\/\/[^\n]*/g, '$1')
+      
+      // 3. Remove trailing commas before closing brackets/braces
+      // This is very common in LLM-generated JSON
+      cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1')
+      
+      // 4. Replace single quotes with double quotes (if used for strings)
+      // Only replace single quotes that appear to be string delimiters
+      // This is a simple heuristic and may not catch all cases
+      cleaned = cleaned.replace(/'([^']*)':/g, '"$1":')  // Property names
+      
       return cleaned
     }
 
     try {
-      // Try to parse as JSON (strip comments first)
-      const cleaned = stripComments(responseText)
+      // Try to parse as JSON (sanitize first)
+      const cleaned = sanitizeJSON(responseText)
       const parsed = JSON.parse(cleaned)
       // Handle both { fields: [...] } and direct array
       fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
@@ -750,7 +763,7 @@ Identify ALL form elements in visual order (top to bottom based on y-coordinates
       
       if (jsonMatch) {
         console.log('✅ Fallback extraction succeeded with pattern')
-        const cleaned = stripComments(jsonMatch[1])
+        const cleaned = sanitizeJSON(jsonMatch[1])
         const extracted = JSON.parse(cleaned)
         fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
       } else {
