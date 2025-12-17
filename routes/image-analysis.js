@@ -708,9 +708,19 @@ Identify ALL form elements in visual order (top to bottom based on y-coordinates
     
     let fields = []
 
+    // Helper function to strip JavaScript-style comments from JSON
+    const stripComments = (jsonString) => {
+      // Remove /* ... */ style comments
+      let cleaned = jsonString.replace(/\/\*[\s\S]*?\*\//g, '')
+      // Remove // ... style comments (but preserve URLs like https://)
+      cleaned = cleaned.replace(/([^:])\/\/[^\n]*/g, '$1')
+      return cleaned
+    }
+
     try {
-      // Try to parse as JSON
-      const parsed = JSON.parse(responseText)
+      // Try to parse as JSON (strip comments first)
+      const cleaned = stripComments(responseText)
+      const parsed = JSON.parse(cleaned)
       // Handle both { fields: [...] } and direct array
       fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
       console.log('✅ Direct JSON parse succeeded')
@@ -740,7 +750,8 @@ Identify ALL form elements in visual order (top to bottom based on y-coordinates
       
       if (jsonMatch) {
         console.log('✅ Fallback extraction succeeded with pattern')
-        const extracted = JSON.parse(jsonMatch[1])
+        const cleaned = stripComments(jsonMatch[1])
+        const extracted = JSON.parse(cleaned)
         fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
       } else {
         console.error('❌ All parsing attempts failed')
