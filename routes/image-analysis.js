@@ -662,7 +662,9 @@ Notice: "Other:" is NOT in the options array because it's handled by allowOther:
 OCR TEXT:
 ${combinedText}
 
-🚨 CRITICAL: Return fields in STRICT TOP-TO-BOTTOM ORDER based on y-coordinates from the spatial data above. Sort by y-coordinate (vertical position), NOT by field type or OCR text order. Lower y-value = higher on page = appears first in your output array.`
+🚨 CRITICAL: Return fields in STRICT TOP-TO-BOTTOM ORDER based on y-coordinates from the spatial data above. Sort by y-coordinate (vertical position), NOT by field type or OCR text order. Lower y-value = higher on page = appears first in your output array.
+
+**OUTPUT FORMAT**: Return ONLY a valid JSON array. Do NOT include any explanation, reasoning, or text outside the JSON array. Start with [ and end with ].`
     
     // If user provided additional context, append it
     if (userMessage) {
@@ -687,11 +689,10 @@ ${combinedText}
             content: groqUserMessage
           }
         ],
-        max_completion_tokens: 65536,  // Increased back - reasoning was consuming all tokens
-        temperature: 0.1,
-        // Disable reasoning feature to prevent token waste on internal thinking
-        // (Model was spending all tokens on reasoning field instead of content)
-        response_format: { type: "json_object" }  // Force JSON output, no reasoning
+        max_completion_tokens: 65536,
+        temperature: 0.1
+        // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
+        // Prompt explicitly requests JSON array output
       })
     })
 
