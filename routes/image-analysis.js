@@ -326,7 +326,7 @@ router.post('/analyze-images', async (req, res) => {
       ? `
 
 **SPATIAL LAYOUT DATA** (Sample for Context Only):
-Below are ${maxSampleBlocks} representative text blocks from ${spatialBlocks.length} total blocks. These are provided as CONTEXT ONLY to help you understand text sizes and layout patterns. DO NOT create a field for every block listed here. Instead, use this spatial information to inform your classification when extracting fields from the OCR TEXT below.
+Below are ${maxSampleBlocks} representative text blocks from ${spatialBlocks.length} total blocks. These are provided as CONTEXT ONLY to help you understand text sizes and layout patterns. DO NOT create a field for every block listed here. Instead, use this spatial information to inform your classification when identifying form fields from the OCR TEXT below.
 
 ${sampleBlocks.map(b => 
   `Block ${b.index}: "${b.text.substring(0, 60)}${b.text.length > 60 ? '...' : ''}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`
@@ -372,11 +372,11 @@ ${sampleBlocks.map(b =>
    - Start with number (e.g., "1 Name of entity", "3a Check the box")
    - Number is part of label, keep it
 
-**⚠️ IMPORTANT - EXTRACTION STRATEGY**:
+**⚠️ IMPORTANT - FIELD IDENTIFICATION STRATEGY**:
 The spatial blocks above are REFERENCE DATA for understanding layout patterns (text sizes, positions). 
-When extracting fields, work from the OCR TEXT below, NOT from the spatial block list.
+When identifying form fields, work from the OCR TEXT below, NOT from the spatial block list.
 Use spatial data to INFORM your classification decisions (is this text a header? a label? an instruction?), but do NOT create a field for every spatial block shown above.
-Focus on extracting actual form fields (inputs, checkboxes, radios) and important structural elements (titles, section headers, instructions) from the OCR text.
+Focus on identifying the form's input fields (text boxes, checkboxes, radios) and structural elements (titles, section headers, instructions) from the OCR text.
 
 **CRITICAL RICHTEXT EXAMPLES**:
 
@@ -423,13 +423,13 @@ Example 3 - Disclaimer (Block 2: "Disclaimer: Thank you..." at y:302, h:89):
       : ''
 
     // Use provided system message or default (text-focused prompt for OCR analysis)
-    const defaultSystemMessage = (systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages along with SPATIAL LAYOUT DATA.
+    const defaultSystemMessage = (systemMessage || `You are a form structure analysis expert. You will receive OCR TEXT from blank PDF form templates (not filled forms) along with SPATIAL LAYOUT DATA.
 
-**YOUR TASK**: Analyze the text AND spatial data to extract:
-1. **Input fields** (text, email, phone, checkboxes, etc.) - for data collection
+**YOUR TASK**: Analyze the text AND spatial data to identify the form's structure and create a digital version:
+1. **Input fields** (text boxes, email fields, phone numbers, checkboxes, etc.) - where users will enter data
 2. **Richtext fields** (titles, section headers, instructions, legal text) - for display/organization
 
-IMPORTANT: Do NOT skip titles, headers, or instructions. These must be included as richtext fields to preserve the form structure.`) + spatialContextHint + `
+IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, not extracting data from a filled form. Do NOT skip titles, headers, or instructions. These must be included as richtext fields to preserve the form structure.`) + spatialContextHint + `
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
@@ -488,7 +488,7 @@ For each field you identify, determine:
    - "(optional)" text (mark as not required)
    - Default to false if no indicator found
 
-4. **Options Extraction**: When the OCR text shows multiple choice options, extract ALL of them and group with the main question label:
+4. **Options Detection**: When the OCR text shows multiple choice options, identify ALL of them and group with the main question label:
    - CRITICAL: When you find Yes/No questions in the text, ALWAYS capture ALL options. If the text contains "Yes" and "No" or "Yes" and "No, please mail it to my home address", include ALL options in the array. Never drop the "No" option or its variations. Search the OCR text around the question - if you find "Yes", search for the corresponding "No" option even if it's on a different line or has additional text. If a question asks "is it OK to email statements to you?" and the text shows "Yes", you MUST also search for "No" or "No, please mail" - they are part of the same question's options.
    - CRITICAL: allowOther should ALWAYS be false by default
    - ONLY set allowOther: true if the OCR text clearly shows an "Other" option (with or without colon) AND a text input field or blank line for text entry
@@ -645,7 +645,7 @@ Notice: "Other:" is NOT in the options array because it's handled by allowOther:
 OCR TEXT:
 ${combinedText}
 
-Extract ALL elements in visual order (top to bottom based on y-coordinates from spatial data). Include both richtext fields for display AND input fields for data collection.`
+Identify ALL form elements in visual order (top to bottom based on y-coordinates from spatial data). Include both richtext fields for display AND input fields where users will enter data.`
     
     // If user provided additional context, append it
     if (userMessage) {
