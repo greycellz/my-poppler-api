@@ -382,7 +382,7 @@ Focus on identifying the form's input fields (text boxes, checkboxes, radios) an
 
 Example 1 - Form Title (Block 1: "APPLICATION FORM" at y:225, h:30):
 {
-  "label": "APPLICATION FORM",
+  "label": "",
   "type": "richtext",
   "richTextContent": "<h1>APPLICATION FORM</h1>",
   "richTextMaxHeight": 0,
@@ -393,7 +393,7 @@ Example 1 - Form Title (Block 1: "APPLICATION FORM" at y:225, h:30):
 
 Example 2 - Section Header (Block 4: "CONTACT INFORMATION" at y:433, h:23):
 {
-  "label": "CONTACT INFORMATION",
+  "label": "",
   "type": "richtext",
   "richTextContent": "<h2>CONTACT INFORMATION</h2>",
   "richTextMaxHeight": 0,
@@ -404,7 +404,7 @@ Example 2 - Section Header (Block 4: "CONTACT INFORMATION" at y:433, h:23):
 
 Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h:89):
 {
-  "label": "Please complete all sections of this form. Fields marked with an asterisk (*) are required...",
+  "label": "",
   "type": "richtext",
   "richTextContent": "<p>Please complete all sections of this form. Fields marked with an asterisk (*) are required...</p>",
   "richTextMaxHeight": 0,
@@ -530,9 +530,9 @@ Return ONLY a JSON array with this exact structure:
 **FOR RICHTEXT FIELDS** (titles, headers, instructions):
 [
   {
-    "label": "The actual text content (e.g., 'APPLICATION FORM', 'Contact Information', 'Please fill out this form completely...')",
+    "label": "",
     "type": "richtext",
-    "richTextContent": "<h1>Title</h1>|<h2>Header</h2>|<p>Instructions...</p>",
+    "richTextContent": "<h1>APPLICATION FORM</h1>|<h2>Contact Information</h2>|<p>Please fill out this form completely...</p>",
     "richTextMaxHeight": 0,
     "required": false,
     "confidence": 0.95,
@@ -540,15 +540,32 @@ Return ONLY a JSON array with this exact structure:
   }
 ]
 
-**IMPORTANT FOR RICHTEXT**: The "label" field should contain the ACTUAL TEXT CONTENT from the form, not generic descriptions like "Form Title" or "Section Header". Identify the real text and use it as the label.
+**CRITICAL FOR RICHTEXT**: 
+- The "label" field MUST be an EMPTY STRING ("") for richtext fields
+- The actual text content goes ONLY in "richTextContent" with proper HTML tags
+- Do NOT put the text in both label and richTextContent
+- Richtext is for display only - the content itself is what users see, not a label
 
 **NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, richtext). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
 
-**OUTPUT ORDER**: Create fields in VISUAL ORDER (sorted by y-coordinate):
-1. Form titles/headers first (top of page)
-2. Section headers in order
-3. Input fields in order
-4. Mix richtext and input fields based on their position
+**🚨 CRITICAL: OUTPUT ORDER - SORT BY Y-COORDINATE 🚨**:
+
+You MUST return fields in STRICT VISUAL ORDER from top to bottom of the page. This means:
+
+1. **Sort ALL fields (richtext AND input) by their y-coordinate value** (vertical position on the page)
+2. **Lower y-value = higher on page = should appear FIRST in the array**
+3. **Process the form from top to bottom**, not by field type or by the OCR text sequence
+
+Example with y-coordinates:
+- Block at y:150 ("PATIENT INFORMATION" header) → comes FIRST
+- Block at y:192 ("LEGAL NAME:" label) → comes SECOND  
+- Block at y:210 ("Last" input under Legal Name) → comes THIRD
+- Block at y:212 ("First" input under Legal Name) → comes FOURTH
+- Block at y:214 ("Middle" input under Legal Name) → comes FIFTH
+- Block at y:247 ("ADDRESS:" label) → comes SIXTH
+- Block at y:265 ("Street" input under Address) → comes SEVENTH
+
+DO NOT group by section or field type. Return fields in the exact order they appear visually (top to bottom).
 
 IMPORTANT: For most fields, allowOther should be false. Only set to true when the text clearly shows "Other:" with a text input field.
 
@@ -560,10 +577,10 @@ Given spatial data showing:
 - Block 4: "First Name:" (y:505, h:21)
 - Block 5: "Last Name:" (y:506, h:19)
 
-Correct output (mixed, in visual order):
+Correct output (mixed, in visual order BY Y-COORDINATE):
 [
   {
-    "label": "REGISTRATION FORM",
+    "label": "",
     "type": "richtext",
     "richTextContent": "<h1>REGISTRATION FORM</h1>",
     "richTextMaxHeight": 0,
@@ -572,7 +589,7 @@ Correct output (mixed, in visual order):
     "pageNumber": 1
   },
   {
-    "label": "Instructions: Please complete all fields below",
+    "label": "",
     "type": "richtext",
     "richTextContent": "<p>Instructions: Please complete all fields below</p>",
     "richTextMaxHeight": 0,
@@ -581,7 +598,7 @@ Correct output (mixed, in visual order):
     "pageNumber": 1
   },
   {
-    "label": "APPLICANT INFORMATION",
+    "label": "",
     "type": "richtext",
     "richTextContent": "<h2>APPLICANT INFORMATION</h2>",
     "richTextMaxHeight": 0,
@@ -645,7 +662,7 @@ Notice: "Other:" is NOT in the options array because it's handled by allowOther:
 OCR TEXT:
 ${combinedText}
 
-Identify ALL form elements in visual order (top to bottom based on y-coordinates from spatial data). Include both richtext fields for display AND input fields where users will enter data.`
+🚨 CRITICAL: Return fields in STRICT TOP-TO-BOTTOM ORDER based on y-coordinates from the spatial data above. Sort by y-coordinate (vertical position), NOT by field type or OCR text order. Lower y-value = higher on page = appears first in your output array.`
     
     // If user provided additional context, append it
     if (userMessage) {
