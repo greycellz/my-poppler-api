@@ -329,6 +329,7 @@ router.post('/screenshot-pages', async (req, res) => {
       
       // For Google Forms, we need to trigger content loading by slowly scrolling
       // Google Forms uses virtual scrolling - content only loads when scrolled into view
+      // We also need to wait for the browser to actually render the content
       await page.evaluate(async (targetY) => {
         return new Promise((resolve) => {
           const formContainer = document.querySelector('.freebirdFormviewerViewFormContentWrapper') ||
@@ -336,32 +337,38 @@ router.post('/screenshot-pages', async (req, res) => {
                                document.body
           
           let currentScroll = formContainer.scrollTop || window.scrollY
-          const scrollStep = 50 // Small steps to trigger lazy loading
-          const scrollInterval = 50 // ms between steps
+          const scrollStep = 100 // Larger steps but still gradual
+          const scrollInterval = 100 // ms between steps
           
           const scrollToTarget = () => {
             if (Math.abs(currentScroll - targetY) < scrollStep) {
               // Close enough, set final position
               if (formContainer.scrollTo) {
-                formContainer.scrollTo(0, targetY)
+                formContainer.scrollTo({ top: targetY, behavior: 'smooth' })
               } else {
                 formContainer.scrollTop = targetY
               }
-              window.scrollTo(0, targetY)
+              window.scrollTo({ top: targetY, behavior: 'smooth' })
               
-              // Wait for content to load after reaching target
-              setTimeout(resolve, 1500)
+              // Wait longer for Google Forms to render content
+              // Google Forms needs time to actually paint the content to the screen
+              setTimeout(() => {
+                // Force a reflow to ensure rendering
+                void formContainer.offsetHeight
+                // Wait additional time for paint
+                setTimeout(resolve, 2000)
+              }, 1000)
             } else {
               // Scroll towards target
               const direction = targetY > currentScroll ? 1 : -1
               currentScroll += direction * scrollStep
               
               if (formContainer.scrollTo) {
-                formContainer.scrollTo(0, currentScroll)
+                formContainer.scrollTo({ top: currentScroll, behavior: 'smooth' })
               } else {
                 formContainer.scrollTop = currentScroll
               }
-              window.scrollTo(0, currentScroll)
+              window.scrollTo({ top: currentScroll, behavior: 'smooth' })
               
               setTimeout(scrollToTarget, scrollInterval)
             }
@@ -370,6 +377,9 @@ router.post('/screenshot-pages', async (req, res) => {
           scrollToTarget()
         })
       }, scrollY)
+      
+      // Additional wait to ensure browser has painted the content
+      await page.waitForTimeout(1000)
       
       // Additional wait for Google Forms to render content at this position
       const contentInfo = await page.evaluate(async () => {
@@ -390,10 +400,20 @@ router.post('/screenshot-pages', async (req, res) => {
               })
               
               const visibleLabels = visibleInputs.map(input => {
-                const item = input.closest('.freebirdFormviewerViewItemsItemItem')
+                // Google Forms structure: input is inside .freebirdFormviewerViewItemsItemItem
+                const item = input.closest('.freebirdFormviewerViewItemsItemItem') ||
+                           input.closest('[role="listitem"]') ||
+                           input.closest('.freebirdFormviewerViewItemsItemItemContainer')
+                
+                // Try multiple selectors for Google Forms labels
                 const label = item?.querySelector('.freebirdFormviewerViewItemsItemItemTitle')?.textContent ||
+                           item?.querySelector('.freebirdFormviewerViewItemsItemItemTitleContainer')?.textContent ||
+                           item?.querySelector('[role="heading"]')?.textContent ||
                            input.closest('label')?.textContent ||
-                           input.getAttribute('aria-label')
+                           input.getAttribute('aria-label') ||
+                           input.getAttribute('placeholder') ||
+                           input.getAttribute('name')
+                
                 return label ? label.trim().substring(0, 50) : 'no label'
               })
               
@@ -430,16 +450,15 @@ router.post('/screenshot-pages', async (req, res) => {
       console.log(`📋 [DEBUG] Content info:`, JSON.stringify(contentInfo, null, 2))
 
       // Capture viewport screenshot
+      // IMPORTANT: Do NOT use clip.y = 0 here, because that always captures
+      // the top of the page regardless of scroll position. We rely on the
+      // current scroll position to determine which part of the page is visible.
+      // Puppeteer will capture the current viewport after scrolling.
       const screenshotPath = path.join(screenshotDir, `page-${pageNumber}.png`)
-      await page.screenshot({ 
+      await page.screenshot({
         path: screenshotPath,
-        clip: { 
-          x: 0, 
-          y: 0, 
-          width: viewportWidth, 
-          height: viewportHeight 
-        },
-        type: 'png'
+        type: 'png',
+        fullPage: false
       })
 
       const pageTime = Date.now() - pageStartTime
