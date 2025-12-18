@@ -260,62 +260,128 @@ router.post('/screenshot-pages', async (req, res) => {
 
       console.log(`📸 [DEBUG] Capturing page ${pageNumber}/${numPages} at scroll position ${scrollY}px`)
 
-      // Scroll to position - try both window scroll and form container scroll
+      // Scroll to position - Google Forms specific handling
+      // Google Forms often has a fixed header, so we need to account for that
       const scrollInfo = await page.evaluate((y) => {
-        // Try to find scrollable container (Google Forms often has one)
-        const form = document.querySelector('form')
-        const mainContent = document.querySelector('[role="main"]') || 
-                           document.querySelector('.freebirdFormviewerViewFormContent') ||
-                           document.querySelector('main')
+        // Find the actual form container (Google Forms uses specific classes)
+        const formContainer = document.querySelector('.freebirdFormviewerViewFormContentWrapper') ||
+                             document.querySelector('.freebirdFormviewerViewFormContent') ||
+                             document.querySelector('[role="main"]') ||
+                             document.querySelector('main') ||
+                             document.body
         
-        // Scroll window
-        window.scrollTo(0, y)
+        // Get header height if there's a fixed header
+        const header = document.querySelector('header') || 
+                      document.querySelector('.freebirdFormviewerViewHeaderHeader') ||
+                      document.querySelector('[role="banner"]')
+        const headerHeight = header ? header.offsetHeight : 0
         
-        // Also try scrolling the container if it exists
-        if (mainContent && mainContent.scrollHeight > mainContent.clientHeight) {
-          mainContent.scrollTop = y
+        // Scroll the container (not just window) - this is key for Google Forms
+        if (formContainer.scrollTo) {
+          formContainer.scrollTo(0, y)
+        } else {
+          formContainer.scrollTop = y
         }
         
+        // Also scroll window as fallback
+        window.scrollTo(0, y + headerHeight)
+        
+        // Force a reflow to ensure content loads
+        void formContainer.offsetHeight
+        
         // Get debug info about what's visible
+        const form = document.querySelector('form')
         const inputs = form ? Array.from(form.querySelectorAll('input, textarea, select')) : []
         const visibleInputs = inputs.filter(input => {
           const rect = input.getBoundingClientRect()
-          return rect.top >= 0 && rect.top <= window.innerHeight && 
+          const viewportTop = headerHeight
+          const viewportBottom = window.innerHeight
+          return rect.top >= viewportTop && rect.top <= viewportBottom && 
                  rect.left >= 0 && rect.left <= window.innerWidth
+        })
+        
+        // Get visible labels
+        const visibleLabels = visibleInputs.map(input => {
+          const item = input.closest('.freebirdFormviewerViewItemsItemItem')
+          const label = item?.querySelector('.freebirdFormviewerViewItemsItemItemTitle')?.textContent ||
+                       input.closest('label')?.textContent ||
+                       input.getAttribute('aria-label')
+          return label ? label.trim().substring(0, 50) : 'no label'
         })
         
         return {
           windowScrollY: window.scrollY,
-          containerScrollTop: mainContent ? mainContent.scrollTop : null,
+          containerScrollTop: formContainer.scrollTop,
+          headerHeight: headerHeight,
           totalInputs: inputs.length,
           visibleInputs: visibleInputs.length,
-          firstVisibleLabel: visibleInputs[0] ? 
-            (visibleInputs[0].closest('label')?.textContent?.substring(0, 50) || 
-             visibleInputs[0].getAttribute('aria-label')?.substring(0, 50) || 
-             'no label') : 'none',
+          visibleLabels: visibleLabels,
           bodyHeight: document.body.scrollHeight,
-          containerHeight: mainContent ? mainContent.scrollHeight : null
+          containerHeight: formContainer.scrollHeight,
+          containerClientHeight: formContainer.clientHeight
         }
       }, scrollY)
       
       console.log(`📊 [DEBUG] Scroll info at ${scrollY}px:`, JSON.stringify(scrollInfo, null, 2))
 
-      // Wait for scroll to settle and content to load
-      await new Promise(resolve => setTimeout(resolve, scrollDelay))
+      // Wait for scroll to settle - longer wait for Google Forms
+      await new Promise(resolve => setTimeout(resolve, scrollDelay * 2)) // Double the wait time
+      
+      // For Google Forms, we need to trigger content loading by slowly scrolling
+      // Google Forms uses virtual scrolling - content only loads when scrolled into view
+      await page.evaluate(async (targetY) => {
+        return new Promise((resolve) => {
+          const formContainer = document.querySelector('.freebirdFormviewerViewFormContentWrapper') ||
+                               document.querySelector('.freebirdFormviewerViewFormContent') ||
+                               document.body
+          
+          let currentScroll = formContainer.scrollTop || window.scrollY
+          const scrollStep = 50 // Small steps to trigger lazy loading
+          const scrollInterval = 50 // ms between steps
+          
+          const scrollToTarget = () => {
+            if (Math.abs(currentScroll - targetY) < scrollStep) {
+              // Close enough, set final position
+              if (formContainer.scrollTo) {
+                formContainer.scrollTo(0, targetY)
+              } else {
+                formContainer.scrollTop = targetY
+              }
+              window.scrollTo(0, targetY)
+              
+              // Wait for content to load after reaching target
+              setTimeout(resolve, 1500)
+            } else {
+              // Scroll towards target
+              const direction = targetY > currentScroll ? 1 : -1
+              currentScroll += direction * scrollStep
+              
+              if (formContainer.scrollTo) {
+                formContainer.scrollTo(0, currentScroll)
+              } else {
+                formContainer.scrollTop = currentScroll
+              }
+              window.scrollTo(0, currentScroll)
+              
+              setTimeout(scrollToTarget, scrollInterval)
+            }
+          }
+          
+          scrollToTarget()
+        })
+      }, scrollY)
       
       // Additional wait for Google Forms to render content at this position
-      // Google Forms uses lazy loading, so we need to wait for it to render
       const contentInfo = await page.evaluate(async () => {
         return new Promise((resolve) => {
           let attempts = 0
-          const maxAttempts = 10
+          const maxAttempts = 15 // More attempts for Google Forms
+          let lastVisibleCount = 0
           
-          // Wait for form elements to be visible
           const checkContent = () => {
             attempts++
             const form = document.querySelector('form')
             if (form) {
-              // Check if there are input elements in viewport
               const inputs = Array.from(form.querySelectorAll('input, textarea, select'))
               const visibleInputs = inputs.filter(input => {
                 const rect = input.getBoundingClientRect()
@@ -323,34 +389,32 @@ router.post('/screenshot-pages', async (req, res) => {
                        rect.left >= 0 && rect.left <= window.innerWidth
               })
               
-              // Get labels for visible inputs
               const visibleLabels = visibleInputs.map(input => {
-                const label = input.closest('label') || 
-                             document.querySelector(`label[for="${input.id}"]`) ||
-                             input.closest('.freebirdFormviewerViewItemsItemItem')?.querySelector('.freebirdFormviewerViewItemsItemItemTitle')?.textContent
-                return label ? label.textContent?.trim().substring(0, 50) : 'no label'
+                const item = input.closest('.freebirdFormviewerViewItemsItemItem')
+                const label = item?.querySelector('.freebirdFormviewerViewItemsItemItemTitle')?.textContent ||
+                           input.closest('label')?.textContent ||
+                           input.getAttribute('aria-label')
+                return label ? label.trim().substring(0, 50) : 'no label'
               })
               
-              if (visibleInputs.length > 0 && attempts >= 3) {
-                // Content is visible, return info
+              // If visible count is stable for 3 checks, we're ready
+              if (visibleInputs.length === lastVisibleCount && attempts >= 5 && visibleInputs.length > 0) {
                 resolve({
                   visibleCount: visibleInputs.length,
                   labels: visibleLabels,
                   ready: true
                 })
               } else if (attempts >= maxAttempts) {
-                // Timeout, return what we have
                 resolve({
                   visibleCount: visibleInputs.length,
                   labels: visibleLabels,
                   ready: false
                 })
               } else {
-                // Wait and check again
-                setTimeout(checkContent, 300)
+                lastVisibleCount = visibleInputs.length
+                setTimeout(checkContent, 400)
               }
             } else {
-              // No form found
               resolve({
                 visibleCount: 0,
                 labels: [],
@@ -359,8 +423,7 @@ router.post('/screenshot-pages', async (req, res) => {
             }
           }
           
-          // Start checking after initial delay
-          setTimeout(checkContent, 500)
+          setTimeout(checkContent, 800)
         })
       })
       
