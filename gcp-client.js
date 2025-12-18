@@ -972,23 +972,38 @@ class GCPClient {
       const { total_views, unique_views, last_view } = countRows[0] || {};
 
       // Update form_analytics
-      const updateQuery = `
-        UPDATE \`${this.projectId}.form_submissions.form_analytics\`
-        SET 
-          total_views = @totalViews,
-          unique_views = @uniqueViews,
-          last_view = @lastView
-        WHERE form_id = @formId
-      `;
+      // Build params object, only including non-null values
+      const params = {
+        formId,
+        totalViews: total_views || 0,
+        uniqueViews: unique_views || 0
+      };
+
+      // Build query conditionally based on whether last_view exists
+      let updateQuery;
+      if (last_view) {
+        params.lastView = last_view;
+        updateQuery = `
+          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+          SET 
+            total_views = @totalViews,
+            unique_views = @uniqueViews,
+            last_view = @lastView
+          WHERE form_id = @formId
+        `;
+      } else {
+        updateQuery = `
+          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+          SET 
+            total_views = @totalViews,
+            unique_views = @uniqueViews
+          WHERE form_id = @formId
+        `;
+      }
 
       await this.bigquery.query({
         query: updateQuery,
-        params: {
-          formId,
-          totalViews: total_views || 0,
-          uniqueViews: unique_views || 0,
-          lastView: last_view || null
-        }
+        params
       });
 
       console.log(`✅ Form analytics views updated: ${formId}`);
