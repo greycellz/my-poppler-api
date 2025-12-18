@@ -865,28 +865,45 @@ class GCPClient {
 
       const viewId = `view_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+      // Build params object, only including non-null values
+      const params = {
+        viewId,
+        formId: form_id,
+        timestamp: timestamp || new Date(),
+        sessionId: session_id
+      };
+
+      // Add optional fields only if they have values
+      if (ip_address) params.ipAddress = ip_address;
+      if (user_agent) params.userAgent = user_agent;
+      if (referrer) params.referrer = referrer;
+      if (device_type) params.deviceType = device_type;
+      if (browser) params.browser = browser;
+      if (os) params.os = os;
+      if (country) params.country = country;
+
+      // Build query with conditional fields
+      const fields = ['view_id', 'form_id', 'timestamp', 'session_id'];
+      const values = ['@viewId', '@formId', '@timestamp', '@sessionId'];
+      
+      if (ip_address) { fields.push('ip_address'); values.push('@ipAddress'); }
+      if (user_agent) { fields.push('user_agent'); values.push('@userAgent'); }
+      if (referrer) { fields.push('referrer'); values.push('@referrer'); }
+      if (device_type) { fields.push('device_type'); values.push('@deviceType'); }
+      if (browser) { fields.push('browser'); values.push('@browser'); }
+      if (os) { fields.push('os'); values.push('@os'); }
+      if (country) { fields.push('country'); values.push('@country'); }
+
       const query = `
         INSERT INTO \`${this.projectId}.form_submissions.form_views\`
-        (view_id, form_id, timestamp, ip_address, user_agent, referrer, session_id, device_type, browser, os, country)
+        (${fields.join(', ')})
         VALUES
-        (@viewId, @formId, @timestamp, @ipAddress, @userAgent, @referrer, @sessionId, @deviceType, @browser, @os, @country)
+        (${values.join(', ')})
       `;
 
       const options = {
         query,
-        params: {
-          viewId,
-          formId: form_id,
-          timestamp: timestamp || new Date(),
-          ipAddress: ip_address || null,
-          userAgent: user_agent || null,
-          referrer: referrer || null,
-          sessionId: session_id,
-          deviceType: device_type || null,
-          browser: browser || null,
-          os: os || null,
-          country: country || null
-        }
+        params
       };
 
       await this.bigquery.query(options);
