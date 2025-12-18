@@ -482,6 +482,9 @@ router.post('/screenshot-pages', async (req, res) => {
     const finalUrl = page.url()
 
     console.log(`✅ [DEBUG] All ${numPages} pages captured in ${captureTime}ms`)
+    if (screenshots.length > 0) {
+      console.log('📸 [DEBUG] First screenshot URL:', screenshots[0].url)
+    }
     console.log(`⏱️ [DEBUG] Total endpoint processing time: ${endpointTime}ms`)
     console.log('📸 [DEBUG] ========== SCREENSHOT-PAGES ENDPOINT END ==========')
 
