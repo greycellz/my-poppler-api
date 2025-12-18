@@ -971,38 +971,59 @@ class GCPClient {
 
       const { total_views, unique_views, last_view } = countRows[0] || {};
 
-      // Update form_analytics
-      // Build params object, only including non-null values
+      // Use MERGE to update or insert (ensures row exists)
+      // Build params object
       const params = {
         formId,
         totalViews: total_views || 0,
         uniqueViews: unique_views || 0
       };
 
-      // Build query conditionally based on whether last_view exists
-      let updateQuery;
+      // Build MERGE query conditionally based on whether last_view exists
+      let mergeQuery;
       if (last_view) {
         params.lastView = last_view;
-        updateQuery = `
-          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
-          SET 
-            total_views = @totalViews,
-            unique_views = @uniqueViews,
-            last_view = @lastView
-          WHERE form_id = @formId
+        mergeQuery = `
+          MERGE \`${this.projectId}.form_submissions.form_analytics\` AS target
+          USING (
+            SELECT 
+              @formId as form_id,
+              @totalViews as total_views,
+              @uniqueViews as unique_views,
+              @lastView as last_view
+          ) AS source
+          ON target.form_id = source.form_id
+          WHEN MATCHED THEN
+            UPDATE SET
+              total_views = source.total_views,
+              unique_views = source.unique_views,
+              last_view = source.last_view
+          WHEN NOT MATCHED THEN
+            INSERT (form_id, total_views, unique_views, last_view, submissions_count, is_hipaa, is_published)
+            VALUES (source.form_id, source.total_views, source.unique_views, source.last_view, 0, false, true)
         `;
       } else {
-        updateQuery = `
-          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
-          SET 
-            total_views = @totalViews,
-            unique_views = @uniqueViews
-          WHERE form_id = @formId
+        mergeQuery = `
+          MERGE \`${this.projectId}.form_submissions.form_analytics\` AS target
+          USING (
+            SELECT 
+              @formId as form_id,
+              @totalViews as total_views,
+              @uniqueViews as unique_views
+          ) AS source
+          ON target.form_id = source.form_id
+          WHEN MATCHED THEN
+            UPDATE SET
+              total_views = source.total_views,
+              unique_views = source.unique_views
+          WHEN NOT MATCHED THEN
+            INSERT (form_id, total_views, unique_views, submissions_count, is_hipaa, is_published)
+            VALUES (source.form_id, source.total_views, source.unique_views, 0, false, true)
         `;
       }
 
       await this.bigquery.query({
-        query: updateQuery,
+        query: mergeQuery,
         params
       });
 
