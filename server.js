@@ -1521,6 +1521,89 @@ app.post('/store-form', async (req, res) => {
   }
 });
 
+// ============== VIEW TRACKING ENDPOINT ==============
+
+// Track form view (non-blocking, isolated from submissions)
+app.post('/api/forms/:formId/view', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const { sessionId, referrer, timestamp } = req.body;
+
+    if (!formId || !sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID and session ID are required'
+      });
+    }
+
+    console.log(`👁️ Tracking view for form: ${formId}, session: ${sessionId}`);
+
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Check for existing view (deduplication)
+    const existingView = await gcpClient.getViewBySession(formId, sessionId);
+    if (existingView) {
+      console.log(`✅ View already tracked for session: ${sessionId}`);
+      return res.json({
+        success: true,
+        viewId: existingView.view_id,
+        duplicate: true
+      });
+    }
+
+    // Parse device info from user agent
+    const UAParser = require('ua-parser-js');
+    const parser = new UAParser(req.get('User-Agent'));
+    const device = parser.getDevice();
+    const browser = parser.getBrowser();
+    const os = parser.getOS();
+
+    let deviceType = 'desktop';
+    if (device.type === 'mobile') deviceType = 'mobile';
+    else if (device.type === 'tablet') deviceType = 'tablet';
+
+    const deviceInfo = {
+      deviceType,
+      browser: browser.name && browser.version 
+        ? `${browser.name} ${browser.version}` 
+        : browser.name || 'Unknown',
+      os: os.name && os.version 
+        ? `${os.name} ${os.version}` 
+        : os.name || 'Unknown'
+    };
+
+    // Insert view into BigQuery
+    const viewId = await gcpClient.insertFormView({
+      form_id: formId,
+      session_id: sessionId,
+      timestamp: timestamp ? new Date(timestamp) : new Date(),
+      ip_address: req.ip || req.connection.remoteAddress,
+      user_agent: req.get('User-Agent'),
+      referrer: referrer || null,
+      device_type: deviceInfo.deviceType,
+      browser: deviceInfo.browser,
+      os: deviceInfo.os,
+      country: null // TODO: Add IP geolocation in Phase 2
+    });
+
+    res.json({
+      success: true,
+      viewId
+    });
+
+  } catch (error) {
+    console.error('❌ View tracking error:', error);
+    // Non-blocking - return success even if tracking fails
+    res.json({
+      success: false,
+      error: 'View tracking failed (non-blocking)',
+      details: error.message
+    });
+  }
+});
+
 // ============== FORM SUBMISSION ENDPOINT ==============
 
 // Submit form data with GCP integration
@@ -1581,7 +1664,7 @@ app.post('/submit-form', async (req, res) => {
       // Store signature images in GCS (skip PDF generation for now)
       await gcpClient.storeSignatureImages(submissionId, formId, formData, false);
 
-      // Update form analytics
+      // Update form analytics (existing - submissions count)
       try {
         const analyticsResult = await gcpClient.updateFormAnalytics(formId, userId || 'anonymous');
         if (analyticsResult.success) {
@@ -1594,6 +1677,16 @@ app.post('/submit-form', async (req, res) => {
         // Don't fail the form submission if analytics fails
       }
     }
+
+    // ============================================================
+    // NEW: Analytics Update (ISOLATED, NON-BLOCKING)
+    // ============================================================
+    // Analytics update happens AFTER submission succeeds
+    // Wrapped in try-catch - failures don't affect submission
+    updateAnalyticsAsync(formId, submissionId, clientMetadata, isHipaa).catch(err => {
+      console.warn(`⚠️ Analytics update failed (non-blocking) for ${formId}:`, err.message);
+      // Don't throw - submission already succeeded
+    });
 
     console.log(`✅ Form submission processed: ${submissionId}`);
 
@@ -1616,6 +1709,40 @@ app.post('/submit-form', async (req, res) => {
     });
   }
 });
+
+// ============================================================
+// ISOLATED Analytics Update Function
+// ============================================================
+async function updateAnalyticsAsync(formId, submissionId, metadata, isHipaa) {
+  try {
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Parse device info from user_agent
+    const UAParser = require('ua-parser-js');
+    const parser = new UAParser(metadata.userAgent || '');
+    const device = parser.getDevice();
+
+    let deviceType = 'desktop';
+    if (device.type === 'mobile') deviceType = 'mobile';
+    else if (device.type === 'tablet') deviceType = 'tablet';
+
+    // Update form_analytics table with device info and completion time
+    await gcpClient.updateFormAnalyticsWithDevice(
+      formId,
+      {
+        deviceType,
+        completionTime: metadata.completionTime || null,
+        // Note: No distinction between HIPAA and regular in analytics
+      }
+    );
+
+    console.log(`✅ Analytics updated for form: ${formId}`);
+  } catch (error) {
+    // Analytics errors are logged but don't propagate
+    throw error; // Caught by caller's catch block
+  }
+}
 
 // ============== FORM RETRIEVAL ENDPOINT ==============
 
@@ -1757,6 +1884,90 @@ app.get('/analytics/:formId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch analytics',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== ANALYTICS OVERVIEW ENDPOINT ==============
+
+// Get analytics overview for a form (with views, submissions, completion rate)
+app.get('/analytics/forms/:formId/overview', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const dateRange = parseInt(req.query.dateRange) || 30; // Default 30 days
+
+    console.log(`📊 Fetching analytics overview for form: ${formId}, dateRange: ${dateRange}d`);
+
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Get form analytics from BigQuery
+    const analytics = await gcpClient.getFormAnalytics(formId);
+
+    if (!analytics) {
+      return res.json({
+        success: true,
+        totalViews: 0,
+        totalSubmissions: 0,
+        completionRate: 0,
+        lastSubmission: null,
+        trends: {
+          views: [],
+          submissions: []
+        }
+      });
+    }
+
+    // Get view trends from form_views table
+    const viewsQuery = `
+      SELECT 
+        DATE(timestamp) as date,
+        COUNT(*) as count
+      FROM \`${gcpClient.projectId}.form_submissions.form_views\`
+      WHERE form_id = @formId
+        AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+
+    const [viewsRows] = await gcpClient.bigquery.query({
+      query: viewsQuery,
+      params: { formId, days: dateRange }
+    });
+
+    // Get submission trends from form_analytics (simplified - would need Firestore query for accurate trends)
+    // For MVP, we'll use the aggregated data
+    const trends = {
+      views: viewsRows.map(row => ({
+        date: row.date.value,
+        count: parseInt(row.count)
+      })),
+      submissions: [] // TODO: Query Firestore for submission trends in Phase 1 enhancement
+    };
+
+    const totalViews = analytics.total_views || 0;
+    const totalSubmissions = analytics.submissions_count || 0;
+    const completionRate = totalViews > 0 
+      ? (totalSubmissions / totalViews) * 100 
+      : 0;
+
+    res.json({
+      success: true,
+      totalViews,
+      totalSubmissions,
+      completionRate: Math.round(completionRate * 100) / 100, // Round to 2 decimal places
+      lastSubmission: analytics.last_submission ? analytics.last_submission.value : null,
+      trends
+    });
+
+  } catch (error) {
+    console.error('❌ Analytics overview fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch analytics overview',
       details: error.message,
       timestamp: new Date().toISOString()
     });
