@@ -379,7 +379,8 @@ router.post('/screenshot-pages', async (req, res) => {
       }, scrollY)
       
       // Additional wait to ensure browser has painted the content
-      await page.waitForTimeout(1000)
+      // Use setTimeout wrapper for compatibility with older Puppeteer versions
+      await new Promise(resolve => setTimeout(resolve, 1000))
       
       // Additional wait for Google Forms to render content at this position
       const contentInfo = await page.evaluate(async () => {
