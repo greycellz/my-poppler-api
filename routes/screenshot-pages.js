@@ -160,25 +160,37 @@ router.post('/screenshot-pages', async (req, res) => {
     console.log(`⏳ [DEBUG] Waiting ${waitTime}ms for dynamic content...`)
     await new Promise(resolve => setTimeout(resolve, waitTime))
 
-    // Scroll to load lazy content
+    // Scroll to load lazy content - improved for Google Forms
     console.log('📜 [DEBUG] Scrolling page to load lazy content...')
     const scrollStartTime = Date.now()
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       return new Promise((resolve) => {
-        let totalHeight = 0
-        const distance = 100
-        const timer = setInterval(() => {
-          const scrollHeight = document.body.scrollHeight
-          window.scrollBy(0, distance)
-          totalHeight += distance
-
-          if (totalHeight >= scrollHeight) {
-            clearInterval(timer)
-            // Scroll back to top
-            window.scrollTo(0, 0)
-            setTimeout(() => resolve(), 1000)
-          }
-        }, 100)
+        let lastHeight = 0
+        let attempts = 0
+        const maxAttempts = 100 // Prevent infinite loop
+        
+        const scrollAndCheck = () => {
+          // Scroll to bottom
+          window.scrollTo(0, document.body.scrollHeight)
+          
+          setTimeout(() => {
+            const newHeight = document.body.scrollHeight
+            const currentScroll = window.scrollY
+            
+            // If height hasn't changed and we're at the bottom, we're done
+            if ((newHeight === lastHeight && currentScroll + window.innerHeight >= newHeight - 10) || attempts >= maxAttempts) {
+              // Scroll back to top
+              window.scrollTo(0, 0)
+              setTimeout(() => resolve(), 1500) // Wait longer for content to settle
+            } else {
+              lastHeight = newHeight
+              attempts++
+              scrollAndCheck()
+            }
+          }, 1000) // Wait 1 second for content to load
+        }
+        
+        scrollAndCheck()
       })
     })
     const scrollTime = Date.now() - scrollStartTime
@@ -232,13 +244,17 @@ router.post('/screenshot-pages', async (req, res) => {
       }
 
       // Calculate scroll position with overlap
+      // For Google Forms, we need to scroll to where content actually is
+      // Instead of subtracting overlap, we scroll to show new content
       let scrollY
       if (i === 0) {
         // First page: start at top
         scrollY = 0
       } else {
-        // Subsequent pages: overlap by overlap pixels
-        scrollY = (i * viewportHeight) - overlap
+        // Subsequent pages: scroll to show new content
+        // Each page should show viewportHeight pixels of new content
+        // With overlap, we go back by overlap pixels to ensure we don't miss content
+        scrollY = i * (viewportHeight - overlap)
         if (scrollY < 0) scrollY = 0
       }
 
@@ -249,8 +265,44 @@ router.post('/screenshot-pages', async (req, res) => {
         window.scrollTo(0, y)
       }, scrollY)
 
-      // Wait for scroll to settle
+      // Wait for scroll to settle and content to load
       await new Promise(resolve => setTimeout(resolve, scrollDelay))
+      
+      // Additional wait for Google Forms to render content at this position
+      // Google Forms uses lazy loading, so we need to wait for it to render
+      await page.evaluate(async () => {
+        return new Promise((resolve) => {
+          // Wait for form elements to be visible
+          const checkContent = () => {
+            const form = document.querySelector('form')
+            if (form) {
+              // Check if there are input elements in viewport
+              const inputs = form.querySelectorAll('input, textarea, select')
+              const visibleInputs = Array.from(inputs).filter(input => {
+                const rect = input.getBoundingClientRect()
+                return rect.top >= 0 && rect.top <= window.innerHeight
+              })
+              
+              if (visibleInputs.length > 0) {
+                // Content is visible, wait a bit more for any animations
+                setTimeout(resolve, 500)
+              } else {
+                // No visible inputs yet, wait and check again
+                setTimeout(checkContent, 200)
+              }
+            } else {
+              // No form found, resolve anyway
+              setTimeout(resolve, 500)
+            }
+          }
+          
+          // Start checking after initial delay
+          setTimeout(checkContent, 300)
+          
+          // Timeout after 2 seconds max
+          setTimeout(resolve, 2000)
+        })
+      })
 
       // Capture viewport screenshot
       const screenshotPath = path.join(screenshotDir, `page-${pageNumber}.png`)
