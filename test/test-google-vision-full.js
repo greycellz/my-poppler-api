@@ -30,7 +30,7 @@ async function testFullPipeline() {
   console.log(`Images to process: ${TEST_IMAGE_URLS.length}\n`)
 
   try {
-    const startTime = Date.now()
+    const requestStartTime = Date.now()
     
     console.log('📤 Sending request to full pipeline endpoint...')
     const response = await fetch(API_URL, {
@@ -43,7 +43,7 @@ async function testFullPipeline() {
       })
     })
 
-    const totalTime = Date.now() - startTime
+    const requestTime = Date.now() - requestStartTime
 
     if (!response.ok) {
       const errorData = await response.json()
@@ -101,14 +101,15 @@ async function testFullPipeline() {
     console.log('─'.repeat(80))
     const visionTime = data.analytics.visionApi.totalTime
     const groqTime = data.analytics.groqApi.time
-    const totalTime = data.analytics.totalTime
+    const pipelineTotalTime = data.analytics.totalTime
     const baselineTime = 200000 // ~200s for GPT-4o Vision baseline
     
-    console.log(`Current (Google Vision + Groq): ${(totalTime / 1000).toFixed(2)}s`)
+    console.log(`Current (Google Vision + Groq): ${(pipelineTotalTime / 1000).toFixed(2)}s`)
     console.log(`  - Vision OCR: ${(visionTime / 1000).toFixed(2)}s`)
     console.log(`  - Groq Structuring: ${(groqTime / 1000).toFixed(2)}s`)
     console.log(`Baseline (GPT-4o Vision): ~${(baselineTime / 1000).toFixed(2)}s`)
-    console.log(`Speedup: ${(baselineTime / totalTime).toFixed(1)}x faster`)
+    console.log(`Speedup: ${(baselineTime / pipelineTotalTime).toFixed(1)}x faster`)
+    console.log(`Request overhead: ${requestTime}ms`)
 
     // Sample Fields
     console.log('\n📝 SAMPLE FIELDS (first 10):')

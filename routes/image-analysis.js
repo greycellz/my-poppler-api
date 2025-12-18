@@ -48,13 +48,151 @@ function initializeVisionClient() {
   }
 }
 
-// Groq model selection
+// Groq model selection - using OSS 20B for better speed and lower cost
 const USE_GROQ_LLAMA = process.env.USE_GROQ_LLAMA === 'TRUE'
-const GROQ_MODEL = USE_GROQ_LLAMA ? 'llama-3.3-70b-versatile' : 'openai/gpt-oss-120b'
+const GROQ_MODEL = USE_GROQ_LLAMA ? 'llama-3.3-70b-versatile' : 'openai/gpt-oss-20b'
 
 if (!process.env.GROQ_API_KEY) {
   console.error('⚠️ WARNING: GROQ_API_KEY not set in Railway environment')
 }
+
+/**
+ * Helper functions for spatial layout analysis
+ */
+
+// Extract text from a Vision API block
+function getBlockText(block) {
+  if (!block || !block.paragraphs) return ''
+  
+  return block.paragraphs
+    .flatMap(p => p.words || [])
+    .map(w => (w.symbols || []).map(s => s.text).join(''))
+    .join(' ')
+}
+
+// Calculate bounding box height
+function getBlockHeight(block) {
+  if (!block || !block.boundingBox || !block.boundingBox.vertices || block.boundingBox.vertices.length < 3) {
+    return 0
+  }
+  const vertices = block.boundingBox.vertices
+  return vertices[2].y - vertices[0].y
+}
+
+// Calculate median text height across all blocks (more robust than average)
+/* 
+ * DEPRECATED: Heuristic-based detection replaced by LLM-based classification
+ * The functions below are preserved for reference but no longer used.
+ * LLM now uses spatial data directly to classify form elements contextually.
+ * 
+function calculateMedianHeight(blocks) {
+  const heights = blocks
+    .map(b => getBlockHeight(b))
+    .filter(h => h > 0)
+    .sort((a, b) => a - b)
+  
+  if (heights.length === 0) return 0
+  
+  const mid = Math.floor(heights.length / 2)
+  if (heights.length % 2 === 0) {
+    return (heights[mid - 1] + heights[mid]) / 2
+  }
+  return heights[mid]
+}
+
+// Detect read-only text (headers, instructions, labels without inputs)
+function detectSectionHeaders(blocks) {
+  const headers = []
+  const medianHeight = calculateMedianHeight(blocks)
+  
+  if (medianHeight === 0) return headers
+  
+  console.log(`📏 Median text height: ${medianHeight.toFixed(1)}px (more robust than average)`)
+  console.log(`📏 Large text threshold (1.3x): ${(medianHeight * 1.3).toFixed(1)}px`)
+  
+  // Log all blocks for debugging
+  console.log(`\n🔍 Analyzing ${blocks.length} blocks:`)
+  
+  blocks.forEach((block, index) => {
+    const text = getBlockText(block).trim()
+    if (!text) return
+    
+    const height = getBlockHeight(block)
+    const relativeSize = height / medianHeight
+    
+    // Log first 10 blocks with details
+    if (index < 10) {
+      console.log(`  Block ${index + 1}: "${text.substring(0, 50)}" | ${height.toFixed(1)}px (${relativeSize.toFixed(2)}x median)`)
+    }
+    
+    // Detect read-only text (headers, instructions, standalone labels)
+    // Key indicators:
+    // 1. Somewhat larger than typical (but not necessarily huge)
+    // 2. Looks like a heading/label (all caps, or matches common patterns)
+    // 3. NOT a field label (no colon like "Name:")
+    // 4. Reasonable length (not a full paragraph, not just 1-2 chars)
+    
+    const isLargerThanTypical = relativeSize > 1.3  // More lenient than 1.5
+    const isSignificantlyLarger = relativeSize > 1.8
+    const isAllCaps = text === text.toUpperCase() && text.length > 3
+    const isTitleCase = /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*$/.test(text)  // "Contact Information", "Personal Information"
+    const hasNoColon = !text.includes(':')
+    const isReasonableLength = text.length >= 4 && text.length < 100
+    const matchesHeaderPattern = /^(PART|SECTION|INFORMATION|CONTACT|EMERGENCY|HISTORY|AUTHORIZATION|CONSENT|DEMOGRAPHIC|PERSONAL|FINANCIAL|FORM|WELCOME|EDUCATION|EMPLOYMENT|FAMILY|LEGAL|APPLICATION|REGISTRATION|DETAILS|BACKGROUND|EXPERIENCE)/i.test(text)
+    
+    // Log check results for potential read-only text
+    if (matchesHeaderPattern || isLargerThanTypical) {
+      console.log(`  🔎 Potential read-only text: "${text.substring(0, 40)}"`)
+      console.log(`     - Size: ${relativeSize.toFixed(2)}x | Larger? ${isLargerThanTypical}`)
+      console.log(`     - AllCaps? ${isAllCaps} | TitleCase? ${isTitleCase} | NoColon? ${hasNoColon}`)
+      console.log(`     - Length: ${text.length} | HeaderPattern? ${matchesHeaderPattern}`)
+    }
+    
+    // Detection paths:
+    // Path 1: Strong pattern match (pattern + (all caps OR title case) + no colon) - size-agnostic for short text
+    // Path 2: Large + structured (all caps OR pattern) + not field label
+    // Path 3: Very large + not field label + not too long (avoid paragraphs/options)
+    const strongPatternMatch = matchesHeaderPattern && (isAllCaps || isTitleCase) && hasNoColon && text.length < 50
+    const structuredHeader = (isAllCaps || matchesHeaderPattern) && hasNoColon && isReasonableLength
+    const largeStructuredMatch = isLargerThanTypical && structuredHeader
+    const veryLargeMatch = isSignificantlyLarger && hasNoColon && text.length < 60  // Stricter length to avoid "5. Religious background ( circle one ) Protestant..."
+    
+    if (strongPatternMatch || largeStructuredMatch || veryLargeMatch) {
+      // Determine confidence
+      let confidence = 'medium'
+      if (strongPatternMatch) {
+        confidence = 'high'  // Strong structural signals (pattern + formatting)
+      } else if (isSignificantlyLarger && matchesHeaderPattern && (isAllCaps || isTitleCase)) {
+        confidence = 'high'
+      } else if (matchesHeaderPattern && (isAllCaps || isTitleCase)) {
+        confidence = 'medium'
+      } else {
+        confidence = 'low'
+      }
+      
+      // Determine header level based on relative size
+      let headerLevel = 2  // default h2
+      if (relativeSize > 1.8) {
+        headerLevel = 1  // significantly large = h1
+      } else if (relativeSize < 1.3) {
+        headerLevel = 3  // moderately large = h3
+      }
+      
+      headers.push({
+        text: text,
+        height: height,
+        relativeSize: relativeSize,
+        headerLevel: headerLevel,
+        confidence: confidence
+      })
+      
+      console.log(`✨ Detected read-only text: "${text}" (size: ${relativeSize.toFixed(2)}x, level: h${headerLevel}, confidence: ${confidence})`)
+    }
+  })
+  
+  return headers
+}
+*/
 
 /**
  * POST /analyze-images
@@ -109,11 +247,16 @@ router.post('/analyze-images', async (req, res) => {
           const imageTime = Date.now() - imageStartTime
           const extractedText = result.fullTextAnnotation?.text || ''
           
-          console.log(`✅ Image ${index + 1} processed in ${imageTime}ms (${extractedText.length} chars)`)
+          // Extract bounding box data for spatial analysis
+          const pages = result.fullTextAnnotation?.pages || []
+          const blocks = pages.flatMap(page => page.blocks || [])
+          
+          console.log(`✅ Image ${index + 1} processed in ${imageTime}ms (${extractedText.length} chars, ${blocks.length} blocks)`)
           
           return {
             page: index + 1,
             text: extractedText,
+            blocks: blocks,
             processingTime: imageTime
           }
         } catch (error) {
@@ -129,22 +272,169 @@ router.post('/analyze-images', async (req, res) => {
     console.log(`✅ All images processed in ${visionTotalTime}ms`)
     console.log(`📝 Total OCR text: ${totalCharacters} characters`)
 
-    // Step 2: Combine OCR text from all pages
+    // Step 2: Format spatial layout data for LLM
+    console.log('🔍 Formatting spatial layout data for LLM...')
+    const allBlocks = visionResults.flatMap(r => r.blocks || [])
+    console.log(`📦 Total blocks from Vision API: ${allBlocks.length}`)
+    
+    // Format blocks with spatial information for LLM
+    const spatialBlocks = allBlocks.map((block, idx) => {
+      const text = getBlockText(block).trim()
+      const box = block.boundingBox
+      
+      if (box && box.vertices && box.vertices.length >= 4) {
+        const topLeft = box.vertices[0]
+        const bottomRight = box.vertices[2]
+        const width = bottomRight.x - topLeft.x
+        const height = Math.abs(bottomRight.y - topLeft.y)  // Use abs() to handle negative heights
+        
+        return {
+          index: idx + 1,
+          text: text,
+          x: topLeft.x,
+          y: topLeft.y,
+          width: width,
+          height: height
+        }
+      }
+      
+      return null
+    }).filter(b => b !== null && b.text.length > 0)  // Remove null entries and empty text
+    
+    console.log(`📊 Formatted ${spatialBlocks.length} blocks with spatial data for LLM`)
+    
+    // Log first 5 blocks as sample
+    console.log('📍 Sample spatial blocks:')
+    spatialBlocks.slice(0, 5).forEach(b => {
+      console.log(`  [${b.index}] "${b.text.substring(0, 40)}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`)
+    })
+
+    // Step 3: Combine OCR text from all pages
     const combinedText = visionResults
       .map((result, index) => `=== PAGE ${result.page} ===\n${result.text}`)
       .join('\n\n')
 
-    // Step 3: Send to Groq API for field extraction
-    console.log('🤖 Step 2: Sending OCR text to Groq API for field extraction...')
+    // Step 4: Send to Groq API for field identification
+    console.log('🤖 Step 3: Sending OCR text to Groq API for field identification...')
     const groqStartTime = Date.now()
 
+    // Build spatial context for Groq
+    // Only send first 50 blocks as representative examples (not exhaustive list)
+    const maxSampleBlocks = 50
+    const sampleBlocks = spatialBlocks.slice(0, maxSampleBlocks)
+    const spatialContextHint = sampleBlocks.length > 0 
+      ? `
+
+**SPATIAL LAYOUT DATA** (Sample for Context Only):
+Below are ${maxSampleBlocks} representative text blocks from ${spatialBlocks.length} total blocks. These are provided as CONTEXT ONLY to help you understand text sizes and layout patterns. DO NOT create a field for every block listed here. Instead, use this spatial information to inform your classification when identifying form fields from the OCR TEXT below.
+
+${sampleBlocks.map(b => 
+  `Block ${b.index}: "${b.text.substring(0, 60)}${b.text.length > 60 ? '...' : ''}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`
+).join('\n')}
+...(${spatialBlocks.length - maxSampleBlocks} more blocks exist but omitted here for brevity)
+
+**SPATIAL CLASSIFICATION RULES**:
+
+1. **Form Titles/Main Headers**: 
+   - Large height (typically >25px) OR large width (>400px)
+   - Near top of page (low y-value, typically <200)
+   - All caps or title case, no colon at end
+   → Create label field with <h1> tag
+
+2. **Section Headers**:
+   - Medium-large height (typically 18-25px)
+   - Standalone text with semantic meaning (e.g., "APPLICANT DETAILS", "Contact Information", "Part I")
+   - No colon at end, not followed immediately by input
+   → Create label field with <h2> tag
+
+3. **Instructions/Legal Text/Disclaimers**:
+   - Multi-line (large height >40px) OR long text (>100 chars)
+   - Explanatory content (e.g., "Disclaimer:", "Before you begin", "Under penalties of perjury")
+   - Not a field label
+   → Create label field with <p> tag or <h3> tag if shorter
+
+4. **Field Labels**:
+   - Typically ends with ":" (e.g., "First Name:", "Address:")
+   - Small-medium height (12-20px)
+   - Followed by input area (next block at similar y-coord or slightly below)
+   → Use as label for input field (remove the ":" from label)
+
+5. **Field Options/Checkboxes**:
+   - Contains ☐, ☑, or multiple choices separated by spaces
+   - Part of a parent field (e.g., "Gender: ☐ Male ☐ Female ☐ Other")
+   → Include as options array in the field
+
+6. **Horizontal Grouping**:
+   - Fields at similar y-coordinates (within 10px) are on the same row
+   - Create separate fields but note they're visually grouped
+
+7. **Numbered Fields**:
+   - Start with number (e.g., "1 Name of entity", "3a Check the box")
+   - Number is part of label, keep it
+
+**⚠️ IMPORTANT - FIELD IDENTIFICATION STRATEGY**:
+The spatial blocks above are REFERENCE DATA for understanding layout patterns (text sizes, positions). 
+When identifying form fields, work from the OCR TEXT below, NOT from the spatial block list.
+Use spatial data to INFORM your classification decisions (is this text a header? a label? an instruction?), but do NOT create a field for every spatial block shown above.
+Focus on identifying the form's input fields (text boxes, checkboxes, radios) and structural elements (titles, section headers, instructions) from the OCR text.
+
+**CRITICAL LABEL EXAMPLES**:
+
+Example 1 - Form Title (Block 1: "APPLICATION FORM" at y:225, h:30):
+{
+  "label": "",
+  "type": "label",
+  "richTextContent": "<h1>APPLICATION FORM</h1>",
+  "richTextMaxHeight": 0,
+  "required": false,
+  "confidence": 0.98,
+  "pageNumber": 1
+}
+
+Example 2 - Section Header (Block 4: "CONTACT INFORMATION" at y:433, h:23):
+{
+  "label": "",
+  "type": "label",
+  "richTextContent": "<h2>CONTACT INFORMATION</h2>",
+  "richTextMaxHeight": 0,
+  "required": false,
+  "confidence": 0.95,
+  "pageNumber": 1
+}
+
+Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h:89):
+{
+  "label": "",
+  "type": "label",
+  "richTextContent": "<p>Please complete all sections of this form. Fields marked with an asterisk (*) are required...</p>",
+  "richTextMaxHeight": 0,
+  "required": false,
+  "confidence": 0.90,
+  "pageNumber": 1
+}
+
+**IMPORTANT**:
+- Use spatial proximity (x, y coordinates) to understand field relationships
+- Use height to distinguish titles/headers (large) from regular fields (small)
+- Sort ALL fields (label AND input) by y-coordinate - DO NOT separate label and input fields
+- Mix label and input fields in the order they appear vertically on the page
+- DO NOT skip titles, headers, or instructions - they are essential for form structure
+`
+      : ''
+
     // Use provided system message or default (text-focused prompt for OCR analysis)
-    const defaultSystemMessage = systemMessage || `You are a form analysis expert. You will receive OCR TEXT (not images) extracted from PDF form pages. Analyze this TEXT to extract ALL form fields with high accuracy.
+    const defaultSystemMessage = (systemMessage || `You are a form structure analysis expert. You will receive OCR TEXT from blank PDF form templates (not filled forms) along with SPATIAL LAYOUT DATA.
+
+**YOUR TASK**: Analyze the text AND spatial data to identify the form's structure and create a digital version:
+1. **Input fields** (text boxes, email fields, phone numbers, checkboxes, etc.) - where users will enter data
+2. **Label fields** (titles, section headers, instructions, legal text) - for display/organization
+
+IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, not extracting data from a filled form. Do NOT skip titles, headers, or instructions. These must be included as label fields to preserve the form structure.`) + spatialContextHint + `
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
 - Repeated "Yes/No" questions on different pages must each be separate fields
-- "If living, age and health status" for Mother vs Father must be separate fields
+- "Current Address" vs "Mailing Address" must be separate fields even if both collect the same type of data
 
 **ALWAYS KEEP CONDITIONAL QUESTIONS**: Treat every "If yes, ...", "If no, ...", "If applicable, ...", "If you have used..., do you feel...", and every table/row instruction as its OWN field, not just explanation. Even if the wording is short and appears to be a sub-clause, if it asks the user to provide information or choose an option, it must be a field.
 
@@ -154,31 +444,41 @@ router.post('/analyze-images', async (req, res) => {
 - Do NOT create separate fields for each option; they must be grouped under the main question
 - CRITICAL: When the text contains Yes/No questions, ALWAYS include BOTH options. If the text shows "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array. Search carefully in the OCR text - if a question has "Yes" mentioned, search for the corresponding "No" option even if it's on a different line or has additional text like "No, please mail it to my home address"
 - If the text shows "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
-- CRITICAL: When the text shows patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if the same field label appears multiple times, it should only be extracted once.
+- CRITICAL: When the text shows patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if the same field label appears multiple times, it should only be identified once.
 
-**ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. medication charts, hospitalization charts):
-- If each row asks for user input (e.g. Medication Name, Dosage, When Started), treat each column that expects text as a separate field
-- Include the question number or context in the label (e.g. "5. Medication Name (row 1)", "5. Medication Name (row 2)")
+**ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. product lists, item tables, experience charts):
+- If each row asks for user input (e.g. Item Name, Quantity, Date), treat each column that expects text as a separate field
+- Include the question number or context in the label (e.g. "5. Item Name (row 1)", "5. Item Name (row 2)")
 - Do NOT merge or deduplicate rows just because the column labels are the same
 
 **LABEL DISAMBIGUATION**: When two fields share the same base label but refer to different people or contexts, include that context in the label:
-- e.g. "Emergency Contact (Phone)" vs "Mother's Phone", "Father's Phone"
-- e.g. "Hospitalization date (physical)" vs "Hospitalization date (mental health)" if both exist
+- e.g. "Emergency Contact (Phone)" vs "Primary Contact (Phone)", "Secondary Contact (Phone)"
+- e.g. "Employment Start Date (Current Job)" vs "Employment Start Date (Previous Job)" if both exist
 - Prefer slightly longer, more specific labels over shorter generic ones to avoid collapsing distinct fields
 
 For each field you identify, determine:
 
-1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Medication Name" not just "Medication Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
+1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Item Name" not just "Item Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
 
 2. **Field Type**: Choose the most appropriate type based on what you find in the OCR text:
+   
+   **Common types from OCR:**
    - text: for single-line text inputs (names, addresses, single values). CRITICAL: If the OCR text shows a field label with a blank line or filled value underneath, treat it as type "text" - do NOT infer radio/select types from filled sample data. If the text shows "3. Gender" followed by a value like "Male", use type "text", NOT "select" or "radio"
    - email: for email address fields
-   - tel: for phone/telephone number fields  
+   - tel: for phone/telephone number fields
+   - number: for numeric inputs (age, quantity, ID numbers)
    - textarea: for large text areas, comments, messages, or multi-line inputs
    - select: ONLY when the OCR text shows multiple distinct options listed together (like "Yes", "No", "Maybe") indicating a dropdown or selection. Do NOT use "select" for fields that show only a single value
    - radio-with-other: when the OCR text shows multiple radio button options AND includes "Other:" with a text input
    - checkbox-with-other: when the OCR text shows multiple checkbox options AND includes "Other:" with a text input
    - date: for date picker fields (usually shown as mm/dd/yyyy or similar)
+   - label: for display-only text (titles, section headers, instructions, legal disclaimers)
+   
+   **Advanced types** (rarely in scanned forms, use only if explicitly shown):
+   - rating: for star ratings or scale (1-5, 1-10)
+   - file: for file upload fields (rarely in scanned PDFs)
+   - signature: for signature fields (usually shown as "Signature: ___________")
+   - payment: for credit card, bank account, or payment information fields (e.g., "Card Number:", "Account Number:", "Routing Number:", "CVV:", "Expiration Date:")
    
    IMPORTANT: Do NOT infer field types from filled sample data in the OCR text. If a form field shows only a single value (even something like "Male"), use type "text", not "radio" or "select". Only use "select" or "radio" when the OCR text explicitly shows multiple choice options.
 
@@ -188,7 +488,7 @@ For each field you identify, determine:
    - "(optional)" text (mark as not required)
    - Default to false if no indicator found
 
-4. **Options Extraction**: When the OCR text shows multiple choice options, extract ALL of them and group with the main question label:
+4. **Options Detection**: When the OCR text shows multiple choice options, identify ALL of them and group with the main question label:
    - CRITICAL: When you find Yes/No questions in the text, ALWAYS capture ALL options. If the text contains "Yes" and "No" or "Yes" and "No, please mail it to my home address", include ALL options in the array. Never drop the "No" option or its variations. Search the OCR text around the question - if you find "Yes", search for the corresponding "No" option even if it's on a different line or has additional text. If a question asks "is it OK to email statements to you?" and the text shows "Yes", you MUST also search for "No" or "No, please mail" - they are part of the same question's options.
    - CRITICAL: allowOther should ALWAYS be false by default
    - ONLY set allowOther: true if the OCR text clearly shows an "Other" option (with or without colon) AND a text input field or blank line for text entry
@@ -204,13 +504,21 @@ For each field you identify, determine:
 6. **Confidence**: Rate 0.0-1.0 how confident you are about this field
 
 Return ONLY a JSON array with this exact structure:
+
+**SUPPORTED FIELD TYPES**:
+- **Common types** (from OCR): text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other
+- **Display types**: label (for titles/headers/instructions - display-only form text)
+- **Advanced types** (rare): rating, file, signature, payment
+- **Manual types** (not from OCR): image, calendly, richtext (user-editable rich content)
+
+**FOR INPUT FIELDS** (text, email, phone, checkboxes, etc.):
 [
   {
-    "label": "Field Label Text",
-    "type": "text|email|tel|textarea|select|date|radio-with-other|checkbox-with-other",
+    "label": "First Name",
+    "type": "text|email|tel|number|textarea|select|date|radio-with-other|checkbox-with-other|rating|file|signature|payment",
     "required": true/false,
     "placeholder": "Placeholder text if visible",
-    "options": ["Option 1", "Option 2"] (for select/radio/checkbox),
+    "options": ["Option 1", "Option 2"] (for select/radio/checkbox/rating),
     "allowOther": true/false (ONLY true if the text shows "Other:" with text input),
     "otherLabel": "Other:" (ONLY if allowOther is true),
     "otherPlaceholder": "Please specify..." (ONLY if allowOther is true),
@@ -219,18 +527,125 @@ Return ONLY a JSON array with this exact structure:
   }
 ]
 
+**FOR LABEL FIELDS** (titles, headers, instructions - display-only form text):
+[
+  {
+    "label": "",
+    "type": "label",
+    "richTextContent": "<h1>APPLICATION FORM</h1>|<h2>Contact Information</h2>|<p>Please fill out this form completely...</p>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.95,
+    "pageNumber": 1
+  }
+]
+
+**CRITICAL FOR LABEL FIELDS**: 
+- The "label" field MUST be an EMPTY STRING ("") for label fields
+- The actual text content goes ONLY in "richTextContent" with proper HTML tags
+- Do NOT put the text in both label and richTextContent
+- Label fields are for display only - the content itself is what users see, not a label input
+
+**NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, label). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
+
+**🚨 CRITICAL: OUTPUT ORDER - SORT BY Y-COORDINATE 🚨**:
+
+You MUST return fields in STRICT VISUAL ORDER from top to bottom of the page. This means:
+
+1. **Sort ALL fields (label AND input) by their y-coordinate value** (vertical position on the page)
+2. **Lower y-value = higher on page = should appear FIRST in the array**
+3. **Process the form from top to bottom**, not by field type or by the OCR text sequence
+
+Example with y-coordinates:
+- Block at y:150 ("PATIENT INFORMATION" header) → comes FIRST
+- Block at y:192 ("LEGAL NAME:" label) → comes SECOND  
+- Block at y:210 ("Last" input under Legal Name) → comes THIRD
+- Block at y:212 ("First" input under Legal Name) → comes FOURTH
+- Block at y:214 ("Middle" input under Legal Name) → comes FIFTH
+- Block at y:247 ("ADDRESS:" label) → comes SIXTH
+- Block at y:265 ("Street" input under Address) → comes SEVENTH
+
+DO NOT group by section or field type. Return fields in the exact order they appear visually (top to bottom).
+
 IMPORTANT: For most fields, allowOther should be false. Only set to true when the text clearly shows "Other:" with a text input field.
 
-EXAMPLE: If the text contains options like:
+**COMPLETE EXAMPLE MIXING LABEL AND INPUT FIELDS**:
+Given spatial data showing:
+- Block 1: "REGISTRATION FORM" (y:225, h:30)
+- Block 2: "Instructions: ..." (y:302, h:89)
+- Block 3: "APPLICANT INFORMATION" (y:433, h:23)
+- Block 4: "First Name:" (y:505, h:21)
+- Block 5: "Last Name:" (y:506, h:19)
+
+Correct output (mixed, in visual order BY Y-COORDINATE):
+[
+  {
+    "label": "",
+    "type": "label",
+    "richTextContent": "<h1>REGISTRATION FORM</h1>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.98,
+    "pageNumber": 1
+  },
+  {
+    "label": "",
+    "type": "label",
+    "richTextContent": "<p>Instructions: Please complete all fields below</p>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.90,
+    "pageNumber": 1
+  },
+  {
+    "label": "",
+    "type": "label",
+    "richTextContent": "<h2>APPLICANT INFORMATION</h2>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.95,
+    "pageNumber": 1
+  },
+  {
+    "label": "First Name",
+    "type": "text",
+    "required": false,
+    "placeholder": "",
+    "options": [],
+    "allowOther": false,
+    "otherLabel": "",
+    "otherPlaceholder": "",
+    "confidence": 0.97,
+    "pageNumber": 1
+  },
+  {
+    "label": "Last Name",
+    "type": "text",
+    "required": false,
+    "placeholder": "",
+    "options": [],
+    "allowOther": false,
+    "otherLabel": "",
+    "otherPlaceholder": "",
+    "confidence": 0.97,
+    "pageNumber": 1
+  }
+]
+
+**CRITICAL**: 
+- Label fields do NOT need: placeholder, options, allowOther, otherLabel, otherPlaceholder
+- Input fields MUST have ALL fields even if empty: placeholder, options, allowOther, otherLabel, otherPlaceholder
+
+**OPTIONS DETECTION EXAMPLE**: If the text contains options like:
 - "No"
-- "Yes-Flu A" 
-- "Yes-Flu B"
+- "Yes-Option A" 
+- "Yes-Option B"
 - "Yes-Other"
 - "Other:" (with text input field)
 
-The correct extraction should be:
+The correct output should be:
 {
-  "options": ["No", "Yes-Flu A", "Yes-Flu B", "Yes-Other"],
+  "options": ["No", "Yes-Option A", "Yes-Option B", "Yes-Other"],
   "allowOther": true,
   "otherLabel": "Other:",
   "otherPlaceholder": "Please specify..."
@@ -240,12 +655,16 @@ Notice: "Other:" is NOT in the options array because it's handled by allowOther:
 
     // Build user message with OCR text
     // IMPORTANT: Always include the OCR text, even if userMessage is provided
-    let groqUserMessage = `Analyze this OCR text extracted from PDF form pages and extract all visible form fields.
+    let groqUserMessage = `Analyze this OCR text from a blank form template and identify BOTH:
+1. Label fields (titles, section headers, instructions, legal text - display-only form text)
+2. Input fields (text, email, phone, checkboxes, etc.)
 
 OCR TEXT:
 ${combinedText}
 
-Extract all form fields with their exact labels, types, and options as they appear in the text.`
+🚨 CRITICAL: Return fields in STRICT TOP-TO-BOTTOM ORDER based on y-coordinates from the spatial data above. Sort by y-coordinate (vertical position), NOT by field type or OCR text order. Lower y-value = higher on page = appears first in your output array.
+
+**OUTPUT FORMAT**: Return ONLY a valid JSON array. Do NOT include any explanation, reasoning, or text outside the JSON array. Start with [ and end with ].`
     
     // If user provided additional context, append it
     if (userMessage) {
@@ -270,8 +689,10 @@ Extract all form fields with their exact labels, types, and options as they appe
             content: groqUserMessage
           }
         ],
-        max_completion_tokens: 32768,
+        max_completion_tokens: 65536,
         temperature: 0.1
+        // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
+        // Prompt explicitly requests JSON array output
       })
     })
 
@@ -291,6 +712,22 @@ Extract all form fields with their exact labels, types, and options as they appe
       throw new Error('No response from Groq API')
     }
 
+    // Check if response was truncated due to token limit
+    const finishReason = choice.finish_reason
+    console.log(`🏁 Groq finish_reason: ${finishReason}`)
+    
+    // Debug: Log the entire choice object if content is missing
+    if (!choice.message?.content) {
+      console.error('❌ Groq response has no content!')
+      console.error('📋 Full choice object:', JSON.stringify(choice, null, 2))
+      console.error('📋 Full groqData:', JSON.stringify(groqData, null, 2))
+    }
+    
+    if (finishReason === 'length') {
+      console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
+      console.warn('⚠️ Consider reducing form complexity or increasing token limit')
+    }
+
     const responseText = choice.message?.content || ''
     
     // Log response for debugging
@@ -300,9 +737,32 @@ Extract all form fields with their exact labels, types, and options as they appe
     
     let fields = []
 
+    // Helper function to sanitize LLM-generated JSON
+    const sanitizeJSON = (jsonString) => {
+      let cleaned = jsonString
+      
+      // 1. Remove /* ... */ style comments
+      cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '')
+      
+      // 2. Remove // ... style comments (but preserve URLs like https://)
+      cleaned = cleaned.replace(/([^:])\/\/[^\n]*/g, '$1')
+      
+      // 3. Remove trailing commas before closing brackets/braces
+      // This is very common in LLM-generated JSON
+      cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1')
+      
+      // 4. Replace single quotes with double quotes (if used for strings)
+      // Only replace single quotes that appear to be string delimiters
+      // This is a simple heuristic and may not catch all cases
+      cleaned = cleaned.replace(/'([^']*)':/g, '"$1":')  // Property names
+      
+      return cleaned
+    }
+
     try {
-      // Try to parse as JSON
-      const parsed = JSON.parse(responseText)
+      // Try to parse as JSON (sanitize first)
+      const cleaned = sanitizeJSON(responseText)
+      const parsed = JSON.parse(cleaned)
       // Handle both { fields: [...] } and direct array
       fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
       console.log('✅ Direct JSON parse succeeded')
@@ -332,7 +792,8 @@ Extract all form fields with their exact labels, types, and options as they appe
       
       if (jsonMatch) {
         console.log('✅ Fallback extraction succeeded with pattern')
-        const extracted = JSON.parse(jsonMatch[1])
+        const cleaned = sanitizeJSON(jsonMatch[1])
+        const extracted = JSON.parse(cleaned)
         fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
       } else {
         console.error('❌ All parsing attempts failed')
