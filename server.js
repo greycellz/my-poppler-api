@@ -3407,6 +3407,7 @@ const imageAnalysisRoutes = require('./routes/image-analysis');
 const urlAnalysisRoutes = require('./routes/url-analysis');
 const urlAnalysisHtmlRoutes = require('./routes/url-analysis-html');
 const googleVisionTestRoutes = require('./routes/google-vision-test');
+const screenshotPagesRoutes = require('./routes/screenshot-pages');
 
 // Mount authentication routes
 app.use('/auth', authRoutes);
@@ -3422,6 +3423,7 @@ app.use('/api', imageAnalysisRoutes);
 app.use('/api', urlAnalysisRoutes);
 app.use('/api', urlAnalysisHtmlRoutes);
 app.use('/api', googleVisionTestRoutes);
+app.use('/', screenshotPagesRoutes);
 
 // ============== AUTO-SAVE ENDPOINT ==============
 
