@@ -1060,28 +1060,43 @@ class GCPClient {
           : 0;
 
         // Calculate average completion time (simplified - would need to aggregate from Firestore)
-        // For now, we'll update it incrementally
-        const avgCompletionTime = completionTime || null;
+        // Only update completion time if we have a value
+        if (completionTime && completionTime > 0) {
+          const updateQuery = `
+            UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+            SET 
+              completion_rate = @completionRate,
+              avg_completion_time = COALESCE(
+                (avg_completion_time * (submissions_count - 1) + @completionTime) / submissions_count,
+                @completionTime
+              )
+            WHERE form_id = @formId
+          `;
 
-        const updateQuery = `
-          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
-          SET 
-            completion_rate = @completionRate,
-            avg_completion_time = COALESCE(
-              (avg_completion_time * (submissions_count - 1) + @completionTime) / submissions_count,
-              @completionTime
-            )
-          WHERE form_id = @formId
-        `;
+          await this.bigquery.query({
+            query: updateQuery,
+            params: {
+              formId,
+              completionRate,
+              completionTime: completionTime
+            }
+          });
+        } else {
+          // Only update completion rate if no completion time
+          const updateQuery = `
+            UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+            SET completion_rate = @completionRate
+            WHERE form_id = @formId
+          `;
 
-        await this.bigquery.query({
-          query: updateQuery,
-          params: {
-            formId,
-            completionRate,
-            completionTime: avgCompletionTime
-          }
-        });
+          await this.bigquery.query({
+            query: updateQuery,
+            params: {
+              formId,
+              completionRate
+            }
+          });
+        }
       }
 
       console.log(`✅ Form analytics device/completion updated: ${formId}`);
