@@ -1095,41 +1095,38 @@ class GCPClient {
           ? (submissions_count / total_views) * 100 
           : 0;
 
-        // Calculate average completion time (simplified - would need to aggregate from Firestore)
-        // Only update completion time if we have a value
+        // Update completion rate (always)
+        const completionRateQuery = `
+          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+          SET completion_rate = @completionRate
+          WHERE form_id = @formId
+        `;
+
+        await this.bigquery.query({
+          query: completionRateQuery,
+          params: {
+            formId,
+            completionRate
+          }
+        });
+
+        // Update average completion time only if we have a valid completion time
+        // Cast to INT64 to match column type (division results in FLOAT64)
         if (completionTime && completionTime > 0) {
-          const updateQuery = `
+          const avgTimeQuery = `
             UPDATE \`${this.projectId}.form_submissions.form_analytics\`
-            SET 
-              completion_rate = @completionRate,
-              avg_completion_time = COALESCE(
-                (avg_completion_time * (submissions_count - 1) + @completionTime) / submissions_count,
-                @completionTime
-              )
+            SET avg_completion_time = CAST(COALESCE(
+              (avg_completion_time * (submissions_count - 1) + @completionTime) / submissions_count,
+              @completionTime
+            ) AS INT64)
             WHERE form_id = @formId
           `;
 
           await this.bigquery.query({
-            query: updateQuery,
+            query: avgTimeQuery,
             params: {
               formId,
-              completionRate,
               completionTime: completionTime
-            }
-          });
-        } else {
-          // Only update completion rate if no completion time
-          const updateQuery = `
-            UPDATE \`${this.projectId}.form_submissions.form_analytics\`
-            SET completion_rate = @completionRate
-            WHERE form_id = @formId
-          `;
-
-          await this.bigquery.query({
-            query: updateQuery,
-            params: {
-              formId,
-              completionRate
             }
           });
         }
