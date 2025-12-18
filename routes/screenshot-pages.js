@@ -260,49 +260,111 @@ router.post('/screenshot-pages', async (req, res) => {
 
       console.log(`📸 [DEBUG] Capturing page ${pageNumber}/${numPages} at scroll position ${scrollY}px`)
 
-      // Scroll to position
-      await page.evaluate((y) => {
+      // Scroll to position - try both window scroll and form container scroll
+      const scrollInfo = await page.evaluate((y) => {
+        // Try to find scrollable container (Google Forms often has one)
+        const form = document.querySelector('form')
+        const mainContent = document.querySelector('[role="main"]') || 
+                           document.querySelector('.freebirdFormviewerViewFormContent') ||
+                           document.querySelector('main')
+        
+        // Scroll window
         window.scrollTo(0, y)
+        
+        // Also try scrolling the container if it exists
+        if (mainContent && mainContent.scrollHeight > mainContent.clientHeight) {
+          mainContent.scrollTop = y
+        }
+        
+        // Get debug info about what's visible
+        const inputs = form ? Array.from(form.querySelectorAll('input, textarea, select')) : []
+        const visibleInputs = inputs.filter(input => {
+          const rect = input.getBoundingClientRect()
+          return rect.top >= 0 && rect.top <= window.innerHeight && 
+                 rect.left >= 0 && rect.left <= window.innerWidth
+        })
+        
+        return {
+          windowScrollY: window.scrollY,
+          containerScrollTop: mainContent ? mainContent.scrollTop : null,
+          totalInputs: inputs.length,
+          visibleInputs: visibleInputs.length,
+          firstVisibleLabel: visibleInputs[0] ? 
+            (visibleInputs[0].closest('label')?.textContent?.substring(0, 50) || 
+             visibleInputs[0].getAttribute('aria-label')?.substring(0, 50) || 
+             'no label') : 'none',
+          bodyHeight: document.body.scrollHeight,
+          containerHeight: mainContent ? mainContent.scrollHeight : null
+        }
       }, scrollY)
+      
+      console.log(`📊 [DEBUG] Scroll info at ${scrollY}px:`, JSON.stringify(scrollInfo, null, 2))
 
       // Wait for scroll to settle and content to load
       await new Promise(resolve => setTimeout(resolve, scrollDelay))
       
       // Additional wait for Google Forms to render content at this position
       // Google Forms uses lazy loading, so we need to wait for it to render
-      await page.evaluate(async () => {
+      const contentInfo = await page.evaluate(async () => {
         return new Promise((resolve) => {
+          let attempts = 0
+          const maxAttempts = 10
+          
           // Wait for form elements to be visible
           const checkContent = () => {
+            attempts++
             const form = document.querySelector('form')
             if (form) {
               // Check if there are input elements in viewport
-              const inputs = form.querySelectorAll('input, textarea, select')
-              const visibleInputs = Array.from(inputs).filter(input => {
+              const inputs = Array.from(form.querySelectorAll('input, textarea, select'))
+              const visibleInputs = inputs.filter(input => {
                 const rect = input.getBoundingClientRect()
-                return rect.top >= 0 && rect.top <= window.innerHeight
+                return rect.top >= 0 && rect.top <= window.innerHeight && 
+                       rect.left >= 0 && rect.left <= window.innerWidth
               })
               
-              if (visibleInputs.length > 0) {
-                // Content is visible, wait a bit more for any animations
-                setTimeout(resolve, 500)
+              // Get labels for visible inputs
+              const visibleLabels = visibleInputs.map(input => {
+                const label = input.closest('label') || 
+                             document.querySelector(`label[for="${input.id}"]`) ||
+                             input.closest('.freebirdFormviewerViewItemsItemItem')?.querySelector('.freebirdFormviewerViewItemsItemItemTitle')?.textContent
+                return label ? label.textContent?.trim().substring(0, 50) : 'no label'
+              })
+              
+              if (visibleInputs.length > 0 && attempts >= 3) {
+                // Content is visible, return info
+                resolve({
+                  visibleCount: visibleInputs.length,
+                  labels: visibleLabels,
+                  ready: true
+                })
+              } else if (attempts >= maxAttempts) {
+                // Timeout, return what we have
+                resolve({
+                  visibleCount: visibleInputs.length,
+                  labels: visibleLabels,
+                  ready: false
+                })
               } else {
-                // No visible inputs yet, wait and check again
-                setTimeout(checkContent, 200)
+                // Wait and check again
+                setTimeout(checkContent, 300)
               }
             } else {
-              // No form found, resolve anyway
-              setTimeout(resolve, 500)
+              // No form found
+              resolve({
+                visibleCount: 0,
+                labels: [],
+                ready: false
+              })
             }
           }
           
           // Start checking after initial delay
-          setTimeout(checkContent, 300)
-          
-          // Timeout after 2 seconds max
-          setTimeout(resolve, 2000)
+          setTimeout(checkContent, 500)
         })
       })
+      
+      console.log(`📋 [DEBUG] Content info:`, JSON.stringify(contentInfo, null, 2))
 
       // Capture viewport screenshot
       const screenshotPath = path.join(screenshotDir, `page-${pageNumber}.png`)
