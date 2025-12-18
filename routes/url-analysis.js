@@ -59,6 +59,12 @@ function initializeVisionClient() {
 const USE_GROQ_LLAMA = process.env.USE_GROQ_LLAMA === 'TRUE'
 const GROQ_MODEL = USE_GROQ_LLAMA ? 'llama-3.3-70b-versatile' : 'openai/gpt-oss-20b'
 
+// Simple token estimator for debugging (rough: ~3.5 chars per token for JSON/text)
+function estimateTokens(text) {
+  if (!text) return 0
+  return Math.ceil(String(text).length / 3.5)
+}
+
 // Helper function to extract text from Vision API block
 function getBlockText(block) {
   if (!block || !block.paragraphs) return ''
@@ -321,6 +327,21 @@ ${combinedText}
         groqUserMessage += `\n\n${userMessage}`
       }
 
+      // DEBUG: Estimate Groq input tokens before calling API
+      const systemTokens = estimateTokens(defaultSystemMessage)
+      const userTokens = estimateTokens(groqUserMessage)
+      const ocrTokens = estimateTokens(combinedText)
+      const spatialTokens = estimateTokens(spatialContextHint)
+      const estimatedInputTokens = systemTokens + userTokens + ocrTokens + spatialTokens
+
+      console.log('📊 [DEBUG][Groq] Estimated input tokens:', {
+        systemTokens,
+        userTokens,
+        ocrTokens,
+        spatialTokens,
+        estimatedInputTokens
+      })
+
       const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -352,7 +373,15 @@ ${combinedText}
       const groqData = await groqResponse.json()
       const groqTime = Date.now() - groqStartTime
 
+      // DEBUG: Log Groq usage if available
+      const groqUsage = groqData.usage || groqData.usage_metadata || null
+
       console.log(`✅ Groq API completed in ${groqTime}ms`)
+      if (groqUsage) {
+        console.log('📊 [DEBUG][Groq] Actual token usage:', JSON.stringify(groqUsage, null, 2))
+      } else {
+        console.log('📊 [DEBUG][Groq] No usage field returned in response')
+      }
 
       // Parse Groq response
       const choice = groqData.choices?.[0]
@@ -368,6 +397,10 @@ ${combinedText}
       }
 
       const responseText = choice.message?.content || ''
+
+      // DEBUG: Estimate completion tokens from response length
+      const estimatedCompletionTokens = estimateTokens(responseText)
+      console.log('📊 [DEBUG][Groq] Estimated completion tokens from responseText:', estimatedCompletionTokens)
       
       // Helper function to sanitize LLM-generated JSON
       const sanitizeJSON = (jsonString) => {
