@@ -2232,6 +2232,154 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
   }
 });
 
+// ============== FIELD ANALYTICS ENDPOINT ==============
+
+// Get field-level analytics for a form
+app.get('/analytics/forms/:formId/fields', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    
+    // Handle dateRange with or without 'd' suffix (e.g., "30d" or "30")
+    const dateRangeParam = req.query.dateRange || '30';
+    const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30; // Default 30 days
+    
+    console.log(`📊 Fetching field analytics for form: ${formId}, dateRange: ${dateRange}d`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Fetch form structure to get field definitions
+    const formDoc = await gcpClient.getFormStructure(formId, true);
+    if (!formDoc) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found',
+        formId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const fields = formDoc.structure?.fields || [];
+    
+    // Calculate date range using UTC for consistency with Firestore timestamps
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setUTCDate(startDate.getUTCDate() - dateRange);
+    startDate.setUTCHours(0, 0, 0, 0); // Start of day (UTC)
+    endDate.setUTCHours(23, 59, 59, 999); // End of today (UTC)
+    
+    if (fields.length === 0) {
+      return res.json({
+        success: true,
+        formId,
+        dateRange: {
+          start: startDate.toISOString(),
+          end: endDate.toISOString()
+        },
+        fields: [],
+        message: 'Form has no fields'
+      });
+    }
+    
+    console.log(`📅 Field analytics date range: ${startDate.toISOString()} to ${endDate.toISOString()}`);
+    
+    // Get submissions with date filtering
+    const submissions = await gcpClient.getFormSubmissions(formId, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+    
+    const totalSubmissionsInRange = submissions.length;
+    console.log(`📊 Found ${totalSubmissionsInRange} submissions in date range`);
+    
+    // Import field analytics computation
+    const { computeFieldAnalytics } = require('./utils/field-analytics');
+    
+    // Timeout protection for large datasets (10 seconds)
+    const TIMEOUT_MS = 10000;
+    const analyticsPromise = computeFieldAnalytics(fields, submissions, totalSubmissionsInRange);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Analytics computation timeout')), TIMEOUT_MS)
+    );
+    
+    let fieldAnalytics;
+    let fieldErrors = [];
+    try {
+      const result = await Promise.race([analyticsPromise, timeoutPromise]);
+      fieldAnalytics = result.fields || [];
+      fieldErrors = result.errors || [];
+    } catch (error) {
+      if (error.message.includes('timeout')) {
+        console.warn(`⚠️ Field analytics timeout for form ${formId}`);
+        return res.status(500).json({
+          success: false,
+          error: 'Analytics computation timeout',
+          message: 'Please try a shorter date range',
+          formId,
+          timestamp: new Date().toISOString()
+        });
+      }
+      throw error;
+    }
+    
+    // Order fields to match form structure order
+    const fieldOrderMap = new Map();
+    fields.forEach((field, index) => {
+      if (field.id) {
+        fieldOrderMap.set(field.id, index);
+      }
+    });
+    
+    fieldAnalytics.sort((a, b) => {
+      const orderA = fieldOrderMap.get(a.fieldId) ?? Infinity;
+      const orderB = fieldOrderMap.get(b.fieldId) ?? Infinity;
+      return orderA - orderB;
+    });
+    
+    // Return response with graceful degradation (partial results if some fields failed)
+    if (fieldAnalytics.length === 0 && fieldErrors.length > 0) {
+      // All fields failed
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to compute field analytics',
+        errors: fieldErrors,
+        formId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Partial or complete success
+    const response = {
+      success: true,
+      formId,
+      dateRange: {
+        start: startDate.toISOString(),
+        end: endDate.toISOString()
+      },
+      fields: fieldAnalytics
+    };
+    
+    // Include errors if any (for graceful degradation)
+    if (fieldErrors.length > 0) {
+      response.errors = fieldErrors;
+    }
+    
+    console.log(`✅ Field analytics computed: ${fieldAnalytics.length} fields, ${fieldErrors.length} errors`);
+    res.json(response);
+    
+  } catch (error) {
+    console.error('❌ Field analytics fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch field analytics',
+      details: error.message,
+      formId: req.params.formId,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // ============== USER ANALYTICS ENDPOINT ==============
 
 // Get all analytics for a specific user
