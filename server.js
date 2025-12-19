@@ -1922,6 +1922,12 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
         trends: {
           views: [],
           submissions: []
+        },
+        deviceBreakdown: {
+          desktop: { views: 0 },
+          mobile: { views: 0 },
+          tablet: { views: 0 },
+          other: { views: 0 }
         }
       });
     }
@@ -1944,6 +1950,30 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
       query: viewsQuery,
       params: { formId, days: dateRange }
     });
+
+    // Get device breakdown from form_views table (same date range window)
+    // NOTE: This is views-only for now; submissions remain Firestore-only.
+    let deviceRows = [];
+    try {
+      const deviceQuery = `
+        SELECT 
+          COALESCE(device_type, 'unknown') as device_type,
+          COUNT(*) as views
+        FROM \`${gcpClient.projectId}.form_submissions.form_views\`
+        WHERE form_id = @formId
+          AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+          AND timestamp <= CURRENT_TIMESTAMP()
+        GROUP BY device_type
+      `;
+
+      [deviceRows] = await gcpClient.bigquery.query({
+        query: deviceQuery,
+        params: { formId, days: dateRange }
+      });
+    } catch (error) {
+      console.warn('⚠️ Error querying device breakdown:', error.message);
+      // Continue with empty deviceRows - device breakdown failure shouldn't break the endpoint
+    }
 
     // Get submission trends from Firestore (grouped by date)
     // Calculate date range: from N days ago to end of today
@@ -2058,6 +2088,42 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
         count: submissionsByDate[date] || 0
       }))
     };
+
+    // Build device breakdown object from deviceRows
+    // We keep this focused on views by device over the selected window.
+    const deviceCounts = {
+      desktop: 0,
+      mobile: 0,
+      tablet: 0,
+      other: 0
+    };
+
+    deviceRows.forEach(row => {
+      const rawType = (row.device_type || '').toString().toLowerCase();
+      const views = parseInt(row.views, 10) || 0;
+
+      if (!rawType) {
+        deviceCounts.other += views;
+        return;
+      }
+
+      if (rawType.includes('desktop')) {
+        deviceCounts.desktop += views;
+      } else if (rawType.includes('mobile')) {
+        deviceCounts.mobile += views;
+      } else if (rawType.includes('tablet') || rawType.includes('ipad')) {
+        deviceCounts.tablet += views;
+      } else {
+        deviceCounts.other += views;
+      }
+    });
+
+    const deviceBreakdown = {
+      desktop: { views: deviceCounts.desktop },
+      mobile: { views: deviceCounts.mobile },
+      tablet: { views: deviceCounts.tablet },
+      other: { views: deviceCounts.other }
+    };
     
     // Calculate totals from filtered trends data (not from aggregate table)
     // IMPORTANT: These MUST match the sum of trends arrays
@@ -2099,7 +2165,8 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
       totalSubmissions,
       completionRate: Math.round(completionRate * 100) / 100, // Round to 2 decimal places
       lastSubmission,
-      trends
+      trends,
+      deviceBreakdown
     });
 
   } catch (error) {
