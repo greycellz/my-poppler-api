@@ -1951,7 +1951,7 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
     const totalViews = analytics.total_views || 0;
     const totalSubmissions = analytics.submissions_count || 0;
     const completionRate = totalViews > 0 
-      ? (totalSubmissions / totalViews) * 100 
+      ? Math.min((totalSubmissions / totalViews) * 100, 100) // Cap at 100%
       : 0;
 
     res.json({

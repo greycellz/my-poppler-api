@@ -1092,7 +1092,7 @@ class GCPClient {
       if (statsRows.length > 0) {
         const { submissions_count, total_views } = statsRows[0];
         const completionRate = total_views > 0 
-          ? (submissions_count / total_views) * 100 
+          ? Math.min((submissions_count / total_views) * 100, 100) // Cap at 100%
           : 0;
 
         // Update completion rate (always)
