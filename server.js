@@ -1740,7 +1740,10 @@ async function updateAnalyticsAsync(formId, submissionId, metadata, isHipaa) {
     console.log(`✅ Analytics updated for form: ${formId}`);
   } catch (error) {
     // Analytics errors are logged but don't propagate
-    throw error; // Caught by caller's catch block
+    // Error is caught by caller's .catch() block - don't throw
+    console.error(`❌ Analytics update error for ${formId}:`, error);
+    // Re-throw to be caught by caller's .catch() - this is intentional
+    throw error;
   }
 }
 
@@ -1924,6 +1927,7 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
     }
 
     // Get view trends from form_views table
+    // Filter: from N days ago to end of today (exclude future dates)
     const viewsQuery = `
       SELECT 
         DATE(timestamp) as date,
@@ -1931,6 +1935,7 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
       FROM \`${gcpClient.projectId}.form_submissions.form_views\`
       WHERE form_id = @formId
         AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+        AND timestamp <= CURRENT_TIMESTAMP()
       GROUP BY date
       ORDER BY date ASC
     `;
@@ -1941,17 +1946,33 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
     });
 
     // Get submission trends from Firestore (grouped by date)
+    // Calculate date range: from N days ago to end of today
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - dateRange);
+    dateFrom.setHours(0, 0, 0, 0); // Start of day
+    
+    const dateTo = new Date();
+    dateTo.setHours(23, 59, 59, 999); // End of today (exclude future dates)
+    
+    // Convert to Firestore Timestamp for proper comparison
+    const { Firestore } = require('@google-cloud/firestore');
+    const dateFromTimestamp = Firestore.Timestamp.fromDate(dateFrom);
+    const dateToTimestamp = Firestore.Timestamp.fromDate(dateTo);
+    
+    console.log(`📅 Filtering submissions from: ${dateFrom.toISOString()} to ${dateTo.toISOString()} (${dateRange} days)`);
     
     let submissionsByDate = {};
     try {
       // Query without orderBy to avoid index requirement, we'll sort in memory
+      // Filter: timestamp >= dateFrom AND timestamp <= dateTo (exclude future dates)
       const submissionsSnapshot = await gcpClient
         .collection('submissions')
         .where('form_id', '==', formId)
-        .where('timestamp', '>=', dateFrom)
+        .where('timestamp', '>=', dateFromTimestamp)
+        .where('timestamp', '<=', dateToTimestamp)
         .get();
+      
+      console.log(`📊 Found ${submissionsSnapshot.docs.length} submissions within date range`);
 
       // Group submissions by date
       submissionsSnapshot.docs.forEach(doc => {
@@ -1959,11 +1980,22 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
         if (data.timestamp) {
           const date = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
           const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
-          submissionsByDate[dateKey] = (submissionsByDate[dateKey] || 0) + 1;
+          
+          // Double-check: only include dates within range (defensive check)
+          const dateOnly = new Date(dateKey + 'T00:00:00.000Z');
+          const dateFromOnly = new Date(dateFrom.toISOString().split('T')[0] + 'T00:00:00.000Z');
+          const dateToOnly = new Date(dateTo.toISOString().split('T')[0] + 'T00:00:00.000Z');
+          
+          if (dateOnly >= dateFromOnly && dateOnly <= dateToOnly) {
+            submissionsByDate[dateKey] = (submissionsByDate[dateKey] || 0) + 1;
+          } else {
+            console.log(`⚠️ Skipping submission ${data.submission_id || doc.id} with date ${dateKey} (outside range ${dateFromOnly.toISOString().split('T')[0]} to ${dateToOnly.toISOString().split('T')[0]})`);
+          }
         }
       });
       
       console.log(`📊 Grouped ${submissionsSnapshot.docs.length} submissions by date:`, Object.keys(submissionsByDate).length, 'dates');
+      console.log(`📅 Date keys:`, Object.keys(submissionsByDate).sort().join(', '));
     } catch (error) {
       console.warn('⚠️ Error querying Firestore for submissions:', error.message);
       // Continue with empty submissionsByDate
@@ -2027,24 +2059,46 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
       }))
     };
     
-    console.log(`📊 Trends summary: ${sortedDates.length} dates, ${trends.views.reduce((sum, v) => sum + v.count, 0)} total views, ${trends.submissions.reduce((sum, s) => sum + s.count, 0)} total submissions`);
+    // Calculate totals from filtered trends data (not from aggregate table)
+    // IMPORTANT: These MUST match the sum of trends arrays
+    const totalViews = trends.views.reduce((sum, v) => sum + (v.count || 0), 0);
+    const totalSubmissions = trends.submissions.reduce((sum, s) => sum + (s.count || 0), 0);
+    
+    // Debug logging
+    console.log(`📊 Trends array details:`);
+    console.log(`   Views:`, JSON.stringify(trends.views, null, 2));
+    console.log(`   Submissions:`, JSON.stringify(trends.submissions, null, 2));
+    console.log(`📊 Trends summary: ${sortedDates.length} dates, ${totalViews} total views, ${totalSubmissions} total submissions`);
+    console.log(`📊 ViewsMap size: ${viewsMap.size}, SubmissionsByDate keys: ${Object.keys(submissionsByDate).length}`);
 
-    const totalViews = analytics.total_views || 0;
-    const totalSubmissions = analytics.submissions_count || 0;
+    // Calculate completion rate from filtered data
     const completionRate = totalViews > 0 
       ? Math.min((totalSubmissions / totalViews) * 100, 100) // Cap at 100%
       : 0;
+
+    // Get last submission date from filtered trends (most recent date with submissions)
+    let lastSubmission = null;
+    const submissionDates = trends.submissions
+      .filter(s => s.count > 0)
+      .map(s => s.date)
+      .sort()
+      .reverse();
+    if (submissionDates.length > 0) {
+      // Use the most recent date that has submissions
+      lastSubmission = submissionDates[0];
+    } else if (analytics.last_submission) {
+      // Fallback to aggregate table if no filtered submissions
+      lastSubmission = analytics.last_submission.value 
+        ? analytics.last_submission.value 
+        : analytics.last_submission;
+    }
 
     res.json({
       success: true,
       totalViews,
       totalSubmissions,
       completionRate: Math.round(completionRate * 100) / 100, // Round to 2 decimal places
-      lastSubmission: analytics.last_submission 
-        ? (analytics.last_submission.value 
-            ? analytics.last_submission.value 
-            : analytics.last_submission)
-        : null,
+      lastSubmission,
       trends
     });
 
