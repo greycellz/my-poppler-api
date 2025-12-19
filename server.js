@@ -1896,7 +1896,9 @@ app.get('/analytics/:formId', async (req, res) => {
 app.get('/analytics/forms/:formId/overview', async (req, res) => {
   try {
     const { formId } = req.params;
-    const dateRange = parseInt(req.query.dateRange) || 30; // Default 30 days
+    // Handle dateRange with or without 'd' suffix (e.g., "30d" or "30")
+    const dateRangeParam = req.query.dateRange || '30';
+    const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30; // Default 30 days
 
     console.log(`📊 Fetching analytics overview for form: ${formId}, dateRange: ${dateRange}d`);
 
@@ -1970,8 +1972,41 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
     // Merge views and submissions by date
     const viewsMap = new Map();
     viewsRows.forEach(row => {
-      const dateKey = row.date.value.toISOString().split('T')[0];
-      viewsMap.set(dateKey, parseInt(row.count));
+      try {
+        // Handle BigQuery DATE() return format - can be string, Date, or {value: Date/string}
+        let dateValue = row.date;
+        
+        // Extract value if wrapped in object
+        if (dateValue && typeof dateValue === 'object' && 'value' in dateValue) {
+          dateValue = dateValue.value;
+        }
+        
+        // Convert to date string (YYYY-MM-DD)
+        let dateKey;
+        if (dateValue instanceof Date) {
+          dateKey = dateValue.toISOString().split('T')[0];
+        } else if (typeof dateValue === 'string') {
+          // BigQuery DATE() returns YYYY-MM-DD string format
+          dateKey = dateValue.split('T')[0].split(' ')[0]; // Handle both ISO and date-only strings
+        } else if (dateValue) {
+          // Fallback: try to parse as date
+          const parsed = new Date(dateValue);
+          if (!isNaN(parsed.getTime())) {
+            dateKey = parsed.toISOString().split('T')[0];
+          } else {
+            console.warn(`⚠️ Could not parse date value:`, dateValue);
+            return; // Skip this row
+          }
+        } else {
+          console.warn(`⚠️ Missing date value in row:`, row);
+          return; // Skip this row
+        }
+        
+        viewsMap.set(dateKey, parseInt(row.count) || 0);
+      } catch (error) {
+        console.warn(`⚠️ Error processing view row:`, error.message, row);
+        // Continue with next row
+      }
     });
 
     // Get all unique dates from both views and submissions
@@ -2005,7 +2040,11 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
       totalViews,
       totalSubmissions,
       completionRate: Math.round(completionRate * 100) / 100, // Round to 2 decimal places
-      lastSubmission: analytics.last_submission ? analytics.last_submission.value : null,
+      lastSubmission: analytics.last_submission 
+        ? (analytics.last_submission.value 
+            ? analytics.last_submission.value 
+            : analytics.last_submission)
+        : null,
       trends
     });
 
