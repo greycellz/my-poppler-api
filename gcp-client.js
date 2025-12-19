@@ -782,7 +782,15 @@ class GCPClient {
           last_submission,
           is_hipaa,
           is_published,
-          user_id
+          user_id,
+          total_views,
+          unique_views,
+          completion_rate,
+          avg_completion_time,
+          device_mobile_count,
+          device_desktop_count,
+          device_tablet_count,
+          last_view
         FROM \`${this.projectId}.form_submissions.form_analytics\`
         WHERE form_id = @formId
         ORDER BY last_submission DESC
