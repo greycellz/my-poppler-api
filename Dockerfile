@@ -68,8 +68,25 @@ RUN npm install
 # Create necessary directories for both services
 RUN mkdir -p uploads output screenshots
 
-# Copy the rest of the code
+# Copy the rest of the code (including GeoLite2-City.mmdb if it exists locally)
 COPY . .
+
+# Download GeoLite2-City database ONLY if it doesn't exist and MAXMIND_LICENSE_KEY is provided
+# This is a fallback for Railway deployments where the file isn't in git
+ARG MAXMIND_LICENSE_KEY
+RUN if [ ! -f "./GeoLite2-City.mmdb" ] && [ -n "$MAXMIND_LICENSE_KEY" ]; then \
+      echo "📥 GeoLite2-City.mmdb not found, downloading..." && \
+      wget -q "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${MAXMIND_LICENSE_KEY}&suffix=tar.gz" -O /tmp/GeoLite2-City.tar.gz && \
+      tar -xzf /tmp/GeoLite2-City.tar.gz -C /tmp && \
+      cp /tmp/GeoLite2-City_*/GeoLite2-City.mmdb ./GeoLite2-City.mmdb && \
+      rm -rf /tmp/GeoLite2-City* && \
+      echo "✅ GeoLite2-City database downloaded"; \
+    elif [ -f "./GeoLite2-City.mmdb" ]; then \
+      echo "✅ Using existing GeoLite2-City.mmdb from build context"; \
+    else \
+      echo "⚠️  GeoLite2-City.mmdb not found and MAXMIND_LICENSE_KEY not provided"; \
+      echo "   Geolocation will be disabled unless database is provided via MAXMIND_DB_PATH"; \
+    fi
 
 # Set Puppeteer environment variables to use system Chrome
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true

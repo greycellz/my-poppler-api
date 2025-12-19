@@ -521,6 +521,11 @@ class GCPClient {
         user_agent: metadata.userAgent,
         is_hipaa: isHipaa,
         encrypted: metadata.encrypted || false, // Set based on metadata
+        // Analytics fields (optional - for linking views to submissions)
+        view_timestamp: metadata.viewTimestamp || null,
+        start_timestamp: metadata.startTimestamp || null,
+        completion_time: metadata.completionTime || null,
+        session_id: metadata.sessionId || null,
       };
 
       // HIPAA-only trim: store data pointer instead of full submission_data to avoid index explosion
@@ -777,7 +782,15 @@ class GCPClient {
           last_submission,
           is_hipaa,
           is_published,
-          user_id
+          user_id,
+          total_views,
+          unique_views,
+          completion_rate,
+          avg_completion_time,
+          device_mobile_count,
+          device_desktop_count,
+          device_tablet_count,
+          last_view
         FROM \`${this.projectId}.form_submissions.form_analytics\`
         WHERE form_id = @formId
         ORDER BY last_submission DESC
@@ -835,6 +848,308 @@ class GCPClient {
     } catch (error) {
       console.error('❌ Error getting user analytics:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Insert a form view into BigQuery form_views table
+   * @param {Object} viewData - View data object
+   * @returns {Promise<string>} View ID
+   */
+  async insertFormView(viewData) {
+    try {
+      const {
+        form_id,
+        session_id,
+        timestamp,
+        ip_address,
+        user_agent,
+        referrer,
+        device_type,
+        browser,
+        os,
+        country,
+        city,
+        region
+      } = viewData;
+
+      const viewId = `view_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      // Build params object, only including non-null values
+      const params = {
+        viewId,
+        formId: form_id,
+        timestamp: timestamp || new Date(),
+        sessionId: session_id
+      };
+
+      // Add optional fields only if they have values
+      if (ip_address) params.ipAddress = ip_address;
+      if (user_agent) params.userAgent = user_agent;
+      if (referrer) params.referrer = referrer;
+      if (device_type) params.deviceType = device_type;
+      if (browser) params.browser = browser;
+      if (os) params.os = os;
+      if (country) params.country = country;
+      if (city) params.city = city;
+      if (region) params.region = region;
+
+      // Build query with conditional fields
+      const fields = ['view_id', 'form_id', 'timestamp', 'session_id'];
+      const values = ['@viewId', '@formId', '@timestamp', '@sessionId'];
+      
+      if (ip_address) { fields.push('ip_address'); values.push('@ipAddress'); }
+      if (user_agent) { fields.push('user_agent'); values.push('@userAgent'); }
+      if (referrer) { fields.push('referrer'); values.push('@referrer'); }
+      if (device_type) { fields.push('device_type'); values.push('@deviceType'); }
+      if (browser) { fields.push('browser'); values.push('@browser'); }
+      if (os) { fields.push('os'); values.push('@os'); }
+      if (country) { fields.push('country'); values.push('@country'); }
+      if (city) { fields.push('city'); values.push('@city'); }
+      if (region) { fields.push('region'); values.push('@region'); }
+
+      const query = `
+        INSERT INTO \`${this.projectId}.form_submissions.form_views\`
+        (${fields.join(', ')})
+        VALUES
+        (${values.join(', ')})
+      `;
+
+      const options = {
+        query,
+        params
+      };
+
+      await this.bigquery.query(options);
+      console.log(`✅ Form view inserted: ${viewId} for form ${form_id}`);
+
+      // Update form_analytics with view count
+      await this.updateFormAnalyticsWithViews(form_id);
+
+      return viewId;
+    } catch (error) {
+      console.error('❌ Error inserting form view:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if a view already exists for a session and form
+   * @param {string} formId - Form ID
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object|null>} Existing view or null
+   */
+  async getViewBySession(formId, sessionId) {
+    try {
+      const query = `
+        SELECT view_id
+        FROM \`${this.projectId}.form_submissions.form_views\`
+        WHERE form_id = @formId AND session_id = @sessionId
+        ORDER BY timestamp DESC
+        LIMIT 1
+      `;
+
+      const options = {
+        query,
+        params: { formId, sessionId }
+      };
+
+      const [rows] = await this.bigquery.query(options);
+      return rows.length > 0 ? rows[0] : null;
+    } catch (error) {
+      console.error('❌ Error getting view by session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update form_analytics table with view counts
+   * @param {string} formId - Form ID
+   */
+  async updateFormAnalyticsWithViews(formId) {
+    try {
+      // Get view counts from form_views table
+      const countQuery = `
+        SELECT 
+          COUNT(*) as total_views,
+          COUNT(DISTINCT session_id) as unique_views,
+          MAX(timestamp) as last_view
+        FROM \`${this.projectId}.form_submissions.form_views\`
+        WHERE form_id = @formId
+      `;
+
+      const [countRows] = await this.bigquery.query({
+        query: countQuery,
+        params: { formId }
+      });
+
+      const { total_views, unique_views, last_view } = countRows[0] || {};
+
+      // Use MERGE to update or insert (ensures row exists)
+      // Build params object
+      const params = {
+        formId,
+        totalViews: total_views || 0,
+        uniqueViews: unique_views || 0
+      };
+
+      // Build MERGE query conditionally based on whether last_view exists
+      let mergeQuery;
+      if (last_view) {
+        params.lastView = last_view;
+        mergeQuery = `
+          MERGE \`${this.projectId}.form_submissions.form_analytics\` AS target
+          USING (
+            SELECT 
+              @formId as form_id,
+              @totalViews as total_views,
+              @uniqueViews as unique_views,
+              @lastView as last_view
+          ) AS source
+          ON target.form_id = source.form_id
+          WHEN MATCHED THEN
+            UPDATE SET
+              total_views = source.total_views,
+              unique_views = source.unique_views,
+              last_view = source.last_view
+          WHEN NOT MATCHED THEN
+            INSERT (form_id, total_views, unique_views, last_view, submissions_count, is_hipaa, is_published)
+            VALUES (source.form_id, source.total_views, source.unique_views, source.last_view, 0, false, true)
+        `;
+      } else {
+        mergeQuery = `
+          MERGE \`${this.projectId}.form_submissions.form_analytics\` AS target
+          USING (
+            SELECT 
+              @formId as form_id,
+              @totalViews as total_views,
+              @uniqueViews as unique_views
+          ) AS source
+          ON target.form_id = source.form_id
+          WHEN MATCHED THEN
+            UPDATE SET
+              total_views = source.total_views,
+              unique_views = source.unique_views
+          WHEN NOT MATCHED THEN
+            INSERT (form_id, total_views, unique_views, submissions_count, is_hipaa, is_published)
+            VALUES (source.form_id, source.total_views, source.unique_views, 0, false, true)
+        `;
+      }
+
+      await this.bigquery.query({
+        query: mergeQuery,
+        params
+      });
+
+      console.log(`✅ Form analytics views updated: ${formId}`);
+    } catch (error) {
+      console.error('❌ Error updating form analytics with views:', error);
+      // Don't throw - analytics update failure shouldn't break view tracking
+    }
+  }
+
+  /**
+   * Update form_analytics table with device info and completion time
+   * @param {string} formId - Form ID
+   * @param {Object} analyticsData - Analytics data (deviceType, completionTime, etc.)
+   */
+  async updateFormAnalyticsWithDevice(formId, analyticsData) {
+    try {
+      const { deviceType, completionTime } = analyticsData;
+
+      // Update device counts
+      let deviceUpdateQuery = '';
+      const deviceParams = { formId };
+
+      if (deviceType === 'mobile') {
+        deviceUpdateQuery = `
+          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+          SET device_mobile_count = COALESCE(device_mobile_count, 0) + 1
+          WHERE form_id = @formId
+        `;
+      } else if (deviceType === 'desktop') {
+        deviceUpdateQuery = `
+          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+          SET device_desktop_count = COALESCE(device_desktop_count, 0) + 1
+          WHERE form_id = @formId
+        `;
+      } else if (deviceType === 'tablet') {
+        deviceUpdateQuery = `
+          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+          SET device_tablet_count = COALESCE(device_tablet_count, 0) + 1
+          WHERE form_id = @formId
+        `;
+      }
+
+      if (deviceUpdateQuery) {
+        await this.bigquery.query({
+          query: deviceUpdateQuery,
+          params: deviceParams
+        });
+      }
+
+      // Update completion rate and average completion time
+      // Get current submission count and total views
+      const statsQuery = `
+        SELECT 
+          submissions_count,
+          total_views
+        FROM \`${this.projectId}.form_submissions.form_analytics\`
+        WHERE form_id = @formId
+      `;
+
+      const [statsRows] = await this.bigquery.query({
+        query: statsQuery,
+        params: { formId }
+      });
+
+      if (statsRows.length > 0) {
+        const { submissions_count, total_views } = statsRows[0];
+        const completionRate = total_views > 0 
+          ? Math.min((submissions_count / total_views) * 100, 100) // Cap at 100%
+          : 0;
+
+        // Update completion rate (always)
+        const completionRateQuery = `
+          UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+          SET completion_rate = @completionRate
+          WHERE form_id = @formId
+        `;
+
+        await this.bigquery.query({
+          query: completionRateQuery,
+          params: {
+            formId,
+            completionRate
+          }
+        });
+
+        // Update average completion time only if we have a valid completion time
+        // Cast to INT64 to match column type (division results in FLOAT64)
+        if (completionTime && completionTime > 0) {
+          const avgTimeQuery = `
+            UPDATE \`${this.projectId}.form_submissions.form_analytics\`
+            SET avg_completion_time = CAST(COALESCE(
+              (avg_completion_time * (submissions_count - 1) + @completionTime) / submissions_count,
+              @completionTime
+            ) AS INT64)
+            WHERE form_id = @formId
+          `;
+
+          await this.bigquery.query({
+            query: avgTimeQuery,
+            params: {
+              formId,
+              completionTime: completionTime
+            }
+          });
+        }
+      }
+
+      console.log(`✅ Form analytics device/completion updated: ${formId}`);
+    } catch (error) {
+      console.error('❌ Error updating form analytics with device:', error);
+      // Don't throw - analytics update failure shouldn't break submission
     }
   }
 

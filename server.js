@@ -1521,6 +1521,102 @@ app.post('/store-form', async (req, res) => {
   }
 });
 
+// ============== VIEW TRACKING ENDPOINT ==============
+
+// Track form view (non-blocking, isolated from submissions)
+app.post('/api/forms/:formId/view', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const { sessionId, referrer, timestamp } = req.body;
+
+    if (!formId || !sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Form ID and session ID are required'
+      });
+    }
+
+    console.log(`👁️ Tracking view for form: ${formId}, session: ${sessionId}`);
+
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Check for existing view (deduplication)
+    const existingView = await gcpClient.getViewBySession(formId, sessionId);
+    if (existingView) {
+      console.log(`✅ View already tracked for session: ${sessionId}`);
+      return res.json({
+        success: true,
+        viewId: existingView.view_id,
+        duplicate: true
+      });
+    }
+
+    // Parse device info from user agent
+    const UAParser = require('ua-parser-js');
+    const parser = new UAParser(req.get('User-Agent'));
+    const device = parser.getDevice();
+    const browser = parser.getBrowser();
+    const os = parser.getOS();
+
+    let deviceType = 'desktop';
+    if (device.type === 'mobile') deviceType = 'mobile';
+    else if (device.type === 'tablet') deviceType = 'tablet';
+
+    const deviceInfo = {
+      deviceType,
+      browser: browser.name && browser.version 
+        ? `${browser.name} ${browser.version}` 
+        : browser.name || 'Unknown',
+      os: os.name && os.version 
+        ? `${os.name} ${os.version}` 
+        : os.name || 'Unknown'
+    };
+
+    // Get geolocation (non-blocking - if it fails, continue without geo data)
+    let geoData = { city: null, region: null, country: null };
+    try {
+      const { getLocationFromIP } = require('./utils/geolocation');
+      const ipAddress = req.ip || req.connection.remoteAddress;
+      geoData = await getLocationFromIP(ipAddress);
+    } catch (error) {
+      console.warn('⚠️  Geolocation lookup failed (non-blocking):', error.message);
+      // Continue without geo data
+    }
+
+    // Insert view into BigQuery
+    const viewId = await gcpClient.insertFormView({
+      form_id: formId,
+      session_id: sessionId,
+      timestamp: timestamp ? new Date(timestamp) : new Date(),
+      ip_address: req.ip || req.connection.remoteAddress,
+      user_agent: req.get('User-Agent'),
+      referrer: referrer || null,
+      device_type: deviceInfo.deviceType,
+      browser: deviceInfo.browser,
+      os: deviceInfo.os,
+      country: geoData.country,
+      city: geoData.city,
+      region: geoData.region
+    });
+
+    res.json({
+      success: true,
+      viewId
+    });
+
+  } catch (error) {
+    console.error('❌ View tracking error:', error);
+    // Non-blocking - return success even if tracking fails
+    res.json({
+      success: false,
+      error: 'View tracking failed (non-blocking)',
+      details: error.message
+    });
+  }
+});
+
 // ============== FORM SUBMISSION ENDPOINT ==============
 
 // Submit form data with GCP integration
@@ -1581,7 +1677,7 @@ app.post('/submit-form', async (req, res) => {
       // Store signature images in GCS (skip PDF generation for now)
       await gcpClient.storeSignatureImages(submissionId, formId, formData, false);
 
-      // Update form analytics
+      // Update form analytics (existing - submissions count)
       try {
         const analyticsResult = await gcpClient.updateFormAnalytics(formId, userId || 'anonymous');
         if (analyticsResult.success) {
@@ -1594,6 +1690,16 @@ app.post('/submit-form', async (req, res) => {
         // Don't fail the form submission if analytics fails
       }
     }
+
+    // ============================================================
+    // NEW: Analytics Update (ISOLATED, NON-BLOCKING)
+    // ============================================================
+    // Analytics update happens AFTER submission succeeds
+    // Wrapped in try-catch - failures don't affect submission
+    updateAnalyticsAsync(formId, submissionId, clientMetadata, isHipaa).catch(err => {
+      console.warn(`⚠️ Analytics update failed (non-blocking) for ${formId}:`, err.message);
+      // Don't throw - submission already succeeded
+    });
 
     console.log(`✅ Form submission processed: ${submissionId}`);
 
@@ -1616,6 +1722,43 @@ app.post('/submit-form', async (req, res) => {
     });
   }
 });
+
+// ============================================================
+// ISOLATED Analytics Update Function
+// ============================================================
+async function updateAnalyticsAsync(formId, submissionId, metadata, isHipaa) {
+  try {
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Parse device info from user_agent
+    const UAParser = require('ua-parser-js');
+    const parser = new UAParser(metadata.userAgent || '');
+    const device = parser.getDevice();
+
+    let deviceType = 'desktop';
+    if (device.type === 'mobile') deviceType = 'mobile';
+    else if (device.type === 'tablet') deviceType = 'tablet';
+
+    // Update form_analytics table with device info and completion time
+    await gcpClient.updateFormAnalyticsWithDevice(
+      formId,
+      {
+        deviceType,
+        completionTime: metadata.completionTime || null,
+        // Note: No distinction between HIPAA and regular in analytics
+      }
+    );
+
+    console.log(`✅ Analytics updated for form: ${formId}`);
+  } catch (error) {
+    // Analytics errors are logged but don't propagate
+    // Error is caught by caller's .catch() block - don't throw
+    console.error(`❌ Analytics update error for ${formId}:`, error);
+    // Re-throw to be caught by caller's .catch() - this is intentional
+    throw error;
+  }
+}
 
 // ============== FORM RETRIEVAL ENDPOINT ==============
 
@@ -1757,6 +1900,332 @@ app.get('/analytics/:formId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch analytics',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== ANALYTICS OVERVIEW ENDPOINT ==============
+
+// Get analytics overview for a form (with views, submissions, completion rate)
+app.get('/analytics/forms/:formId/overview', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    // Handle dateRange with or without 'd' suffix (e.g., "30d" or "30")
+    const dateRangeParam = req.query.dateRange || '30';
+    const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30; // Default 30 days
+
+    console.log(`📊 Fetching analytics overview for form: ${formId}, dateRange: ${dateRange}d`);
+
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+
+    // Get form analytics from BigQuery
+    const analytics = await gcpClient.getFormAnalytics(formId);
+
+    if (!analytics) {
+      return res.json({
+        success: true,
+        totalViews: 0,
+        totalSubmissions: 0,
+        completionRate: 0,
+        lastSubmission: null,
+        trends: {
+          views: [],
+          submissions: []
+        },
+        deviceBreakdown: {
+          desktop: { views: 0 },
+          mobile: { views: 0 },
+          tablet: { views: 0 },
+          other: { views: 0 }
+        },
+        geoBreakdown: []
+      });
+    }
+
+    // Get view trends from form_views table
+    // Filter: from N days ago to end of today (exclude future dates)
+    const viewsQuery = `
+      SELECT 
+        DATE(timestamp) as date,
+        COUNT(*) as count
+      FROM \`${gcpClient.projectId}.form_submissions.form_views\`
+      WHERE form_id = @formId
+        AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+        AND timestamp <= CURRENT_TIMESTAMP()
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+
+    const [viewsRows] = await gcpClient.bigquery.query({
+      query: viewsQuery,
+      params: { formId, days: dateRange }
+    });
+
+    // Get device breakdown from form_views table (same date range window)
+    // NOTE: This is views-only for now; submissions remain Firestore-only.
+    let deviceRows = [];
+    try {
+      const deviceQuery = `
+        SELECT 
+          COALESCE(device_type, 'unknown') as device_type,
+          COUNT(*) as views
+        FROM \`${gcpClient.projectId}.form_submissions.form_views\`
+        WHERE form_id = @formId
+          AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+          AND timestamp <= CURRENT_TIMESTAMP()
+        GROUP BY device_type
+      `;
+
+      [deviceRows] = await gcpClient.bigquery.query({
+        query: deviceQuery,
+        params: { formId, days: dateRange }
+      });
+    } catch (error) {
+      console.warn('⚠️ Error querying device breakdown:', error.message);
+      // Continue with empty deviceRows - device breakdown failure shouldn't break the endpoint
+    }
+
+    // Get geographic breakdown from form_views table (same date range window)
+    // Group by city/region combination for better granularity
+    let geoRows = [];
+    try {
+      const geoQuery = `
+        SELECT 
+          COALESCE(city, 'Unknown') as city,
+          COALESCE(region, 'Unknown') as region,
+          COALESCE(country, 'Unknown') as country,
+          COUNT(*) as views
+        FROM \`${gcpClient.projectId}.form_submissions.form_views\`
+        WHERE form_id = @formId
+          AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+          AND timestamp <= CURRENT_TIMESTAMP()
+          AND (city IS NOT NULL OR region IS NOT NULL OR country IS NOT NULL)
+        GROUP BY city, region, country
+        ORDER BY views DESC
+        LIMIT 10
+      `;
+
+      [geoRows] = await gcpClient.bigquery.query({
+        query: geoQuery,
+        params: { formId, days: dateRange }
+      });
+    } catch (error) {
+      console.warn('⚠️ Error querying geographic breakdown:', error.message);
+      // Continue with empty geoRows - geo breakdown failure shouldn't break the endpoint
+    }
+
+    // Get submission trends from Firestore (grouped by date)
+    // Calculate date range: from N days ago to end of today
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - dateRange);
+    dateFrom.setHours(0, 0, 0, 0); // Start of day
+    
+    const dateTo = new Date();
+    dateTo.setHours(23, 59, 59, 999); // End of today (exclude future dates)
+    
+    // Convert to Firestore Timestamp for proper comparison
+    const { Firestore } = require('@google-cloud/firestore');
+    const dateFromTimestamp = Firestore.Timestamp.fromDate(dateFrom);
+    const dateToTimestamp = Firestore.Timestamp.fromDate(dateTo);
+    
+    console.log(`📅 Filtering submissions from: ${dateFrom.toISOString()} to ${dateTo.toISOString()} (${dateRange} days)`);
+    
+    let submissionsByDate = {};
+    try {
+      // Query without orderBy to avoid index requirement, we'll sort in memory
+      // Filter: timestamp >= dateFrom AND timestamp <= dateTo (exclude future dates)
+      const submissionsSnapshot = await gcpClient
+        .collection('submissions')
+        .where('form_id', '==', formId)
+        .where('timestamp', '>=', dateFromTimestamp)
+        .where('timestamp', '<=', dateToTimestamp)
+        .get();
+      
+      console.log(`📊 Found ${submissionsSnapshot.docs.length} submissions within date range`);
+
+      // Group submissions by date
+      submissionsSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.timestamp) {
+          const date = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+          const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+          
+          // Double-check: only include dates within range (defensive check)
+          const dateOnly = new Date(dateKey + 'T00:00:00.000Z');
+          const dateFromOnly = new Date(dateFrom.toISOString().split('T')[0] + 'T00:00:00.000Z');
+          const dateToOnly = new Date(dateTo.toISOString().split('T')[0] + 'T00:00:00.000Z');
+          
+          if (dateOnly >= dateFromOnly && dateOnly <= dateToOnly) {
+            submissionsByDate[dateKey] = (submissionsByDate[dateKey] || 0) + 1;
+          } else {
+            console.log(`⚠️ Skipping submission ${data.submission_id || doc.id} with date ${dateKey} (outside range ${dateFromOnly.toISOString().split('T')[0]} to ${dateToOnly.toISOString().split('T')[0]})`);
+          }
+        }
+      });
+      
+      console.log(`📊 Grouped ${submissionsSnapshot.docs.length} submissions by date:`, Object.keys(submissionsByDate).length, 'dates');
+      console.log(`📅 Date keys:`, Object.keys(submissionsByDate).sort().join(', '));
+    } catch (error) {
+      console.warn('⚠️ Error querying Firestore for submissions:', error.message);
+      // Continue with empty submissionsByDate
+    }
+
+    // Merge views and submissions by date
+    const viewsMap = new Map();
+    viewsRows.forEach(row => {
+      try {
+        // Handle BigQuery DATE() return format - can be string, Date, or {value: Date/string}
+        let dateValue = row.date;
+        
+        // Extract value if wrapped in object
+        if (dateValue && typeof dateValue === 'object' && 'value' in dateValue) {
+          dateValue = dateValue.value;
+        }
+        
+        // Convert to date string (YYYY-MM-DD)
+        let dateKey;
+        if (dateValue instanceof Date) {
+          dateKey = dateValue.toISOString().split('T')[0];
+        } else if (typeof dateValue === 'string') {
+          // BigQuery DATE() returns YYYY-MM-DD string format
+          dateKey = dateValue.split('T')[0].split(' ')[0]; // Handle both ISO and date-only strings
+        } else if (dateValue) {
+          // Fallback: try to parse as date
+          const parsed = new Date(dateValue);
+          if (!isNaN(parsed.getTime())) {
+            dateKey = parsed.toISOString().split('T')[0];
+          } else {
+            console.warn(`⚠️ Could not parse date value:`, dateValue);
+            return; // Skip this row
+          }
+        } else {
+          console.warn(`⚠️ Missing date value in row:`, row);
+          return; // Skip this row
+        }
+        
+        viewsMap.set(dateKey, parseInt(row.count) || 0);
+      } catch (error) {
+        console.warn(`⚠️ Error processing view row:`, error.message, row);
+        // Continue with next row
+      }
+    });
+
+    // Get all unique dates from both views and submissions
+    const allDates = new Set();
+    viewsMap.forEach((_, date) => allDates.add(date));
+    Object.keys(submissionsByDate).forEach(date => allDates.add(date));
+
+    // Sort dates and create trends array
+    const sortedDates = Array.from(allDates).sort();
+    const trends = {
+      views: sortedDates.map(date => ({
+        date,
+        count: viewsMap.get(date) || 0
+      })),
+      submissions: sortedDates.map(date => ({
+        date,
+        count: submissionsByDate[date] || 0
+      }))
+    };
+
+    // Build device breakdown object from deviceRows
+    // We keep this focused on views by device over the selected window.
+    const deviceCounts = {
+      desktop: 0,
+      mobile: 0,
+      tablet: 0,
+      other: 0
+    };
+
+    deviceRows.forEach(row => {
+      const rawType = (row.device_type || '').toString().toLowerCase();
+      const views = parseInt(row.views, 10) || 0;
+
+      if (!rawType) {
+        deviceCounts.other += views;
+        return;
+      }
+
+      if (rawType.includes('desktop')) {
+        deviceCounts.desktop += views;
+      } else if (rawType.includes('mobile')) {
+        deviceCounts.mobile += views;
+      } else if (rawType.includes('tablet') || rawType.includes('ipad')) {
+        deviceCounts.tablet += views;
+      } else {
+        deviceCounts.other += views;
+      }
+    });
+
+    const deviceBreakdown = {
+      desktop: { views: deviceCounts.desktop },
+      mobile: { views: deviceCounts.mobile },
+      tablet: { views: deviceCounts.tablet },
+      other: { views: deviceCounts.other }
+    };
+
+    // Build geographic breakdown array (top locations by views)
+    const geoBreakdown = geoRows.map(row => ({
+      city: row.city !== 'Unknown' ? row.city : null,
+      region: row.region !== 'Unknown' ? row.region : null,
+      country: row.country !== 'Unknown' ? row.country : null,
+      views: parseInt(row.views, 10) || 0
+    })).filter(loc => loc.city || loc.region || loc.country); // Filter out completely unknown locations
+    
+    // Calculate totals from filtered trends data (not from aggregate table)
+    // IMPORTANT: These MUST match the sum of trends arrays
+    const totalViews = trends.views.reduce((sum, v) => sum + (v.count || 0), 0);
+    const totalSubmissions = trends.submissions.reduce((sum, s) => sum + (s.count || 0), 0);
+    
+    // Debug logging
+    console.log(`📊 Trends array details:`);
+    console.log(`   Views:`, JSON.stringify(trends.views, null, 2));
+    console.log(`   Submissions:`, JSON.stringify(trends.submissions, null, 2));
+    console.log(`📊 Trends summary: ${sortedDates.length} dates, ${totalViews} total views, ${totalSubmissions} total submissions`);
+    console.log(`📊 ViewsMap size: ${viewsMap.size}, SubmissionsByDate keys: ${Object.keys(submissionsByDate).length}`);
+
+    // Calculate completion rate from filtered data
+    const completionRate = totalViews > 0 
+      ? Math.min((totalSubmissions / totalViews) * 100, 100) // Cap at 100%
+      : 0;
+
+    // Get last submission date from filtered trends (most recent date with submissions)
+    let lastSubmission = null;
+    const submissionDates = trends.submissions
+      .filter(s => s.count > 0)
+      .map(s => s.date)
+      .sort()
+      .reverse();
+    if (submissionDates.length > 0) {
+      // Use the most recent date that has submissions
+      lastSubmission = submissionDates[0];
+    } else if (analytics.last_submission) {
+      // Fallback to aggregate table if no filtered submissions
+      lastSubmission = analytics.last_submission.value 
+        ? analytics.last_submission.value 
+        : analytics.last_submission;
+    }
+
+    res.json({
+      success: true,
+      totalViews,
+      totalSubmissions,
+      completionRate: Math.round(completionRate * 100) / 100, // Round to 2 decimal places
+      lastSubmission,
+      trends,
+      deviceBreakdown,
+      geoBreakdown
+    });
+
+  } catch (error) {
+    console.error('❌ Analytics overview fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch analytics overview',
       details: error.message,
       timestamp: new Date().toISOString()
     });
