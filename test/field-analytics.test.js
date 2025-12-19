@@ -176,6 +176,25 @@ describe('Field Analytics', () => {
 
       expect(result.totalResponses).toBe(2); // Only 'Male' and 'Female' counted
     });
+
+    test('should handle object values by extracting value property', () => {
+      const field = { id: 'rating', label: 'Rating', type: 'select' };
+      const submissions = createSubmissions('rating', [
+        { value: '5' },
+        { value: '4' },
+        { value: '5' },
+        { label: '3' }, // Test label property
+        '4' // Test string value
+      ]);
+      const totalSubmissions = 5;
+
+      const result = analyzeCategoricalField(field, submissions, totalSubmissions);
+
+      expect(result.totalResponses).toBe(5);
+      expect(result.optionCounts['5']).toBe(2);
+      expect(result.optionCounts['4']).toBe(2);
+      expect(result.optionCounts['3']).toBe(1);
+    });
   });
 
   describe('analyzeRatingField', () => {

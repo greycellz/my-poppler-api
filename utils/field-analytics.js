@@ -130,7 +130,18 @@ function analyzeCategoricalField(field, submissions, totalSubmissions) {
       const values = Array.isArray(value) ? value : [value];
       
       values.forEach(v => {
-        const key = String(v);
+        // Extract actual value from object if needed
+        let actualValue = v;
+        if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+          // Try common object properties: value, label, id, text
+          actualValue = v.value !== undefined ? v.value :
+                       v.label !== undefined ? v.label :
+                       v.id !== undefined ? v.id :
+                       v.text !== undefined ? v.text :
+                       JSON.stringify(v); // Fallback to JSON string if no standard property
+        }
+        
+        const key = String(actualValue);
         optionCounts[key] = (optionCounts[key] || 0) + 1;
       });
     }
