@@ -1942,23 +1942,30 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - dateRange);
     
-    const submissionsSnapshot = await gcpClient
-      .collection('submissions')
-      .where('form_id', '==', formId)
-      .where('timestamp', '>=', dateFrom)
-      .orderBy('timestamp', 'desc')
-      .get();
+    let submissionsByDate = {};
+    try {
+      // Query without orderBy to avoid index requirement, we'll sort in memory
+      const submissionsSnapshot = await gcpClient
+        .collection('submissions')
+        .where('form_id', '==', formId)
+        .where('timestamp', '>=', dateFrom)
+        .get();
 
-    // Group submissions by date
-    const submissionsByDate = {};
-    submissionsSnapshot.docs.forEach(doc => {
-      const data = doc.data();
-      if (data.timestamp) {
-        const date = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
-        const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
-        submissionsByDate[dateKey] = (submissionsByDate[dateKey] || 0) + 1;
-      }
-    });
+      // Group submissions by date
+      submissionsSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.timestamp) {
+          const date = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+          const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+          submissionsByDate[dateKey] = (submissionsByDate[dateKey] || 0) + 1;
+        }
+      });
+      
+      console.log(`📊 Grouped ${submissionsSnapshot.docs.length} submissions by date:`, Object.keys(submissionsByDate).length, 'dates');
+    } catch (error) {
+      console.warn('⚠️ Error querying Firestore for submissions:', error.message);
+      // Continue with empty submissionsByDate
+    }
 
     // Merge views and submissions by date
     const viewsMap = new Map();
@@ -1984,6 +1991,8 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
         count: submissionsByDate[date] || 0
       }))
     };
+    
+    console.log(`📊 Trends summary: ${sortedDates.length} dates, ${trends.views.reduce((sum, v) => sum + v.count, 0)} total views, ${trends.submissions.reduce((sum, s) => sum + s.count, 0)} total submissions`);
 
     const totalViews = analytics.total_views || 0;
     const totalSubmissions = analytics.submissions_count || 0;
