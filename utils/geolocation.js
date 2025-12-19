@@ -30,9 +30,15 @@ async function initializeGeoIP() {
       reader = await geoip.Reader.openBuffer(buffer);
       console.log('✅ GeoIP2 database loaded');
     } else {
+      // Note: Runtime download would require tar extraction which adds complexity
+      // Better to download during Docker build or provide via MAXMIND_DB_PATH
+      
       console.warn('⚠️  GeoLite2-City.mmdb not found. Geolocation will be disabled.');
       console.warn(`   Expected path: ${dbPath}`);
-      console.warn('   Set MAXMIND_DB_PATH environment variable or place GeoLite2-City.mmdb in project root');
+      console.warn('   Options:');
+      console.warn('   1. Set MAXMIND_DB_PATH environment variable');
+      console.warn('   2. Place GeoLite2-City.mmdb in project root');
+      console.warn('   3. Set MAXMIND_LICENSE_KEY for automatic download');
       reader = null;
     }
   } catch (error) {

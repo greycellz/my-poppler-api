@@ -56,12 +56,41 @@ The geolocation utility will automatically:
 - Perform IP lookups for new views
 - Gracefully handle missing database (views stored without geo data)
 
+## Railway Deployment
+
+### Option 1: Download During Docker Build (Recommended)
+
+The Dockerfile automatically downloads the database if `MAXMIND_LICENSE_KEY` is provided as a build argument:
+
+1. **Set build argument in Railway:**
+   - Go to Railway Dashboard → Your Project → Settings → Build
+   - Add build argument: `MAXMIND_LICENSE_KEY=your_license_key_here`
+   - Railway will use this during Docker build to download the database
+
+2. **Alternative: Set as environment variable:**
+   - Railway Dashboard → Variables
+   - Add: `MAXMIND_LICENSE_KEY=your_license_key_here`
+   - Note: Railway may not pass env vars as build args automatically, so build arg is preferred
+
+### Option 2: Manual Upload (If build arg doesn't work)
+
+If Railway doesn't support build args easily:
+
+1. Download the database locally (see Step 2 above)
+2. Upload `GeoLite2-City.mmdb` to Railway's file system via Railway CLI or dashboard
+3. Set `MAXMIND_DB_PATH` environment variable to point to the file location
+
+### Option 3: Store in GCS and Download at Startup
+
+For production, consider storing the database in Google Cloud Storage and downloading it at application startup.
+
 ## Notes
 
 - **Free tier**: MaxMind GeoLite2 is free but requires account registration
 - **Database updates**: MaxMind updates databases regularly. Consider setting up automated downloads.
 - **Non-blocking**: If the database is missing, view tracking still works (just without geo data)
-- **Production**: Consider storing the database in GCS or downloading it during deployment
+- **File size**: The database is ~60MB, so it's not included in git
+- **Railway**: The Dockerfile will download it during build if `MAXMIND_LICENSE_KEY` build arg is set
 
 ## Verification
 
