@@ -1574,6 +1574,17 @@ app.post('/api/forms/:formId/view', async (req, res) => {
         : os.name || 'Unknown'
     };
 
+    // Get geolocation (non-blocking - if it fails, continue without geo data)
+    let geoData = { city: null, region: null, country: null };
+    try {
+      const { getLocationFromIP } = require('./utils/geolocation');
+      const ipAddress = req.ip || req.connection.remoteAddress;
+      geoData = await getLocationFromIP(ipAddress);
+    } catch (error) {
+      console.warn('⚠️  Geolocation lookup failed (non-blocking):', error.message);
+      // Continue without geo data
+    }
+
     // Insert view into BigQuery
     const viewId = await gcpClient.insertFormView({
       form_id: formId,
@@ -1585,7 +1596,9 @@ app.post('/api/forms/:formId/view', async (req, res) => {
       device_type: deviceInfo.deviceType,
       browser: deviceInfo.browser,
       os: deviceInfo.os,
-      country: null // TODO: Add IP geolocation in Phase 2
+      country: geoData.country,
+      city: geoData.city,
+      region: geoData.region
     });
 
     res.json({
@@ -1928,7 +1941,8 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
           mobile: { views: 0 },
           tablet: { views: 0 },
           other: { views: 0 }
-        }
+        },
+        geoBreakdown: []
       });
     }
 
@@ -1973,6 +1987,35 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
     } catch (error) {
       console.warn('⚠️ Error querying device breakdown:', error.message);
       // Continue with empty deviceRows - device breakdown failure shouldn't break the endpoint
+    }
+
+    // Get geographic breakdown from form_views table (same date range window)
+    // Group by city/region combination for better granularity
+    let geoRows = [];
+    try {
+      const geoQuery = `
+        SELECT 
+          COALESCE(city, 'Unknown') as city,
+          COALESCE(region, 'Unknown') as region,
+          COALESCE(country, 'Unknown') as country,
+          COUNT(*) as views
+        FROM \`${gcpClient.projectId}.form_submissions.form_views\`
+        WHERE form_id = @formId
+          AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+          AND timestamp <= CURRENT_TIMESTAMP()
+          AND (city IS NOT NULL OR region IS NOT NULL OR country IS NOT NULL)
+        GROUP BY city, region, country
+        ORDER BY views DESC
+        LIMIT 10
+      `;
+
+      [geoRows] = await gcpClient.bigquery.query({
+        query: geoQuery,
+        params: { formId, days: dateRange }
+      });
+    } catch (error) {
+      console.warn('⚠️ Error querying geographic breakdown:', error.message);
+      // Continue with empty geoRows - geo breakdown failure shouldn't break the endpoint
     }
 
     // Get submission trends from Firestore (grouped by date)
@@ -2124,6 +2167,14 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
       tablet: { views: deviceCounts.tablet },
       other: { views: deviceCounts.other }
     };
+
+    // Build geographic breakdown array (top locations by views)
+    const geoBreakdown = geoRows.map(row => ({
+      city: row.city !== 'Unknown' ? row.city : null,
+      region: row.region !== 'Unknown' ? row.region : null,
+      country: row.country !== 'Unknown' ? row.country : null,
+      views: parseInt(row.views, 10) || 0
+    })).filter(loc => loc.city || loc.region || loc.country); // Filter out completely unknown locations
     
     // Calculate totals from filtered trends data (not from aggregate table)
     // IMPORTANT: These MUST match the sum of trends arrays
@@ -2166,7 +2217,8 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
       completionRate: Math.round(completionRate * 100) / 100, // Round to 2 decimal places
       lastSubmission,
       trends,
-      deviceBreakdown
+      deviceBreakdown,
+      geoBreakdown
     });
 
   } catch (error) {

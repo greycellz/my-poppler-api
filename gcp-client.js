@@ -868,7 +868,9 @@ class GCPClient {
         device_type,
         browser,
         os,
-        country
+        country,
+        city,
+        region
       } = viewData;
 
       const viewId = `view_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -889,6 +891,8 @@ class GCPClient {
       if (browser) params.browser = browser;
       if (os) params.os = os;
       if (country) params.country = country;
+      if (city) params.city = city;
+      if (region) params.region = region;
 
       // Build query with conditional fields
       const fields = ['view_id', 'form_id', 'timestamp', 'session_id'];
@@ -901,6 +905,8 @@ class GCPClient {
       if (browser) { fields.push('browser'); values.push('@browser'); }
       if (os) { fields.push('os'); values.push('@os'); }
       if (country) { fields.push('country'); values.push('@country'); }
+      if (city) { fields.push('city'); values.push('@city'); }
+      if (region) { fields.push('region'); values.push('@region'); }
 
       const query = `
         INSERT INTO \`${this.projectId}.form_submissions.form_views\`
