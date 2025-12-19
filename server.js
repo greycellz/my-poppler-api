@@ -1938,14 +1938,51 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
       params: { formId, days: dateRange }
     });
 
-    // Get submission trends from form_analytics (simplified - would need Firestore query for accurate trends)
-    // For MVP, we'll use the aggregated data
+    // Get submission trends from Firestore (grouped by date)
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - dateRange);
+    
+    const submissionsSnapshot = await gcpClient
+      .collection('submissions')
+      .where('form_id', '==', formId)
+      .where('timestamp', '>=', dateFrom)
+      .orderBy('timestamp', 'desc')
+      .get();
+
+    // Group submissions by date
+    const submissionsByDate = {};
+    submissionsSnapshot.docs.forEach(doc => {
+      const data = doc.data();
+      if (data.timestamp) {
+        const date = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+        const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+        submissionsByDate[dateKey] = (submissionsByDate[dateKey] || 0) + 1;
+      }
+    });
+
+    // Merge views and submissions by date
+    const viewsMap = new Map();
+    viewsRows.forEach(row => {
+      const dateKey = row.date.value.toISOString().split('T')[0];
+      viewsMap.set(dateKey, parseInt(row.count));
+    });
+
+    // Get all unique dates from both views and submissions
+    const allDates = new Set();
+    viewsMap.forEach((_, date) => allDates.add(date));
+    Object.keys(submissionsByDate).forEach(date => allDates.add(date));
+
+    // Sort dates and create trends array
+    const sortedDates = Array.from(allDates).sort();
     const trends = {
-      views: viewsRows.map(row => ({
-        date: row.date.value,
-        count: parseInt(row.count)
+      views: sortedDates.map(date => ({
+        date,
+        count: viewsMap.get(date) || 0
       })),
-      submissions: [] // TODO: Query Firestore for submission trends in Phase 1 enhancement
+      submissions: sortedDates.map(date => ({
+        date,
+        count: submissionsByDate[date] || 0
+      }))
     };
 
     const totalViews = analytics.total_views || 0;
