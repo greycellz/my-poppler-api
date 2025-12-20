@@ -92,9 +92,12 @@ function computeFieldAnalytics(fields, submissions, totalSubmissions) {
           
         case 'text':
         case 'textarea':
-        case 'email':
         case 'tel':
           analytics = analyzeTextField(field, submissions, totalSubmissions);
+          break;
+          
+        case 'email':
+          analytics = analyzeEmailField(field, submissions, totalSubmissions);
           break;
           
         case 'number':
@@ -523,6 +526,124 @@ function analyzeTextField(field, submissions, totalSubmissions) {
 }
 
 /**
+ * Analyze email fields (Individual, Enterprise, Non Profit, Gov, Student - top domains)
+ */
+function analyzeEmailField(field, submissions, totalSubmissions) {
+  const fieldId = field.id;
+  let totalResponses = 0;
+  let individualCount = 0;
+  let enterpriseCount = 0;
+  let nonprofitCount = 0;
+  let govCount = 0;
+  let studentCount = 0;
+  const domainCounts = {};
+  
+  // Common individual email providers (including country-specific variants)
+  const INDIVIDUAL_DOMAINS = [
+    'gmail.com', 'gmail.co.uk', 'gmail.co.in',
+    'yahoo.com', 'yahoo.co.uk', 'yahoo.co.in',
+    'hotmail.com', 'hotmail.co.uk',
+    'outlook.com', 'outlook.co.uk',
+    'icloud.com',
+    'aol.com',
+    'mail.com',
+    'protonmail.com',
+    'yandex.com',
+    'zoho.com',
+    'gmx.com',
+    'live.com',
+    'msn.com',
+    'me.com',
+    'mac.com'
+  ];
+  
+  // Government domain patterns (excluding .edu which is for students)
+  const GOV_DOMAIN_PATTERNS = [
+    /\.gov$/,
+    /\.gov\./,
+    /\.mil$/,
+    /\.mil\./
+  ];
+  
+  submissions.forEach(submission => {
+    const value = submission.submission_data?.[fieldId];
+    
+    if (value !== undefined && value !== null && value !== '') {
+      // Extract value from object if needed
+      let email = value;
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        email = value.value !== undefined ? value.value :
+                value.label !== undefined ? value.label :
+                value.text !== undefined ? value.text :
+                String(value);
+      }
+      
+      email = String(email).trim().toLowerCase();
+      
+      // Extract domain from email (more robust regex - doesn't require @ at end)
+      const emailMatch = email.match(/@([^\s@]+)/);
+      if (emailMatch) {
+        const domain = emailMatch[1].trim();
+        totalResponses++;
+        
+        // Categorize email type (order matters - check .edu before .gov patterns)
+        if (INDIVIDUAL_DOMAINS.includes(domain)) {
+          individualCount++;
+        } else if (domain.endsWith('.org')) {
+          nonprofitCount++;
+        } else if (domain.endsWith('.edu') || domain.includes('.edu.')) {
+          studentCount++;
+        } else if (GOV_DOMAIN_PATTERNS.some(pattern => pattern.test(domain))) {
+          govCount++;
+        } else {
+          enterpriseCount++;
+        }
+        
+        // Count domains (for top domains list)
+        domainCounts[domain] = (domainCounts[domain] || 0) + 1;
+      }
+    }
+  });
+  
+  // Get top 5 domains
+  const topDomains = Object.entries(domainCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([domain, count]) => ({ domain, count }));
+  
+  // Calculate completion rate
+  const completionRate = totalSubmissions > 0 
+    ? (totalResponses / totalSubmissions) * 100 
+    : 0;
+  
+  return {
+    totalResponses,
+    individualCount,
+    enterpriseCount,
+    nonprofitCount,
+    govCount,
+    studentCount,
+    individualPercentage: totalResponses > 0 
+      ? Math.round((individualCount / totalResponses) * 100 * 100) / 100 
+      : 0,
+    enterprisePercentage: totalResponses > 0 
+      ? Math.round((enterpriseCount / totalResponses) * 100 * 100) / 100 
+      : 0,
+    nonprofitPercentage: totalResponses > 0 
+      ? Math.round((nonprofitCount / totalResponses) * 100 * 100) / 100 
+      : 0,
+    govPercentage: totalResponses > 0 
+      ? Math.round((govCount / totalResponses) * 100 * 100) / 100 
+      : 0,
+    studentPercentage: totalResponses > 0 
+      ? Math.round((studentCount / totalResponses) * 100 * 100) / 100 
+      : 0,
+    topDomains,
+    completionRate: Math.round(completionRate * 100) / 100
+  };
+}
+
+/**
  * Analyze numeric fields
  */
 function analyzeNumericField(field, submissions, totalSubmissions) {
@@ -647,6 +768,7 @@ module.exports = {
   analyzeMultiSelectField,
   analyzeBooleanField,
   analyzeTextField,
+  analyzeEmailField,
   analyzeNumericField,
   analyzeDateField,
   normalizeRatingValue
