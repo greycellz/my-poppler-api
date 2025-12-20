@@ -92,9 +92,13 @@ function computeFieldAnalytics(fields, submissions, totalSubmissions) {
           
         case 'text':
         case 'textarea':
-        case 'tel':
           analytics = analyzeTextField(field, submissions, totalSubmissions);
           break;
+          
+        case 'tel':
+          // Skip tel fields for now (suppressed)
+          console.log(`⏭️ Skipping tel field ${field.id} (suppressed)`);
+          continue;
           
         case 'email':
           analytics = analyzeEmailField(field, submissions, totalSubmissions);

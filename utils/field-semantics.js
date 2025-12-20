@@ -13,7 +13,7 @@ function detectSemanticType(field) {
   const labelLower = (label || '').toLowerCase();
   
   // Skip fields that don't need analytics
-  const SKIP_FIELD_TYPES = ['payment', 'calendly', 'image', 'signature', 'file', 'richtext'];
+  const SKIP_FIELD_TYPES = ['payment', 'calendly', 'image', 'signature', 'file', 'richtext', 'tel'];
   if (SKIP_FIELD_TYPES.includes(type)) {
     return null; // Signal to skip this field
   }
@@ -51,7 +51,7 @@ function detectSemanticType(field) {
   }
   
   // Text fields (improved keyword matching)
-  if (type === 'text' || type === 'textarea' || type === 'email' || type === 'tel') {
+  if (type === 'text' || type === 'textarea' || type === 'email') {
     const feedbackKeywords = [
       'feedback', 'comment', 'suggestion', 'review', 'opinion', 
       'thought', 'note', 'remark', 'additional', 'other', 'anything',
@@ -92,7 +92,7 @@ function detectSemanticType(field) {
  */
 function shouldSkipField(field) {
   const { type } = field;
-  const SKIP_FIELD_TYPES = ['payment', 'calendly', 'image', 'signature', 'file', 'richtext'];
+  const SKIP_FIELD_TYPES = ['payment', 'calendly', 'image', 'signature', 'file', 'richtext', 'tel'];
   return SKIP_FIELD_TYPES.includes(type);
 }
 
