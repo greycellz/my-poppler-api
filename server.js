@@ -2292,6 +2292,15 @@ app.get('/analytics/forms/:formId/fields', async (req, res) => {
     
     const totalSubmissionsInRange = submissions.length;
     console.log(`📊 Found ${totalSubmissionsInRange} submissions in date range`);
+    console.log(`📊 Form has ${fields.length} fields:`, fields.map(f => ({ id: f.id, label: f.label, type: f.type })));
+    
+    // Debug: Check submission data structure
+    if (submissions.length > 0) {
+      const sampleSubmission = submissions[0];
+      if (sampleSubmission && sampleSubmission.submission_data) {
+        console.log(`📊 Sample submission field IDs:`, Object.keys(sampleSubmission.submission_data));
+      }
+    }
     
     // Import field analytics computation
     const { computeFieldAnalytics } = require('./utils/field-analytics');
@@ -2336,6 +2345,9 @@ app.get('/analytics/forms/:formId/fields', async (req, res) => {
       const orderB = fieldOrderMap.get(b.fieldId) ?? Infinity;
       return orderA - orderB;
     });
+    
+    console.log(`📊 Field analytics computed: ${fieldAnalytics.length} fields, ${fieldErrors.length} errors`);
+    console.log(`📊 Field IDs in results:`, fieldAnalytics.map(f => f.fieldId));
     
     // Return response with graceful degradation (partial results if some fields failed)
     if (fieldAnalytics.length === 0 && fieldErrors.length > 0) {

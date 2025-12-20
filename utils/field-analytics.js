@@ -31,8 +31,12 @@ function computeFieldAnalytics(fields, submissions, totalSubmissions) {
   // Process each field
   for (const field of fields) {
     try {
+      // Debug: Log field being processed
+      console.log(`🔍 Processing field: ${field.label || 'unnamed'} (id: ${field.id}, type: ${field.type})`);
+      
       // Skip non-analyzable fields
       if (shouldSkipField(field)) {
+        console.log(`⏭️ Skipping field ${field.id} (shouldSkipField returned true)`);
         continue;
       }
       
@@ -46,17 +50,35 @@ function computeFieldAnalytics(fields, submissions, totalSubmissions) {
       const semanticType = detectSemanticType(field);
       if (semanticType === null) {
         // Field should be skipped
+        console.log(`⏭️ Skipping field ${field.id} (semanticType is null)`);
         continue;
       }
       
+      console.log(`✅ Field ${field.id} passed checks, semanticType: ${semanticType}`);
+      
       // Route to appropriate analyzer based on field type
       let analytics;
+      
+      // Check if select/radio field should be treated as rating (has numeric options or "rating" in label)
+      const isRatingLikeSelect = (field.type === 'select' || field.type === 'radio' || field.type === 'radio-with-other' || field.type === 'dropdown') &&
+        (semanticType === 'opinion_score' || 
+         (field.label && field.label.toLowerCase().includes('rating')) ||
+         (field.options && Array.isArray(field.options) && field.options.length > 0 && 
+          field.options.every(opt => {
+            const val = typeof opt === 'string' ? opt : (opt.value || opt.label || opt);
+            return !isNaN(parseFloat(val)) && isFinite(val);
+          })));
+      
       switch (field.type) {
         case 'select':
         case 'radio':
         case 'radio-with-other':
         case 'dropdown':
-          analytics = analyzeCategoricalField(field, submissions, totalSubmissions);
+          if (isRatingLikeSelect) {
+            analytics = analyzeRatingField(field, submissions, totalSubmissions);
+          } else {
+            analytics = analyzeCategoricalField(field, submissions, totalSubmissions);
+          }
           break;
           
         case 'rating':
@@ -177,6 +199,19 @@ function analyzeRatingField(field, submissions, totalSubmissions) {
   const distribution = {};
   let totalResponses = 0;
   
+  // Debug: Log field info
+  console.log(`🔍 Analyzing rating field: ${field.label || 'unnamed'} (id: ${fieldId}, type: ${field.type})`);
+  console.log(`🔍 Total submissions to process: ${submissions.length}`);
+  
+  // Debug: Check if field ID exists in any submission
+  const sampleSubmission = submissions[0];
+  if (sampleSubmission && sampleSubmission.submission_data) {
+    const submissionKeys = Object.keys(sampleSubmission.submission_data);
+    console.log(`🔍 Sample submission has ${submissionKeys.length} fields:`, submissionKeys);
+    console.log(`🔍 Looking for fieldId: ${fieldId}`);
+    console.log(`🔍 Field exists in sample? ${submissionKeys.includes(fieldId)}`);
+  }
+  
   submissions.forEach(submission => {
     const value = submission.submission_data?.[fieldId];
     
@@ -190,9 +225,13 @@ function analyzeRatingField(field, submissions, totalSubmissions) {
         // Update distribution
         const key = Math.round(normalized * 2) / 2; // Round to nearest 0.5
         distribution[key] = (distribution[key] || 0) + 1;
+      } else {
+        console.log(`⚠️ Rating value could not be normalized: ${value} (type: ${typeof value})`);
       }
     }
   });
+  
+  console.log(`🔍 Rating field analysis result: ${totalResponses} responses, distribution:`, distribution);
   
   // Calculate statistics
   let mean = 0;
