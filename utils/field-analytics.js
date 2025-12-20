@@ -657,6 +657,29 @@ function calculateHistogramBins(values, min, max) {
   if (n === 0) return [];
   if (min === max) return [{ range: `${min}`, count: n, start: min, end: max }];
   
+  // For very small datasets (2-3 values), use actual values as bins
+  if (n <= 3) {
+    // Count occurrences of each unique value
+    const valueCounts = {};
+    values.forEach(value => {
+      const rounded = Math.round(value * 100) / 100; // Round to 2 decimals
+      valueCounts[rounded] = (valueCounts[rounded] || 0) + 1;
+    });
+    
+    // Create bins for each unique value
+    return Object.keys(valueCounts)
+      .sort((a, b) => parseFloat(a) - parseFloat(b))
+      .map(value => {
+        const numValue = parseFloat(value);
+        return {
+          range: `${numValue}`,
+          count: valueCounts[value],
+          start: numValue,
+          end: numValue
+        };
+      });
+  }
+  
   // Calculate optimal bin count (adaptive based on data size)
   let binCount;
   if (n <= 5) {
@@ -694,17 +717,21 @@ function calculateHistogramBins(values, min, max) {
   
   // Format bin labels (cleaner format: "0-10" instead of "0.00-10.00")
   return bins.map(bin => {
+    // Round to 2 decimals for start and end
+    const roundedStart = Math.round(bin.start * 100) / 100;
+    const roundedEnd = Math.round(bin.end * 100) / 100;
+    
     // Use cleaner format: show integers if both are integers, otherwise 2 decimals
-    const startIsInt = Number.isInteger(bin.start);
-    const endIsInt = Number.isInteger(bin.end);
-    const formatStart = startIsInt ? bin.start.toString() : bin.start.toFixed(2);
-    const formatEnd = endIsInt ? bin.end.toString() : bin.end.toFixed(2);
+    const startIsInt = Number.isInteger(roundedStart);
+    const endIsInt = Number.isInteger(roundedEnd);
+    const formatStart = startIsInt ? roundedStart.toString() : roundedStart.toFixed(2);
+    const formatEnd = endIsInt ? roundedEnd.toString() : roundedEnd.toFixed(2);
     
     return {
       range: `${formatStart}-${formatEnd}`,
       count: bin.count,
-      start: bin.start,
-      end: bin.end
+      start: roundedStart,
+      end: roundedEnd
     };
   });
 }
