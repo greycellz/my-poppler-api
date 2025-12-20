@@ -59,15 +59,16 @@ function computeFieldAnalytics(fields, submissions, totalSubmissions) {
       // Route to appropriate analyzer based on field type
       let analytics;
       
-      // Check if select/radio field should be treated as rating (has numeric options or "rating" in label)
+      // Check if select/radio field should be treated as rating (ONLY if ALL options are numeric)
+      // This ensures mean/median calculations only happen on numeric selections, not text
       const isRatingLikeSelect = (field.type === 'select' || field.type === 'radio' || field.type === 'radio-with-other' || field.type === 'dropdown') &&
-        (semanticType === 'opinion_score' || 
-         (field.label && field.label.toLowerCase().includes('rating')) ||
-         (field.options && Array.isArray(field.options) && field.options.length > 0 && 
-          field.options.every(opt => {
-            const val = typeof opt === 'string' ? opt : (opt.value || opt.label || opt);
-            return !isNaN(parseFloat(val)) && isFinite(val);
-          })));
+        (field.options && Array.isArray(field.options) && field.options.length > 0 && 
+         field.options.every(opt => {
+           const val = typeof opt === 'string' ? opt : (opt.value || opt.label || opt);
+           const num = parseFloat(val);
+           // Must be a valid finite number (not NaN, not Infinity)
+           return !isNaN(num) && isFinite(num) && val !== '';
+         }));
       
       switch (field.type) {
         case 'select':
