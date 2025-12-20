@@ -216,7 +216,23 @@ function analyzeRatingField(field, submissions, totalSubmissions) {
     const value = submission.submission_data?.[fieldId];
     
     if (value !== undefined && value !== null && value !== '') {
-      const normalized = normalizeRatingValue(value, field);
+      // Extract value from object if needed (similar to categorical field fix)
+      let actualValue = value;
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        actualValue = value.value !== undefined ? value.value :
+                     value.label !== undefined ? value.label :
+                     value.id !== undefined ? value.id :
+                     value.text !== undefined ? value.text :
+                     null;
+        
+        if (actualValue === null) {
+          console.log(`⚠️ Could not extract value from rating object:`, JSON.stringify(value));
+          return; // Skip this submission
+        }
+        console.log(`✅ Extracted rating value from object: ${actualValue} (from: ${JSON.stringify(value)})`);
+      }
+      
+      const normalized = normalizeRatingValue(actualValue, field);
       
       if (normalized !== null && !isNaN(normalized)) {
         totalResponses++;
@@ -226,7 +242,7 @@ function analyzeRatingField(field, submissions, totalSubmissions) {
         const key = Math.round(normalized * 2) / 2; // Round to nearest 0.5
         distribution[key] = (distribution[key] || 0) + 1;
       } else {
-        console.log(`⚠️ Rating value could not be normalized: ${value} (type: ${typeof value})`);
+        console.log(`⚠️ Rating value could not be normalized: ${actualValue} (original: ${JSON.stringify(value)}, type: ${typeof actualValue})`);
       }
     }
   });
@@ -292,6 +308,7 @@ function analyzeRatingField(field, submissions, totalSubmissions) {
 
 /**
  * Normalize rating value (handle emojis, half-ratings)
+ * Note: Object extraction is done in analyzeRatingField before calling this
  */
 function normalizeRatingValue(value, field) {
   // Handle emoji ratings
@@ -310,7 +327,10 @@ function normalizeRatingValue(value, field) {
   
   // For stars/scale, ensure numeric
   const num = parseFloat(value);
-  if (isNaN(num)) return null;
+  if (isNaN(num)) {
+    console.log(`⚠️ Rating value is not numeric: ${value} (type: ${typeof value})`);
+    return null;
+  }
   
   // Handle half-ratings if allowed
   if (field.ratingAllowHalf) {
