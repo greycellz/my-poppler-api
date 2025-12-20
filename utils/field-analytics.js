@@ -644,6 +644,68 @@ function analyzeEmailField(field, submissions, totalSubmissions) {
 }
 
 /**
+ * Calculate histogram bins for numeric data
+ */
+function calculateHistogramBins(values, min, max) {
+  const n = values.length;
+  
+  // Edge cases
+  if (n === 0) return [];
+  if (min === max) return [{ range: `${min}`, count: n, start: min, end: max }];
+  
+  // Calculate optimal bin count (adaptive based on data size)
+  let binCount;
+  if (n <= 5) {
+    binCount = Math.max(3, n); // 3-5 bins for small datasets
+  } else if (n <= 10) {
+    binCount = Math.max(3, Math.ceil(1 + Math.log2(n))); // 3-5 bins
+  } else {
+    binCount = Math.max(5, Math.min(15, Math.ceil(1 + Math.log2(n)))); // 5-15 bins
+  }
+  
+  // Calculate bin width
+  const range = max - min;
+  const binWidth = range / binCount;
+  
+  // Create bins
+  const bins = Array(binCount).fill(0).map((_, i) => ({
+    start: min + (i * binWidth),
+    end: min + ((i + 1) * binWidth),
+    count: 0
+  }));
+  
+  // Assign values to bins (handle max value explicitly)
+  values.forEach(value => {
+    // Special case: max value goes to last bin
+    if (value === max) {
+      bins[binCount - 1].count++;
+    } else {
+      const binIndex = Math.min(
+        Math.floor((value - min) / binWidth),
+        binCount - 1
+      );
+      bins[binIndex].count++;
+    }
+  });
+  
+  // Format bin labels (cleaner format: "0-10" instead of "0.00-10.00")
+  return bins.map(bin => {
+    // Use cleaner format: show integers if both are integers, otherwise 2 decimals
+    const startIsInt = Number.isInteger(bin.start);
+    const endIsInt = Number.isInteger(bin.end);
+    const formatStart = startIsInt ? bin.start.toString() : bin.start.toFixed(2);
+    const formatEnd = endIsInt ? bin.end.toString() : bin.end.toFixed(2);
+    
+    return {
+      range: `${formatStart}-${formatEnd}`,
+      count: bin.count,
+      start: bin.start,
+      end: bin.end
+    };
+  });
+}
+
+/**
  * Analyze numeric fields
  */
 function analyzeNumericField(field, submissions, totalSubmissions) {
@@ -655,10 +717,26 @@ function analyzeNumericField(field, submissions, totalSubmissions) {
     const value = submission.submission_data?.[fieldId];
     
     if (value !== undefined && value !== null && value !== '') {
-      const num = parseFloat(value);
+      // Extract value from object if needed (similar to rating fields)
+      let actualValue = value;
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        actualValue = value.value !== undefined ? value.value :
+                     value.label !== undefined ? value.label :
+                     value.text !== undefined ? value.text :
+                     value.id !== undefined ? value.id :
+                     null;
+        if (actualValue === null) {
+          console.log(`⚠️ Could not extract numeric value from object:`, JSON.stringify(value));
+          return; // Skip this submission
+        }
+      }
+      
+      const num = parseFloat(actualValue);
       if (!isNaN(num)) {
         totalResponses++;
         values.push(num);
+      } else {
+        console.log(`⚠️ Numeric value could not be parsed: ${actualValue} (type: ${typeof actualValue})`);
       }
     }
   });
@@ -669,6 +747,7 @@ function analyzeNumericField(field, submissions, totalSubmissions) {
   let mean = 0;
   let median = 0;
   const percentiles = { p25: 0, p50: 0, p75: 0 };
+  let histogram = [];
   
   if (values.length > 0) {
     const sorted = [...values].sort((a, b) => a - b);
@@ -688,6 +767,9 @@ function analyzeNumericField(field, submissions, totalSubmissions) {
     percentiles.p25 = sorted[Math.floor(sorted.length * 0.25)];
     percentiles.p50 = median;
     percentiles.p75 = sorted[Math.floor(sorted.length * 0.75)];
+    
+    // Calculate histogram bins
+    histogram = calculateHistogramBins(values, min, max);
   }
   
   // Calculate completion rate
@@ -706,6 +788,7 @@ function analyzeNumericField(field, submissions, totalSubmissions) {
       p50: Math.round(percentiles.p50 * 100) / 100,
       p75: Math.round(percentiles.p75 * 100) / 100
     },
+    histogram,
     completionRate: Math.round(completionRate * 100) / 100
   };
 }
