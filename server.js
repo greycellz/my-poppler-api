@@ -2392,6 +2392,114 @@ app.get('/analytics/forms/:formId/fields', async (req, res) => {
   }
 });
 
+// ============== ANALYTICS PREFERENCES ENDPOINT ==============
+
+// Helper function to extract userId from JWT token
+function getUserIdFromRequest(req) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return null;
+    }
+    
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-oauth');
+    // Check both userId and id fields (verify actual JWT structure in codebase)
+    return decoded.userId || decoded.id || null;
+  } catch (error) {
+    // Token invalid or expired
+    return null;
+  }
+}
+
+// Get user's analytics preferences for a form
+app.get('/analytics/forms/:formId/preferences', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    // Require authentication - analytics page is authenticated-only
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const docId = `${userId}_${formId}`;
+    const doc = await gcpClient.collection('analytics_preferences').doc(docId).get();
+    
+    if (!doc.exists) {
+      // Return empty preferences if document doesn't exist yet
+      return res.json({ starredFields: [], expandedFields: [] });
+    }
+    
+    // 🔍 INSPECT ACTUAL DOCUMENT DATA STRUCTURE
+    const data = doc.data();
+    console.log('🔍 ACTUAL DOCUMENT DATA:', JSON.stringify(data, null, 2));
+    console.log('🔍 AVAILABLE KEYS:', Object.keys(data || {}));
+    
+    // Handle both camelCase and snake_case field names
+    const starredFields = data.starredFields || data.starred_fields || [];
+    const expandedFields = data.expandedFields || data.expanded_fields || [];
+    
+    res.json({
+      starredFields: Array.isArray(starredFields) ? starredFields : [],
+      expandedFields: Array.isArray(expandedFields) ? expandedFields : []
+    });
+  } catch (error) {
+    console.error('Error fetching analytics preferences:', error);
+    res.status(500).json({ error: 'Failed to fetch preferences' });
+  }
+});
+
+// Update user's analytics preferences for a form
+app.post('/analytics/forms/:formId/preferences', async (req, res) => {
+  try {
+    // 🔍 INSPECT ACTUAL REQUEST BODY STRUCTURE
+    console.log('🔍 ACTUAL REQUEST BODY:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 AVAILABLE KEYS:', Object.keys(req.body || {}));
+    
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    // If no userId, return 401 (can't save without auth)
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    // Validate and extract fields from request body
+    // Check actual field names (starredFields vs starred_fields, etc.)
+    const starredFields = req.body.starredFields || req.body.starred_fields;
+    const expandedFields = req.body.expandedFields || req.body.expanded_fields;
+    
+    // Validate field types if provided
+    if (starredFields !== undefined && !Array.isArray(starredFields)) {
+      return res.status(400).json({ error: 'starredFields must be an array' });
+    }
+    if (expandedFields !== undefined && !Array.isArray(expandedFields)) {
+      return res.status(400).json({ error: 'expandedFields must be an array' });
+    }
+    
+    const docId = `${userId}_${formId}`;
+    const updateData = {
+      userId,
+      formId,
+      updatedAt: new Date().toISOString()
+    };
+    
+    if (starredFields !== undefined) updateData.starredFields = starredFields;
+    if (expandedFields !== undefined) updateData.expandedFields = expandedFields;
+    
+    await gcpClient.collection('analytics_preferences')
+      .doc(docId)
+      .set(updateData, { merge: true });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error saving analytics preferences:', error);
+    res.status(500).json({ error: 'Failed to save preferences' });
+  }
+});
+
 // ============== USER ANALYTICS ENDPOINT ==============
 
 // Get all analytics for a specific user
