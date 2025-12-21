@@ -650,6 +650,8 @@ function analyzeEmailField(field, submissions, totalSubmissions) {
 
 /**
  * Calculate histogram bins for numeric data
+ * For datasets up to 100 data points, shows actual values on X-axis (no binning)
+ * For larger datasets (>100 points), uses binning to avoid overwhelming the chart
  */
 function calculateHistogramBins(values, min, max) {
   const n = values.length;
@@ -658,15 +660,19 @@ function calculateHistogramBins(values, min, max) {
   if (n === 0) return [];
   if (min === max) return [{ range: `${min}`, count: n, start: min, end: max }];
   
-  // For very small datasets (2-3 values), use actual values as bins
-  if (n <= 3) {
-    // Count occurrences of each unique value
-    const valueCounts = {};
-    values.forEach(value => {
-      const rounded = Math.round(value * 100) / 100; // Round to 2 decimals
-      valueCounts[rounded] = (valueCounts[rounded] || 0) + 1;
-    });
-    
+  // Count unique values (rounded to 2 decimals to handle floating point precision)
+  const valueCounts = {};
+  values.forEach(value => {
+    const rounded = Math.round(value * 100) / 100; // Round to 2 decimals
+    valueCounts[rounded] = (valueCounts[rounded] || 0) + 1;
+  });
+  
+  const uniqueCount = Object.keys(valueCounts).length;
+  
+  // For datasets up to 100 data points, show actual values instead of binning
+  // This prevents confusion - regular users expect to see actual values, not aggregated bins
+  // Threshold: if total data points <= 100, show actual values (no binning)
+  if (n <= 100) {
     // Create bins for each unique value
     return Object.keys(valueCounts)
       .sort((a, b) => parseFloat(a) - parseFloat(b))
