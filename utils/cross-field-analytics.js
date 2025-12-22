@@ -545,15 +545,18 @@ function detectDefaultComparisons(fields, submissions) {
     });
   }
 
-  // Priority 2: Category vs Number (e.g., Gender vs Rating) - Use most popular fields
+  // Priority 2: Category vs Number (e.g., Gender vs Rating) - Create multiple comparisons
   const categoryFields = popularFields.filter(f => getFieldType(f) === 'category');
   console.log(`🔍 Category fields found: ${categoryFields.length}`, categoryFields.map(f => f.label));
   if (categoryFields.length > 0 && numberFields.length > 0) {
-    comparisons.push({
-      field1: categoryFields[0],
-      field2: numberFields[0],
-      comparisonId: `default_${categoryFields[0].id}_${numberFields[0].id}`,
-      question: `Which ${categoryFields[0].label || 'groups'} have higher ${numberFields[0].label || 'ratings'}?`
+    // Create comparison for each category field with the most popular number field
+    categoryFields.slice(0, 3).forEach(categoryField => {
+      comparisons.push({
+        field1: categoryField,
+        field2: numberFields[0],
+        comparisonId: `default_${categoryField.id}_${numberFields[0].id}`,
+        question: `Which ${categoryField.label || 'groups'} have higher ${numberFields[0].label || 'ratings'}?`
+      });
     });
   }
 
