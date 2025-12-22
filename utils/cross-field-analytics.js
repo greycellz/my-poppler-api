@@ -499,10 +499,16 @@ function detectDefaultComparisons(fields, submissions) {
   const analyzableFields = fields.filter(field => {
     if (!field.id) return false;
     const type = getFieldType(field);
-    return type !== null;
+    return type !== null && type !== undefined;
   });
 
+  console.log(`🔍 detectDefaultComparisons: ${fields.length} total fields, ${analyzableFields.length} analyzable fields`);
+  if (analyzableFields.length > 0) {
+    console.log(`🔍 Analyzable fields:`, analyzableFields.map(f => ({ id: f.id, label: f.label, type: f.type, detectedType: getFieldType(f) })));
+  }
+
   if (analyzableFields.length < 2) {
+    console.log(`⚠️ Not enough analyzable fields (need 2, have ${analyzableFields.length})`);
     return [];
   }
 
@@ -523,6 +529,7 @@ function detectDefaultComparisons(fields, submissions) {
 
   // Priority 1: Number vs Number (e.g., Age vs Rating) - Use most popular fields
   const numberFields = popularFields.filter(f => getFieldType(f) === 'number');
+  console.log(`🔍 Number fields found: ${numberFields.length}`, numberFields.map(f => f.label));
   if (numberFields.length >= 2) {
     // Take first two number fields (already sorted by popularity)
     comparisons.push({
@@ -535,6 +542,7 @@ function detectDefaultComparisons(fields, submissions) {
 
   // Priority 2: Category vs Number (e.g., Gender vs Rating) - Use most popular fields
   const categoryFields = popularFields.filter(f => getFieldType(f) === 'category');
+  console.log(`🔍 Category fields found: ${categoryFields.length}`, categoryFields.map(f => f.label));
   if (categoryFields.length > 0 && numberFields.length > 0) {
     comparisons.push({
       field1: categoryFields[0],
@@ -546,6 +554,7 @@ function detectDefaultComparisons(fields, submissions) {
 
   // Priority 3: Date vs Number (e.g., Rating over Time) - Use most popular fields
   const dateFields = popularFields.filter(f => getFieldType(f) === 'date');
+  console.log(`🔍 Date fields found: ${dateFields.length}`, dateFields.map(f => f.label));
   if (dateFields.length > 0 && numberFields.length > 0) {
     comparisons.push({
       field1: dateFields[0],
@@ -555,6 +564,7 @@ function detectDefaultComparisons(fields, submissions) {
     });
   }
 
+  console.log(`✅ detectDefaultComparisons: Found ${comparisons.length} comparisons`);
   // Limit to 5 total
   return comparisons.slice(0, 5);
 }
