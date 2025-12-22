@@ -2500,6 +2500,287 @@ app.post('/analytics/forms/:formId/preferences', async (req, res) => {
   }
 });
 
+// ============== CROSS-FIELD ANALYTICS ENDPOINTS ==============
+
+// Get default cross-field comparisons for a form
+app.get('/analytics/forms/:formId/cross-field/defaults', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const dateRangeParam = req.query.dateRange || '30';
+    const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30;
+
+    console.log(`📊 Fetching default cross-field comparisons for form: ${formId}, dateRange: ${dateRange}d`);
+
+    // Fetch form structure
+    const formDoc = await gcpClient.getFormStructure(formId, true);
+    if (!formDoc) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found',
+        formId
+      });
+    }
+
+    const fields = formDoc.structure?.fields || [];
+    if (fields.length < 2) {
+      return res.json({
+        success: true,
+        comparisons: [],
+        message: 'Form needs at least 2 fields for cross-field analysis'
+      });
+    }
+
+    // Calculate date range
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setUTCDate(startDate.getUTCDate() - dateRange);
+    startDate.setUTCHours(0, 0, 0, 0);
+    endDate.setUTCHours(23, 59, 59, 999);
+
+    // Get submissions
+    const submissions = await gcpClient.getFormSubmissions(formId, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+
+    // Auto-detect default comparisons
+    const { detectDefaultComparisons } = require('./utils/cross-field-analytics');
+    const defaultComparisons = detectDefaultComparisons(fields, submissions);
+
+    // Calculate analysis for each comparison with timeout protection
+    const { calculateCrossFieldAnalysis } = require('./utils/cross-field-analytics');
+    const TIMEOUT_MS = 10000; // 10 second timeout
+    
+    const comparisonsPromises = defaultComparisons.map(async comp => {
+      const analysisPromise = new Promise((resolve) => {
+        const analysis = calculateCrossFieldAnalysis(submissions, comp.field1, comp.field2);
+        resolve(analysis);
+      });
+      
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Analysis timeout')), TIMEOUT_MS)
+      );
+      
+      try {
+        const analysis = await Promise.race([analysisPromise, timeoutPromise]);
+        return {
+          comparisonId: comp.comparisonId,
+          field1: {
+            id: comp.field1.id,
+            label: comp.field1.label
+          },
+          field2: {
+            id: comp.field2.id,
+            label: comp.field2.label
+          },
+          question: comp.question,
+          answer: analysis.answer,
+          bigNumber: analysis.bigNumber,
+          strength: analysis.strength,
+          chartType: analysis.chartType,
+          chartData: analysis.chartData
+        };
+      } catch (error) {
+        // Return error comparison if timeout
+        return {
+          comparisonId: comp.comparisonId,
+          field1: { id: comp.field1.id, label: comp.field1.label },
+          field2: { id: comp.field2.id, label: comp.field2.label },
+          question: comp.question,
+          answer: 'Analysis took too long - please try a shorter date range',
+          bigNumber: null,
+          strength: 'no clear pattern',
+          chartType: 'bars',
+          chartData: []
+        };
+      }
+    });
+    
+    const comparisonsWithData = await Promise.all(comparisonsPromises);
+
+    res.json({
+      success: true,
+      comparisons: comparisonsWithData,
+      dateRange: {
+        start: startDate.toISOString(),
+        end: endDate.toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching default comparisons:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch default comparisons',
+      details: error.message
+    });
+  }
+});
+
+// Analyze two specific fields
+app.get('/analytics/forms/:formId/cross-field/analyze', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const { fieldId1, fieldId2 } = req.query;
+    const dateRangeParam = req.query.dateRange || '30';
+    const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30;
+
+    if (!fieldId1 || !fieldId2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both fieldId1 and fieldId2 are required'
+      });
+    }
+
+    // Fetch form structure
+    const formDoc = await gcpClient.getFormStructure(formId, true);
+    if (!formDoc) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found'
+      });
+    }
+
+    const fields = formDoc.structure?.fields || [];
+    const field1 = fields.find(f => f.id === fieldId1);
+    const field2 = fields.find(f => f.id === fieldId2);
+
+    if (!field1 || !field2) {
+      return res.status(404).json({
+        success: false,
+        error: 'One or both fields not found'
+      });
+    }
+
+    // Calculate date range
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setUTCDate(startDate.getUTCDate() - dateRange);
+    startDate.setUTCHours(0, 0, 0, 0);
+    endDate.setUTCHours(23, 59, 59, 999);
+
+    // Get submissions
+    const submissions = await gcpClient.getFormSubmissions(formId, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+
+    // Calculate analysis
+    const { calculateCrossFieldAnalysis } = require('./utils/cross-field-analytics');
+    const analysis = calculateCrossFieldAnalysis(submissions, field1, field2);
+
+    res.json({
+      success: true,
+      field1: {
+        id: field1.id,
+        label: field1.label
+      },
+      field2: {
+        id: field2.id,
+        label: field2.label
+      },
+      question: analysis.question,
+      answer: analysis.answer,
+      bigNumber: analysis.bigNumber,
+      strength: analysis.strength,
+      chartType: analysis.chartType,
+      chartData: analysis.chartData,
+      dateRange: {
+        start: startDate.toISOString(),
+        end: endDate.toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error analyzing cross-field:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to analyze fields',
+      details: error.message
+    });
+  }
+});
+
+// Get user's favorited comparisons
+app.get('/analytics/forms/:formId/cross-field/favorites', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const docId = `${userId}_${formId}`;
+    const doc = await gcpClient.collection('analytics_preferences').doc(docId).get();
+
+    if (!doc.exists) {
+      return res.json({ favoritedComparisons: [] });
+    }
+
+    const data = doc.data();
+    res.json({
+      favoritedComparisons: data.favoritedComparisons || []
+    });
+  } catch (error) {
+    console.error('Error fetching comparison favorites:', error);
+    res.status(500).json({ error: 'Failed to fetch favorites' });
+  }
+});
+
+// Update user's favorited comparisons
+app.post('/analytics/forms/:formId/cross-field/favorites', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    const { comparisonId, isFavorite } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (!comparisonId || typeof isFavorite !== 'boolean') {
+      return res.status(400).json({
+        error: 'comparisonId and isFavorite (boolean) are required'
+      });
+    }
+
+    const docId = `${userId}_${formId}`;
+    const doc = await gcpClient.collection('analytics_preferences').doc(docId).get();
+
+    let favoritedComparisons = [];
+    if (doc.exists) {
+      const data = doc.data();
+      favoritedComparisons = data.favoritedComparisons || [];
+    }
+
+    // Add or remove comparison ID
+    if (isFavorite) {
+      if (!favoritedComparisons.includes(comparisonId)) {
+        favoritedComparisons.push(comparisonId);
+      }
+    } else {
+      favoritedComparisons = favoritedComparisons.filter(id => id !== comparisonId);
+    }
+
+    // Update document
+    await gcpClient.collection('analytics_preferences')
+      .doc(docId)
+      .set({
+        userId,
+        formId,
+        favoritedComparisons,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+    res.json({
+      success: true,
+      favoritedComparisons
+    });
+  } catch (error) {
+    console.error('Error updating comparison favorites:', error);
+    res.status(500).json({ error: 'Failed to update favorites' });
+  }
+});
+
 // ============== USER ANALYTICS ENDPOINT ==============
 
 // Get all analytics for a specific user
