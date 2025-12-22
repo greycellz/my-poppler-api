@@ -90,7 +90,12 @@ function calculateCrossFieldAnalysis(submissions, field1, field2) {
  * Get simplified field type for cross-field analysis
  */
 function getFieldType(field) {
-  const type = field.type || '';
+  if (!field || !field.type) {
+    console.warn(`⚠️ getFieldType: Field missing type`, field);
+    return 'category'; // Default fallback
+  }
+  
+  const type = field.type;
   
   // Number types
   if (['number', 'rating'].includes(type)) {
