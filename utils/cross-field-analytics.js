@@ -572,9 +572,30 @@ function detectDefaultComparisons(fields, submissions) {
     });
   }
 
-  console.log(`✅ detectDefaultComparisons: Found ${comparisons.length} comparisons`);
+  // Priority 4: Category vs Category (e.g., Movie Length vs Gender) - if we have multiple categories
+  if (categoryFields.length >= 2) {
+    // Create comparison between top 2 category fields
+    comparisons.push({
+      field1: categoryFields[0],
+      field2: categoryFields[1],
+      comparisonId: `default_${categoryFields[0].id}_${categoryFields[1].id}`,
+      question: `How do ${categoryFields[0].label || 'groups'} differ in ${categoryFields[1].label || 'preferences'}?`
+    });
+  }
+
+  // Remove duplicates (in case same comparison was added multiple ways)
+  const uniqueComparisons = [];
+  const seenIds = new Set();
+  for (const comp of comparisons) {
+    if (!seenIds.has(comp.comparisonId)) {
+      seenIds.add(comp.comparisonId);
+      uniqueComparisons.push(comp);
+    }
+  }
+
+  console.log(`✅ detectDefaultComparisons: Found ${uniqueComparisons.length} unique comparisons`);
   // Limit to 5 total
-  return comparisons.slice(0, 5);
+  return uniqueComparisons.slice(0, 5);
 }
 
 module.exports = {
