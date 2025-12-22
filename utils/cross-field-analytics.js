@@ -37,10 +37,10 @@ function calculateCrossFieldAnalysis(submissions, field1, field2) {
     }
   }
 
-  if (pairs.length < 10) {
+  if (pairs.length < 2) {
     return {
       question: `How do ${field1.label || 'Field 1'} and ${field2.label || 'Field 2'} relate?`,
-      answer: 'Not enough data to analyze (need at least 10 responses)',
+      answer: 'Not enough data to analyze',
       bigNumber: null,
       chartData: [],
       chartType: 'bars',
@@ -139,7 +139,7 @@ function analyzeNumberNumber(pairs, field1, field2) {
     }))
     .filter(p => !isNaN(p.x) && !isNaN(p.y));
 
-  if (numericPairs.length < 5) {
+  if (numericPairs.length < 2) {
     return {
       question: `Do different ${field1.label || 'values'} give different ${field2.label || 'ratings'}?`,
       answer: 'Not enough numeric data to analyze',
@@ -518,8 +518,8 @@ function detectDefaultComparisons(fields, submissions) {
 
   fieldsWithResponseCount.sort((a, b) => b.responseCount - a.responseCount);
   
-  // Filter to fields with minimum 10 responses
-  const popularFields = fieldsWithResponseCount.filter(f => f.responseCount >= 10);
+  // Use all fields sorted by popularity (no minimum threshold)
+  const popularFields = fieldsWithResponseCount;
 
   // Priority 1: Number vs Number (e.g., Age vs Rating) - Use most popular fields
   const numberFields = popularFields.filter(f => getFieldType(f) === 'number');
