@@ -1156,13 +1156,44 @@ class GCPClient {
   /**
    * Get form submissions from Firestore
    */
-  async getFormSubmissions(formId) {
+  /**
+   * Get form submissions with optional date filtering
+   * @param {string} formId - Form ID
+   * @param {Object} options - Optional parameters
+   * @param {string} options.startDate - ISO date string for start date (inclusive)
+   * @param {string} options.endDate - ISO date string for end date (inclusive)
+   * @returns {Array} Array of submission objects
+   */
+  async getFormSubmissions(formId, options = {}) {
     try {
-      const submissionsSnapshot = await this
+      const { startDate, endDate } = options;
+      
+      let query = this
         .collection('submissions')
-        .where('form_id', '==', formId)
-        .orderBy('timestamp', 'desc')
-        .get();
+        .where('form_id', '==', formId);
+      
+      // Add date filtering if provided
+      if (startDate || endDate) {
+        const { Firestore } = require('@google-cloud/firestore');
+        
+        if (startDate) {
+          const startTimestamp = Firestore.Timestamp.fromDate(new Date(startDate));
+          query = query.where('timestamp', '>=', startTimestamp);
+        }
+        
+        if (endDate) {
+          // For end date, we want to include the entire day, so set to end of day
+          const endDateObj = new Date(endDate);
+          endDateObj.setUTCHours(23, 59, 59, 999);
+          const endTimestamp = Firestore.Timestamp.fromDate(endDateObj);
+          query = query.where('timestamp', '<=', endTimestamp);
+        }
+      }
+      
+      // Order by timestamp (descending)
+      query = query.orderBy('timestamp', 'desc');
+      
+      const submissionsSnapshot = await query.get();
 
       if (submissionsSnapshot.empty) {
         console.log(`📝 No submissions found for form: ${formId}`);

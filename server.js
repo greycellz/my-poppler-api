@@ -2232,6 +2232,274 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
   }
 });
 
+// ============== FIELD ANALYTICS ENDPOINT ==============
+
+// Get field-level analytics for a form
+app.get('/analytics/forms/:formId/fields', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    
+    // Handle dateRange with or without 'd' suffix (e.g., "30d" or "30")
+    const dateRangeParam = req.query.dateRange || '30';
+    const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30; // Default 30 days
+    
+    console.log(`📊 Fetching field analytics for form: ${formId}, dateRange: ${dateRange}d`);
+    
+    // Initialize GCP client
+    const GCPClient = require('./gcp-client');
+    const gcpClient = new GCPClient();
+    
+    // Fetch form structure to get field definitions
+    const formDoc = await gcpClient.getFormStructure(formId, true);
+    if (!formDoc) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found',
+        formId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const fields = formDoc.structure?.fields || [];
+    
+    // Calculate date range using UTC for consistency with Firestore timestamps
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setUTCDate(startDate.getUTCDate() - dateRange);
+    startDate.setUTCHours(0, 0, 0, 0); // Start of day (UTC)
+    endDate.setUTCHours(23, 59, 59, 999); // End of today (UTC)
+    
+    if (fields.length === 0) {
+      return res.json({
+        success: true,
+        formId,
+        dateRange: {
+          start: startDate.toISOString(),
+          end: endDate.toISOString()
+        },
+        fields: [],
+        message: 'Form has no fields'
+      });
+    }
+    
+    console.log(`📅 Field analytics date range: ${startDate.toISOString()} to ${endDate.toISOString()}`);
+    
+    // Get submissions with date filtering
+    const submissions = await gcpClient.getFormSubmissions(formId, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+    
+    const totalSubmissionsInRange = submissions.length;
+    console.log(`📊 Found ${totalSubmissionsInRange} submissions in date range`);
+    console.log(`📊 Form has ${fields.length} fields:`, fields.map(f => ({ id: f.id, label: f.label, type: f.type })));
+    
+    // Debug: Check submission data structure
+    if (submissions.length > 0) {
+      const sampleSubmission = submissions[0];
+      if (sampleSubmission && sampleSubmission.submission_data) {
+        console.log(`📊 Sample submission field IDs:`, Object.keys(sampleSubmission.submission_data));
+      }
+    }
+    
+    // Import field analytics computation
+    const { computeFieldAnalytics } = require('./utils/field-analytics');
+    
+    // Timeout protection for large datasets (10 seconds)
+    const TIMEOUT_MS = 10000;
+    const analyticsPromise = computeFieldAnalytics(fields, submissions, totalSubmissionsInRange);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Analytics computation timeout')), TIMEOUT_MS)
+    );
+    
+    let fieldAnalytics;
+    let fieldErrors = [];
+    try {
+      const result = await Promise.race([analyticsPromise, timeoutPromise]);
+      fieldAnalytics = result.fields || [];
+      fieldErrors = result.errors || [];
+    } catch (error) {
+      if (error.message.includes('timeout')) {
+        console.warn(`⚠️ Field analytics timeout for form ${formId}`);
+        return res.status(500).json({
+          success: false,
+          error: 'Analytics computation timeout',
+          message: 'Please try a shorter date range',
+          formId,
+          timestamp: new Date().toISOString()
+        });
+      }
+      throw error;
+    }
+    
+    // Order fields to match form structure order
+    const fieldOrderMap = new Map();
+    fields.forEach((field, index) => {
+      if (field.id) {
+        fieldOrderMap.set(field.id, index);
+      }
+    });
+    
+    fieldAnalytics.sort((a, b) => {
+      const orderA = fieldOrderMap.get(a.fieldId) ?? Infinity;
+      const orderB = fieldOrderMap.get(b.fieldId) ?? Infinity;
+      return orderA - orderB;
+    });
+    
+    console.log(`📊 Field analytics computed: ${fieldAnalytics.length} fields, ${fieldErrors.length} errors`);
+    console.log(`📊 Field IDs in results:`, fieldAnalytics.map(f => f.fieldId));
+    
+    // Return response with graceful degradation (partial results if some fields failed)
+    if (fieldAnalytics.length === 0 && fieldErrors.length > 0) {
+      // All fields failed
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to compute field analytics',
+        errors: fieldErrors,
+        formId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Partial or complete success
+    const response = {
+      success: true,
+      formId,
+      dateRange: {
+        start: startDate.toISOString(),
+        end: endDate.toISOString()
+      },
+      fields: fieldAnalytics
+    };
+    
+    // Include errors if any (for graceful degradation)
+    if (fieldErrors.length > 0) {
+      response.errors = fieldErrors;
+    }
+    
+    console.log(`✅ Field analytics computed: ${fieldAnalytics.length} fields, ${fieldErrors.length} errors`);
+    res.json(response);
+    
+  } catch (error) {
+    console.error('❌ Field analytics fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch field analytics',
+      details: error.message,
+      formId: req.params.formId,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ============== ANALYTICS PREFERENCES ENDPOINT ==============
+
+// Helper function to extract userId from JWT token
+function getUserIdFromRequest(req) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return null;
+    }
+    
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-oauth');
+    // Check both userId and id fields (verify actual JWT structure in codebase)
+    return decoded.userId || decoded.id || null;
+  } catch (error) {
+    // Token invalid or expired
+    return null;
+  }
+}
+
+// Get user's analytics preferences for a form
+app.get('/analytics/forms/:formId/preferences', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    // Require authentication - analytics page is authenticated-only
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const docId = `${userId}_${formId}`;
+    const doc = await gcpClient.collection('analytics_preferences').doc(docId).get();
+    
+    if (!doc.exists) {
+      // Return empty preferences if document doesn't exist yet
+      return res.json({ starredFields: [], expandedFields: [] });
+    }
+    
+    // 🔍 INSPECT ACTUAL DOCUMENT DATA STRUCTURE
+    const data = doc.data();
+    console.log('🔍 ACTUAL DOCUMENT DATA:', JSON.stringify(data, null, 2));
+    console.log('🔍 AVAILABLE KEYS:', Object.keys(data || {}));
+    
+    // Handle both camelCase and snake_case field names
+    const starredFields = data.starredFields || data.starred_fields || [];
+    const expandedFields = data.expandedFields || data.expanded_fields || [];
+    
+    res.json({
+      starredFields: Array.isArray(starredFields) ? starredFields : [],
+      expandedFields: Array.isArray(expandedFields) ? expandedFields : []
+    });
+  } catch (error) {
+    console.error('Error fetching analytics preferences:', error);
+    res.status(500).json({ error: 'Failed to fetch preferences' });
+  }
+});
+
+// Update user's analytics preferences for a form
+app.post('/analytics/forms/:formId/preferences', async (req, res) => {
+  try {
+    // 🔍 INSPECT ACTUAL REQUEST BODY STRUCTURE
+    console.log('🔍 ACTUAL REQUEST BODY:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 AVAILABLE KEYS:', Object.keys(req.body || {}));
+    
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    // If no userId, return 401 (can't save without auth)
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    // Validate and extract fields from request body
+    // Check actual field names (starredFields vs starred_fields, etc.)
+    const starredFields = req.body.starredFields || req.body.starred_fields;
+    const expandedFields = req.body.expandedFields || req.body.expanded_fields;
+    
+    // Validate field types if provided
+    if (starredFields !== undefined && !Array.isArray(starredFields)) {
+      return res.status(400).json({ error: 'starredFields must be an array' });
+    }
+    if (expandedFields !== undefined && !Array.isArray(expandedFields)) {
+      return res.status(400).json({ error: 'expandedFields must be an array' });
+    }
+    
+    const docId = `${userId}_${formId}`;
+    const updateData = {
+      userId,
+      formId,
+      updatedAt: new Date().toISOString()
+    };
+    
+    if (starredFields !== undefined) updateData.starredFields = starredFields;
+    if (expandedFields !== undefined) updateData.expandedFields = expandedFields;
+    
+    await gcpClient.collection('analytics_preferences')
+      .doc(docId)
+      .set(updateData, { merge: true });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error saving analytics preferences:', error);
+    res.status(500).json({ error: 'Failed to save preferences' });
+  }
+});
+
 // ============== USER ANALYTICS ENDPOINT ==============
 
 // Get all analytics for a specific user
