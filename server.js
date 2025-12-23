@@ -29,6 +29,7 @@ app.set('trust proxy', 1);
 // Initialize GCP Client
 const GCPClient = require('./gcp-client');
 const gcpClient = new GCPClient();
+const { Firestore } = require('@google-cloud/firestore');
 
 // Initialize Email Service
 const emailService = require('./email-service');
@@ -3065,8 +3066,8 @@ app.post('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
       form_id: formId,
       user_id: userId,
       created_by: userId,
-      created_at: db.FieldValue.serverTimestamp(),
-      updated_at: db.FieldValue.serverTimestamp(),
+      created_at: Firestore.FieldValue.serverTimestamp(),
+      updated_at: Firestore.FieldValue.serverTimestamp(),
       template_type,
       selected_fields,
       filters,
@@ -3077,7 +3078,7 @@ app.post('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
       order: pinned ? 0 : existingCount + 1,
       generated_insights: generated_insights || {},
       chart_config: chart_config || {},
-      last_computed_at: db.FieldValue.serverTimestamp(),
+      last_computed_at: Firestore.FieldValue.serverTimestamp(),
       computed_for_submission_count: submissions.length,
       date_range: {
         start: startDate.toISOString(),
@@ -3220,7 +3221,7 @@ app.patch('/api/analytics/forms/:formId/custom/saved/:analysisId', async (req, r
     
     // Build update object
     const updateData = {
-      updated_at: gcpClient.FieldValue.serverTimestamp()
+      updated_at: Firestore.FieldValue.serverTimestamp()
     };
     
     if (name !== undefined) {
@@ -3388,13 +3389,13 @@ app.post('/api/analytics/forms/:formId/custom/saved/:analysisId/recompute', asyn
         type: result.chartType,
         data: result.chartData
       },
-      last_computed_at: db.FieldValue.serverTimestamp(),
+      last_computed_at: Firestore.FieldValue.serverTimestamp(),
       computed_for_submission_count: submissions.length,
       date_range: {
         start: startDate.toISOString(),
         end: endDate.toISOString()
       },
-      updated_at: db.FieldValue.serverTimestamp()
+      updated_at: Firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     
     res.json({
