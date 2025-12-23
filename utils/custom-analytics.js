@@ -238,6 +238,8 @@ function analyzeBreakdown(submissions, primaryField, secondaryField, aggregation
     };
   }
   
+  console.log(`✅ BREAKDOWN - SUFFICIENT PAIRS: ${pairs.length} >= 2, proceeding with analysis`);
+  
   // Group by secondary field and aggregate primary field
   const groups = {};
   pairs.forEach(pair => {
@@ -315,6 +317,8 @@ function analyzeBreakdown(submissions, primaryField, secondaryField, aggregation
   // Determine strength
   const variance = Math.max(...chartData.map(d => d.y)) - Math.min(...chartData.map(d => d.y));
   const strength = variance > overallAvg * 0.3 ? 'strong pattern' : variance > overallAvg * 0.1 ? 'some pattern' : 'no clear pattern';
+  
+  console.log(`✅ BREAKDOWN - Analysis complete: ${chartData.length} categories, sampleSize=${pairs.length}`);
   
   return {
     bigNumber,

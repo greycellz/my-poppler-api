@@ -2950,12 +2950,15 @@ app.post('/api/analytics/forms/:formId/custom/analyze', async (req, res) => {
     
     // Check for errors in result
     if (result.error) {
+      console.error(`❌ ANALYSIS ERROR: ${result.error}, sampleSize=${result.sampleSize}`);
       return res.status(400).json({
         success: false,
         error: result.error,
         sampleSize: result.sampleSize
       });
     }
+    
+    console.log(`✅ ANALYSIS SUCCESS: Returning result with ${result.chartData?.length || 0} chart points, sampleSize=${result.sampleSize}`);
     
     res.json({
       success: true,
