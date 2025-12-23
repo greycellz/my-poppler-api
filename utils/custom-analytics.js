@@ -68,10 +68,25 @@ function getFieldType(field) {
  * @returns {Object} Analysis results with plain language summary
  */
 function computeCustomAnalysis(submissions, templateType, primaryField, secondaryField, options = {}) {
+  console.log(`🔍 COMPUTE CUSTOM ANALYSIS - Starting`);
+  console.log(`   Template: ${templateType}`);
+  console.log(`   Input submissions: ${submissions.length}`);
+  console.log(`   Primary field: ${primaryField.id} (${primaryField.label || 'unknown'})`);
+  console.log(`   Secondary field: ${secondaryField.id} (${secondaryField.label || 'unknown'})`);
+  console.log(`   Options: ${JSON.stringify(options)}`);
+  
   const { filters = [], aggregation = 'mean', timeGranularity = null } = options;
+  
+  console.log(`   Filters: ${filters.length} filter(s)`);
+  if (filters.length > 0) {
+    filters.forEach((f, idx) => {
+      console.log(`     Filter ${idx + 1}: ${f.field_id} ${f.operator} ${f.value}`);
+    });
+  }
   
   // Apply filters
   let filteredSubmissions = applyFilters(submissions, filters);
+  console.log(`   After filters: ${filteredSubmissions.length} submissions`);
   
   // Route to template-specific analyzer
   switch (templateType) {
@@ -156,30 +171,63 @@ function applyFilters(submissions, filters) {
  * @returns {Object} Analysis results
  */
 function analyzeBreakdown(submissions, primaryField, secondaryField, aggregation = 'mean') {
+  console.log(`🔍 BREAKDOWN - Starting analysis with ${submissions.length} submissions`);
+  console.log(`🔍 BREAKDOWN - Primary field: ${primaryField.id} (${primaryField.label || 'unknown'})`);
+  console.log(`🔍 BREAKDOWN - Secondary field: ${secondaryField.id} (${secondaryField.label || 'unknown'})`);
+  
   // 🔍 INSPECT ACTUAL SUBMISSION STRUCTURE (following repo rule: never assume field names)
   if (submissions.length > 0) {
     console.log('🔍 BREAKDOWN - ACTUAL SUBMISSION STRUCTURE:', JSON.stringify(submissions[0], null, 2));
     console.log('🔍 BREAKDOWN - SUBMISSION KEYS:', Object.keys(submissions[0]));
+    
+    // Check data field
+    const dataFieldName = submissions[0].submission_data ? 'submission_data' : 
+                         submissions[0].submissionData ? 'submissionData' : 
+                         submissions[0].data ? 'data' : null;
+    console.log(`🔍 BREAKDOWN - Using data field: "${dataFieldName}"`);
+    
+    if (dataFieldName) {
+      const data = submissions[0][dataFieldName] || {};
+      console.log(`🔍 BREAKDOWN - Data keys: ${Object.keys(data).join(', ')}`);
+      console.log(`🔍 BREAKDOWN - Primary value (${primaryField.id}): ${JSON.stringify(data[primaryField.id])}`);
+      console.log(`🔍 BREAKDOWN - Secondary value (${secondaryField.id}): ${JSON.stringify(data[secondaryField.id])}`);
+    }
   }
   
   // Extract pairs
   const pairs = [];
+  let missingPrimary = 0;
+  let missingSecondary = 0;
+  let missingBoth = 0;
+  
   for (const submission of submissions) {
     // Handle both possible field names (submission_data, submissionData, data)
     const data = submission.submission_data || submission.submissionData || submission.data || {};
     const primaryValue = data[primaryField.id];
     const secondaryValue = data[secondaryField.id];
     
-    if (primaryValue !== undefined && primaryValue !== null && primaryValue !== '' &&
-        secondaryValue !== undefined && secondaryValue !== null && secondaryValue !== '') {
+    const hasPrimary = primaryValue !== undefined && primaryValue !== null && primaryValue !== '';
+    const hasSecondary = secondaryValue !== undefined && secondaryValue !== null && secondaryValue !== '';
+    
+    if (hasPrimary && hasSecondary) {
       pairs.push({ 
         primary: parseFloat(primaryValue), 
         secondary: String(secondaryValue) 
       });
+    } else {
+      if (!hasPrimary && !hasSecondary) missingBoth++;
+      else if (!hasPrimary) missingPrimary++;
+      else if (!hasSecondary) missingSecondary++;
     }
   }
   
+  console.log(`🔍 BREAKDOWN - Found ${pairs.length} complete pairs`);
+  console.log(`🔍 BREAKDOWN - Missing primary only: ${missingPrimary}`);
+  console.log(`🔍 BREAKDOWN - Missing secondary only: ${missingSecondary}`);
+  console.log(`🔍 BREAKDOWN - Missing both: ${missingBoth}`);
+  
   if (pairs.length < 2) {
+    console.error(`❌ BREAKDOWN - NOT ENOUGH PAIRS: ${pairs.length} < 2`);
     return {
       bigNumber: null,
       chartData: [],

@@ -1176,8 +1176,14 @@ class GCPClient {
       if (startDate || endDate) {
         const { Firestore } = require('@google-cloud/firestore');
         
+        console.log(`📅 FILTERING SUBMISSIONS BY DATE:`);
+        console.log(`   startDate: ${startDate}`);
+        console.log(`   endDate: ${endDate}`);
+        
         if (startDate) {
-          const startTimestamp = Firestore.Timestamp.fromDate(new Date(startDate));
+          const startDateObj = new Date(startDate);
+          const startTimestamp = Firestore.Timestamp.fromDate(startDateObj);
+          console.log(`   Start timestamp: ${startTimestamp.toDate().toISOString()}`);
           query = query.where('timestamp', '>=', startTimestamp);
         }
         
@@ -1186,14 +1192,19 @@ class GCPClient {
           const endDateObj = new Date(endDate);
           endDateObj.setUTCHours(23, 59, 59, 999);
           const endTimestamp = Firestore.Timestamp.fromDate(endDateObj);
+          console.log(`   End timestamp: ${endTimestamp.toDate().toISOString()}`);
           query = query.where('timestamp', '<=', endTimestamp);
         }
+      } else {
+        console.log(`📅 NO DATE FILTERING - Loading all submissions`);
       }
       
       // Order by timestamp (descending)
       query = query.orderBy('timestamp', 'desc');
       
       const submissionsSnapshot = await query.get();
+
+      console.log(`📊 Firestore query returned ${submissionsSnapshot.size} documents`);
 
       if (submissionsSnapshot.empty) {
         console.log(`📝 No submissions found for form: ${formId}`);

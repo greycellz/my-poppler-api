@@ -2883,11 +2883,23 @@ app.post('/api/analytics/forms/:formId/custom/analyze', async (req, res) => {
     startDate.setUTCHours(0, 0, 0, 0);
     endDate.setUTCHours(23, 59, 59, 999);
     
+    console.log(`📅 DATE RANGE: ${startDate.toISOString()} to ${endDate.toISOString()}`);
+    
     // Load submissions (from Firestore/GCS - automatically handles HIPAA)
     const submissions = await gcpClient.getFormSubmissions(formId, {
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString()
     });
+    
+    console.log(`📊 LOADED ${submissions.length} submissions after date filtering`);
+    if (submissions.length > 0) {
+      const firstSub = submissions[0];
+      const lastSub = submissions[submissions.length - 1];
+      const firstTimestamp = firstSub.timestamp || firstSub.created_at;
+      const lastTimestamp = lastSub.timestamp || lastSub.created_at;
+      console.log(`📅 First submission timestamp: ${JSON.stringify(firstTimestamp)}`);
+      console.log(`📅 Last submission timestamp: ${JSON.stringify(lastTimestamp)}`);
+    }
     
     // Performance: Dataset size limits
     const MAX_SUBMISSIONS_LIMIT = 10000;
