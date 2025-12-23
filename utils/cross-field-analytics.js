@@ -151,48 +151,97 @@ function analyzeNumberNumber(pairs, field1, field2) {
       bigNumber: null,
       chartData: [],
       chartType: 'dots',
-      strength: 'no clear pattern'
+      strength: 'no clear pattern',
+      metadata: {
+        aggregationLevel: 'none',
+        binRanges: [],
+        numBins: 0
+      }
     };
   }
 
-  // Calculate averages by grouping X into ranges
+  // Calculate overall average for bigNumber
+  const overallAvgY = numericPairs.reduce((sum, p) => sum + p.y, 0) / numericPairs.length;
+
+  // Determine aggregation strategy based on data size (soft thresholds)
+  const dataSize = numericPairs.length;
+  let aggregationLevel;
+  let numBins;
+  let chartData;
+  let binRanges = [];
+
   const xValues = numericPairs.map(p => p.x);
   const minX = Math.min(...xValues);
   const maxX = Math.max(...xValues);
   const range = maxX - minX;
-  const numBins = Math.min(10, Math.max(3, Math.floor(Math.sqrt(numericPairs.length))));
-  const binSize = range / numBins;
 
-  const bins = {};
-  numericPairs.forEach(pair => {
-    const binIndex = Math.min(
-      Math.floor((pair.x - minX) / binSize),
-      numBins - 1
-    );
-    const binKey = `${binIndex}`;
-    if (!bins[binKey]) {
-      bins[binKey] = { sum: 0, count: 0, xValues: [] };
-    }
-    bins[binKey].sum += pair.y;
-    bins[binKey].count += 1;
-    bins[binKey].xValues.push(pair.x);
-  });
+  if (dataSize <= 75) {
+    // No aggregation - return individual points
+    aggregationLevel = 'none';
+    numBins = 0;
+    chartData = numericPairs.map(p => ({
+      x: Math.round(p.x * 10) / 10,
+      y: Math.round(p.y * 10) / 10,
+      label: `${Math.round(p.x)}`
+    }));
+  } else if (dataSize <= 300) {
+    // Light aggregation: 5-8 bins
+    aggregationLevel = 'light';
+    numBins = Math.min(8, Math.max(5, Math.floor(Math.sqrt(dataSize))));
+  } else {
+    // Strong aggregation: 8-10 bins
+    aggregationLevel = 'strong';
+    numBins = Math.min(10, Math.max(8, Math.floor(Math.sqrt(dataSize))));
+  }
 
-  const chartData = Object.keys(bins)
-    .sort((a, b) => parseInt(a) - parseInt(b))
-    .map(binKey => {
-      const bin = bins[binKey];
-      const avgX = bin.xValues.reduce((a, b) => a + b, 0) / bin.xValues.length;
-      const avgY = bin.sum / bin.count;
-      return {
-        x: Math.round(avgX * 10) / 10,
-        y: Math.round(avgY * 10) / 10,
-        label: `${Math.round(avgX)}`
-      };
+  // Apply binning if aggregation is needed
+  if (aggregationLevel !== 'none') {
+    const binSize = range / numBins;
+
+    const bins = {};
+    numericPairs.forEach(pair => {
+      const binIndex = Math.min(
+        Math.floor((pair.x - minX) / binSize),
+        numBins - 1
+      );
+      const binKey = `${binIndex}`;
+      if (!bins[binKey]) {
+        bins[binKey] = { sum: 0, count: 0, xValues: [] };
+      }
+      bins[binKey].sum += pair.y;
+      bins[binKey].count += 1;
+      bins[binKey].xValues.push(pair.x);
     });
 
+    // Build binRanges for tooltip display
+    binRanges = Object.keys(bins)
+      .sort((a, b) => parseInt(a) - parseInt(b))
+      .map(binKey => {
+        const bin = bins[binKey];
+        const minXInBin = Math.min(...bin.xValues);
+        const maxXInBin = Math.max(...bin.xValues);
+        return {
+          min: Math.round(minXInBin * 10) / 10,
+          max: Math.round(maxXInBin * 10) / 10
+        };
+      });
+
+    chartData = Object.keys(bins)
+      .sort((a, b) => parseInt(a) - parseInt(b))
+      .map(binKey => {
+        const bin = bins[binKey];
+        const avgX = bin.xValues.reduce((a, b) => a + b, 0) / bin.xValues.length;
+        const avgY = bin.sum / bin.count;
+        return {
+          x: Math.round(avgX * 10) / 10,
+          y: Math.round(avgY * 10) / 10,
+          label: `${Math.round(avgX)}`
+        };
+      });
+  }
+
   // Simple trend detection: compare first half vs second half
-  const sorted = numericPairs.sort((a, b) => a.x - b.x);
+  const sorted = [...numericPairs].sort((a, b) => a.x - b.x);
   const mid = Math.floor(sorted.length / 2);
   const firstHalf = sorted.slice(0, mid);
   const secondHalf = sorted.slice(mid);
@@ -216,18 +265,21 @@ function analyzeNumberNumber(pairs, field1, field2) {
     strength = percentDiff > 20 ? 'strong pattern' : 'some pattern';
   }
 
-  const overallAvg = numericPairs.reduce((sum, p) => sum + p.y, 0) / numericPairs.length;
-
   return {
     question: `Do different ${field1.label || 'values'} give different ${field2.label || 'ratings'}?`,
     answer,
     bigNumber: {
-      value: `${overallAvg.toFixed(1)}`,
-      comparison: `average ${field2.label || 'rating'}`
+      value: `Avg ${field2.label}: ${overallAvgY.toFixed(1)}`,
+      comparison: null
     },
     chartData,
     chartType: 'dots',
-    strength
+    strength,
+    metadata: {
+      aggregationLevel,
+      binRanges,
+      numBins
+    }
   };
 }
 
@@ -274,10 +326,16 @@ function analyzeCategoryNumber(pairs, categoryField, numberField) {
   const highest = groupAverages[0];
   const lowest = groupAverages[groupAverages.length - 1];
 
+  // Calculate overall average across all groups
+  const totalSum = Object.values(groups).reduce((sum, g) => sum + g.sum, 0);
+  const totalCount = Object.values(groups).reduce((sum, g) => sum + g.count, 0);
+  const overallAvg = totalSum / totalCount;
+
   const difference = highest.average - lowest.average;
   const percentDiff = (difference / highest.average) * 100;
 
   let answer;
+  let strength;
   if (percentDiff < 5) {
     answer = `All groups are similar (around ${highest.average.toFixed(1)})`;
     strength = 'no clear pattern';
@@ -296,8 +354,8 @@ function analyzeCategoryNumber(pairs, categoryField, numberField) {
     question: `Which ${categoryField.label || 'groups'} have higher ${numberField.label || 'ratings'}?`,
     answer,
     bigNumber: {
-      value: `${highest.average.toFixed(1)}`,
-      comparison: `vs ${lowest.average.toFixed(1)}`
+      value: `Highest Avg: ${highest.category} (${highest.average.toFixed(1)})`,
+      comparison: `Overall Avg: ${overallAvg.toFixed(1)}`
     },
     chartData,
     chartType: 'bars',
@@ -373,18 +431,28 @@ function analyzeCategoryCategory(pairs, field1, field2) {
     preferences[cat1] = { option: maxCat2, percent: maxPercent };
   });
 
-  // Build answer
+  // Build answer with precise language
   const answerParts = Object.keys(preferences).map(cat1 => {
     const pref = preferences[cat1];
-    return `${cat1} prefers ${pref.option} (${Math.round(pref.percent)}%)`;
+    return `Among ${cat1}, ${Math.round(pref.percent)}% prefer ${pref.option}`;
   });
+
+  // Find most common preference overall
+  const allPreferences = {};
+  category1Values.forEach(cat1 => {
+    const prefOption = preferences[cat1].option;
+    allPreferences[prefOption] = (allPreferences[prefOption] || 0) + 1;
+  });
+  const mostCommonPref = Object.keys(allPreferences).reduce((a, b) => 
+    allPreferences[a] > allPreferences[b] ? a : b
+  );
 
   return {
     question: `How do ${field1.label || 'groups'} differ in ${field2.label || 'preferences'}?`,
     answer: answerParts.join(', '),
     bigNumber: {
-      value: `${Math.round(preferences[category1Values[0]].percent)}%`,
-      comparison: `${category1Values[0]} prefer ${preferences[category1Values[0]].option}`
+      value: `Most prefer ${mostCommonPref}`,
+      comparison: `Among ${category1Values[0]}: ${Math.round(preferences[category1Values[0]].percent)}%`
     },
     chartData,
     chartType: 'bars',
@@ -447,32 +515,41 @@ function analyzeDateField(pairs, field1, field2, dateField) {
     };
   });
 
-  // Compare first half vs second half
-  const firstHalf = weeks.slice(0, Math.floor(weeks.length / 2));
-  const secondHalf = weeks.slice(Math.floor(weeks.length / 2));
+  // Define "Recent" as last 7-14 data points (never exposed to user)
+  // Use min 7 or max 14, depending on available data
+  const recentCount = Math.min(14, Math.max(7, Math.floor(weeks.length / 2)));
+  const recentWeeks = weeks.slice(-recentCount);
+  const earlierWeeks = weeks.slice(0, -recentCount);
 
-  const firstAvg = firstHalf.reduce((sum, w) => sum + (dateGroups[w].sum / dateGroups[w].count), 0) / firstHalf.length;
-  const secondAvg = secondHalf.reduce((sum, w) => sum + (dateGroups[w].sum / dateGroups[w].count), 0) / secondHalf.length;
+  // Calculate recent vs earlier averages
+  const recentAvg = recentWeeks.reduce((sum, w) => sum + (dateGroups[w].sum / dateGroups[w].count), 0) / recentWeeks.length;
+  const earlierAvg = earlierWeeks.reduce((sum, w) => sum + (dateGroups[w].sum / dateGroups[w].count), 0) / earlierWeeks.length;
 
-  const change = ((secondAvg - firstAvg) / firstAvg) * 100;
+  const change = ((recentAvg - earlierAvg) / earlierAvg) * 100;
   let answer;
+  let strength;
+  let direction;
+  
   if (Math.abs(change) < 5) {
-    answer = `Stable - ${otherField.label || 'ratings'} stayed around ${firstAvg.toFixed(1)}`;
+    answer = `Stable - ${otherField.label || 'ratings'} stayed around ${earlierAvg.toFixed(1)}`;
     strength = 'no clear pattern';
+    direction = null;
   } else if (change > 0) {
-    answer = `Yes! ${otherField.label || 'Ratings'} improved by ${Math.round(change)}% (${firstAvg.toFixed(1)} to ${secondAvg.toFixed(1)})`;
+    answer = `Yes! ${otherField.label || 'Ratings'} improved by ${Math.round(change)}% (${earlierAvg.toFixed(1)} to ${recentAvg.toFixed(1)})`;
     strength = Math.abs(change) > 20 ? 'strong pattern' : 'some pattern';
+    direction = `up from ${earlierAvg.toFixed(1)}`;
   } else {
-    answer = `${otherField.label || 'Ratings'} decreased by ${Math.round(Math.abs(change))}% (${firstAvg.toFixed(1)} to ${secondAvg.toFixed(1)})`;
+    answer = `${otherField.label || 'Ratings'} decreased by ${Math.round(Math.abs(change))}% (${earlierAvg.toFixed(1)} to ${recentAvg.toFixed(1)})`;
     strength = Math.abs(change) > 20 ? 'strong pattern' : 'some pattern';
+    direction = `down from ${earlierAvg.toFixed(1)}`;
   }
 
   return {
     question: `Are ${otherField.label || 'ratings'} improving over time?`,
     answer,
     bigNumber: {
-      value: `${secondAvg.toFixed(1)}`,
-      comparison: `vs ${firstAvg.toFixed(1)} earlier`
+      value: `Recent Avg: ${recentAvg.toFixed(1)}`,
+      comparison: direction
     },
     chartData,
     chartType: 'line',
@@ -489,6 +566,75 @@ function getWeekNumber(date) {
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+/**
+ * Check if data has meaningful variation (not flat)
+ * @param {Array} pairs - Array of {x, y} pairs
+ * @param {string} type1 - Type of field1
+ * @param {string} type2 - Type of field2
+ * @returns {boolean} True if data is flat (no variation)
+ */
+function isFlat(pairs, type1, type2) {
+  if (pairs.length < 2) return true;
+
+  // For numeric Y values
+  if (type2 === 'number' || type1 === 'number') {
+    const yValues = pairs.map(p => parseFloat(type2 === 'number' ? p.y : p.x)).filter(v => !isNaN(v));
+    if (yValues.length < 2) return true;
+    
+    // Check if all values are the same or very close (within 5% range)
+    const min = Math.min(...yValues);
+    const max = Math.max(...yValues);
+    const range = max - min;
+    const avg = yValues.reduce((a, b) => a + b, 0) / yValues.length;
+    
+    return range / Math.max(Math.abs(avg), 1) < 0.05; // Less than 5% variation
+  }
+
+  // For categorical data
+  if (type1 === 'category' && type2 === 'category') {
+    // Check if >90% of responses are in one category combination
+    const combinations = {};
+    pairs.forEach(p => {
+      const key = `${p.x}|${p.y}`;
+      combinations[key] = (combinations[key] || 0) + 1;
+    });
+    const maxCount = Math.max(...Object.values(combinations));
+    return maxCount / pairs.length > 0.9;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a comparison should be auto-surfaced
+ * @param {Object} field1 - First field
+ * @param {Object} field2 - Second field
+ * @param {Array} submissions - Submission data
+ * @param {Array} pairs - Extracted data pairs
+ * @returns {boolean} True if comparison should be shown
+ */
+function shouldSurfaceComparison(field1, field2, submissions, pairs) {
+  // Criterion 1: Minimum response count (≥10)
+  if (pairs.length < 10) {
+    return false;
+  }
+
+  // Criterion 2: Variation exists (not flat data)
+  const type1 = getFieldType(field1);
+  const type2 = getFieldType(field2);
+  if (isFlat(pairs, type1, type2)) {
+    return false;
+  }
+
+  // Criterion 3: Insight confidence threshold
+  const analysis = calculateCrossFieldAnalysis(submissions, field1, field2);
+  if (analysis.strength === 'no clear pattern') {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -536,13 +682,27 @@ function detectDefaultComparisons(fields, submissions) {
   const numberFields = popularFields.filter(f => getFieldType(f) === 'number');
   console.log(`🔍 Number fields found: ${numberFields.length}`, numberFields.map(f => f.label));
   if (numberFields.length >= 2) {
-    // Take first two number fields (already sorted by popularity)
-    comparisons.push({
-      field1: numberFields[0],
-      field2: numberFields[1],
-      comparisonId: `default_${numberFields[0].id}_${numberFields[1].id}`,
-      question: `Do different ${numberFields[0].label || 'values'} give different ${numberFields[1].label || 'ratings'}?`
-    });
+    // Extract pairs for quality check
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[numberFields[0].id];
+      const val2 = data[numberFields[1].id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    // Apply quality filter
+    if (shouldSurfaceComparison(numberFields[0], numberFields[1], submissions, pairs)) {
+      comparisons.push({
+        field1: numberFields[0],
+        field2: numberFields[1],
+        comparisonId: `default_${numberFields[0].id}_${numberFields[1].id}`,
+        question: `Do different ${numberFields[0].label || 'values'} give different ${numberFields[1].label || 'ratings'}?`
+      });
+    }
   }
 
   // Priority 2: Category vs Number (e.g., Gender vs Rating) - Create multiple comparisons
@@ -551,12 +711,27 @@ function detectDefaultComparisons(fields, submissions) {
   if (categoryFields.length > 0 && numberFields.length > 0) {
     // Create comparison for each category field with the most popular number field
     categoryFields.slice(0, 3).forEach(categoryField => {
-      comparisons.push({
-        field1: categoryField,
-        field2: numberFields[0],
-        comparisonId: `default_${categoryField.id}_${numberFields[0].id}`,
-        question: `Which ${categoryField.label || 'groups'} have higher ${numberFields[0].label || 'ratings'}?`
-      });
+      // Extract pairs for quality check
+      const pairs = [];
+      for (const submission of submissions) {
+        const data = submission.submission_data || {};
+        const val1 = data[categoryField.id];
+        const val2 = data[numberFields[0].id];
+        if (val1 !== undefined && val1 !== null && val1 !== '' &&
+            val2 !== undefined && val2 !== null && val2 !== '') {
+          pairs.push({ x: val1, y: val2 });
+        }
+      }
+      
+      // Apply quality filter
+      if (shouldSurfaceComparison(categoryField, numberFields[0], submissions, pairs)) {
+        comparisons.push({
+          field1: categoryField,
+          field2: numberFields[0],
+          comparisonId: `default_${categoryField.id}_${numberFields[0].id}`,
+          question: `Which ${categoryField.label || 'groups'} have higher ${numberFields[0].label || 'ratings'}?`
+        });
+      }
     });
   }
 
@@ -564,23 +739,53 @@ function detectDefaultComparisons(fields, submissions) {
   const dateFields = popularFields.filter(f => getFieldType(f) === 'date');
   console.log(`🔍 Date fields found: ${dateFields.length}`, dateFields.map(f => f.label));
   if (dateFields.length > 0 && numberFields.length > 0) {
-    comparisons.push({
-      field1: dateFields[0],
-      field2: numberFields[0],
-      comparisonId: `default_${dateFields[0].id}_${numberFields[0].id}`,
-      question: `Are ${numberFields[0].label || 'ratings'} improving over time?`
-    });
+    // Extract pairs for quality check
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[dateFields[0].id];
+      const val2 = data[numberFields[0].id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    // Apply quality filter
+    if (shouldSurfaceComparison(dateFields[0], numberFields[0], submissions, pairs)) {
+      comparisons.push({
+        field1: dateFields[0],
+        field2: numberFields[0],
+        comparisonId: `default_${dateFields[0].id}_${numberFields[0].id}`,
+        question: `Are ${numberFields[0].label || 'ratings'} improving over time?`
+      });
+    }
   }
 
   // Priority 4: Category vs Category (e.g., Movie Length vs Gender) - if we have multiple categories
   if (categoryFields.length >= 2) {
-    // Create comparison between top 2 category fields
-    comparisons.push({
-      field1: categoryFields[0],
-      field2: categoryFields[1],
-      comparisonId: `default_${categoryFields[0].id}_${categoryFields[1].id}`,
-      question: `How do ${categoryFields[0].label || 'groups'} differ in ${categoryFields[1].label || 'preferences'}?`
-    });
+    // Extract pairs for quality check
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[categoryFields[0].id];
+      const val2 = data[categoryFields[1].id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    // Apply quality filter
+    if (shouldSurfaceComparison(categoryFields[0], categoryFields[1], submissions, pairs)) {
+      // Create comparison between top 2 category fields
+      comparisons.push({
+        field1: categoryFields[0],
+        field2: categoryFields[1],
+        comparisonId: `default_${categoryFields[0].id}_${categoryFields[1].id}`,
+        question: `How do ${categoryFields[0].label || 'groups'} differ in ${categoryFields[1].label || 'preferences'}?`
+      });
+    }
   }
 
   // Remove duplicates (in case same comparison was added multiple ways)

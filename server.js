@@ -2260,7 +2260,7 @@ app.get('/analytics/forms/:formId/fields', async (req, res) => {
       });
     }
     
-    const fields = formDoc.structure?.fields || [];
+    const fields = formDoc.structure?.fields || formDoc.fields || [];
     
     // Calculate date range using UTC for consistency with Firestore timestamps
     const endDate = new Date();
@@ -2521,7 +2521,7 @@ app.get('/analytics/forms/:formId/cross-field/defaults', async (req, res) => {
       });
     }
 
-    const fields = formDoc.structure?.fields || [];
+    const fields = formDoc.structure?.fields || formDoc.fields || [];
     if (fields.length < 2) {
       return res.json({
         success: true,
