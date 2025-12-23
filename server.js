@@ -29,6 +29,7 @@ app.set('trust proxy', 1);
 // Initialize GCP Client
 const GCPClient = require('./gcp-client');
 const gcpClient = new GCPClient();
+const { Firestore } = require('@google-cloud/firestore');
 
 // Initialize Email Service
 const emailService = require('./email-service');
@@ -2778,6 +2779,658 @@ app.post('/analytics/forms/:formId/cross-field/favorites', async (req, res) => {
   } catch (error) {
     console.error('Error updating comparison favorites:', error);
     res.status(500).json({ error: 'Failed to update favorites' });
+  }
+});
+
+// ============== CUSTOM ANALYTICS ENDPOINTS ==============
+
+// Analyze custom fields with template
+app.post('/api/analytics/forms/:formId/custom/analyze', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    // Require authentication
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized'
+      });
+    }
+    
+    // 🔍 INSPECT ACTUAL REQUEST BODY (following repo rule: never assume field names)
+    console.log('🔍 ANALYZE - REQUEST BODY:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 ANALYZE - AVAILABLE KEYS:', Object.keys(req.body));
+    
+    // Handle both snake_case and camelCase field names
+    const template_type = req.body.template_type || req.body.templateType;
+    const primary_field_id = req.body.primary_field_id || req.body.primaryFieldId;
+    const secondary_field_id = req.body.secondary_field_id || req.body.secondaryFieldId;
+    const filters = req.body.filters || [];
+    const aggregation = req.body.aggregation || 'mean';
+    const time_granularity = req.body.time_granularity || req.body.timeGranularity || null;
+    const date_range = req.body.date_range || req.body.dateRange;
+    
+    console.log(`📊 Custom analysis request: formId=${formId}, template=${template_type}, userId=${userId}`);
+    
+    // Validate required fields
+    if (!template_type || !primary_field_id || !secondary_field_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'template_type, primary_field_id, and secondary_field_id are required'
+      });
+    }
+    
+    // Validate aggregation parameter
+    const validAggregations = ['mean', 'median', 'p90'];
+    if (aggregation && !validAggregations.includes(aggregation)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid aggregation. Must be one of: ${validAggregations.join(', ')}`,
+        received: aggregation
+      });
+    }
+    
+    // Get form structure
+    const formDoc = await gcpClient.getFormStructure(formId, true);
+    if (!formDoc) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found',
+        formId
+      });
+    }
+    
+    const fields = formDoc.structure?.fields || formDoc.fields || [];
+    
+    // Find selected fields
+    const primaryField = fields.find(f => f.id === primary_field_id);
+    const secondaryField = fields.find(f => f.id === secondary_field_id);
+    
+    if (!primaryField || !secondaryField) {
+      return res.status(400).json({
+        success: false,
+        error: 'Field not found',
+        missing_primary: !primaryField,
+        missing_secondary: !secondaryField
+      });
+    }
+    
+    // Validate compatibility
+    const { validateFieldCompatibility } = require('./utils/custom-analytics');
+    const compatible = validateFieldCompatibility(template_type, primaryField, secondaryField);
+    
+    if (!compatible) {
+      return res.status(400).json({
+        success: false,
+        error: 'Field types not compatible with selected template',
+        template_type,
+        primary_type: primaryField.type,
+        secondary_type: secondaryField.type
+      });
+    }
+    
+    // Calculate date range (default to 30 days if not provided)
+    let startDate, endDate;
+    if (date_range && date_range.start && date_range.end) {
+      startDate = new Date(date_range.start);
+      endDate = new Date(date_range.end);
+    } else {
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setUTCDate(startDate.getUTCDate() - 30);
+    }
+    startDate.setUTCHours(0, 0, 0, 0);
+    endDate.setUTCHours(23, 59, 59, 999);
+    
+    console.log(`📅 DATE RANGE: ${startDate.toISOString()} to ${endDate.toISOString()}`);
+    
+    // Load submissions (from Firestore/GCS - automatically handles HIPAA)
+    const submissions = await gcpClient.getFormSubmissions(formId, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+    
+    console.log(`📊 LOADED ${submissions.length} submissions after date filtering`);
+    if (submissions.length > 0) {
+      const firstSub = submissions[0];
+      const lastSub = submissions[submissions.length - 1];
+      const firstTimestamp = firstSub.timestamp || firstSub.created_at;
+      const lastTimestamp = lastSub.timestamp || lastSub.created_at;
+      console.log(`📅 First submission timestamp: ${JSON.stringify(firstTimestamp)}`);
+      console.log(`📅 Last submission timestamp: ${JSON.stringify(lastTimestamp)}`);
+    }
+    
+    // Performance: Dataset size limits
+    const MAX_SUBMISSIONS_LIMIT = 10000;
+    const MAX_SUBMISSIONS_WARNING = 5000;
+    
+    if (submissions.length > MAX_SUBMISSIONS_LIMIT) {
+      return res.status(400).json({
+        success: false,
+        error: `Too many submissions (${submissions.length}). Reduce date range to analyze.`,
+        submission_count: submissions.length,
+        max_allowed: MAX_SUBMISSIONS_LIMIT
+      });
+    }
+    
+    if (submissions.length > MAX_SUBMISSIONS_WARNING) {
+      console.warn(`⚠️ Large dataset: ${submissions.length} submissions for custom analysis`);
+    }
+    
+    // Compute analysis with timeout
+    const { computeCustomAnalysis } = require('./utils/custom-analytics');
+    const TIMEOUT_MS = 30000; // 30 second timeout
+    
+    const analysisPromise = computeCustomAnalysis(
+      submissions,
+      template_type,
+      primaryField,
+      secondaryField,
+      { filters, aggregation, time_granularity }
+    );
+    
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Analysis computation timeout')), TIMEOUT_MS)
+    );
+    
+    let result;
+    try {
+      result = await Promise.race([analysisPromise, timeoutPromise]);
+    } catch (error) {
+      if (error.message === 'Analysis computation timeout') {
+        return res.status(408).json({
+          success: false,
+          error: 'Analysis is taking too long. Try reducing the date range or simplifying filters.',
+          timeout: true
+        });
+      }
+      throw error;
+    }
+    
+    // Check for errors in result
+    if (result.error) {
+      console.error(`❌ ANALYSIS ERROR: ${result.error}, sampleSize=${result.sampleSize}`);
+      return res.status(400).json({
+        success: false,
+        error: result.error,
+        sampleSize: result.sampleSize
+      });
+    }
+    
+    console.log(`✅ ANALYSIS SUCCESS: Returning result with ${result.chartData?.length || 0} chart points, sampleSize=${result.sampleSize}`);
+    
+    res.json({
+      success: true,
+      analysis: {
+        template_type,
+        selected_fields: {
+          primary: { 
+            id: primaryField.id, 
+            label: primaryField.label, 
+            type: primaryField.type 
+          },
+          secondary: { 
+            id: secondaryField.id, 
+            label: secondaryField.label, 
+            type: secondaryField.type 
+          }
+        },
+        bigNumber: result.bigNumber,
+        chartType: result.chartType,
+        chartData: result.chartData,
+        sampleSize: result.sampleSize,
+        strength: result.strength
+      },
+      submission_count: submissions.length,
+      date_range: {
+        start: startDate.toISOString(),
+        end: endDate.toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Custom analysis error:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to compute analysis'
+    });
+  }
+});
+
+// Save custom analysis
+app.post('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized'
+      });
+    }
+    
+    // 🔍 INSPECT ACTUAL REQUEST BODY (following repo rule: never assume field names)
+    console.log('🔍 SAVE - REQUEST BODY:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 SAVE - AVAILABLE KEYS:', Object.keys(req.body));
+    
+    // Handle both snake_case and camelCase field names
+    const analysis_id = req.body.analysis_id || req.body.analysisId;
+    const template_type = req.body.template_type || req.body.templateType;
+    const selected_fields = req.body.selected_fields || req.body.selectedFields;
+    const filters = req.body.filters || [];
+    const aggregation = req.body.aggregation || 'mean';
+    const time_granularity = req.body.time_granularity || req.body.timeGranularity || null;
+    const name = req.body.name;
+    const pinned = req.body.pinned || false;
+    const generated_insights = req.body.generated_insights || req.body.generatedInsights;
+    const chart_config = req.body.chart_config || req.body.chartConfig;
+    const date_range = req.body.date_range || req.body.dateRange;
+    
+    // Validate required fields
+    if (!template_type || !selected_fields || !name) {
+      return res.status(400).json({
+        success: false,
+        error: 'template_type, selected_fields, and name are required'
+      });
+    }
+    
+    // Check analysis limit (10 per form)
+    const existingSnapshot = await gcpClient.collection('custom_analyses')
+      .where('form_id', '==', formId)
+      .get();
+    
+    // If updating existing, don't count it
+    const existingCount = analysis_id 
+      ? existingSnapshot.docs.filter(doc => doc.id !== analysis_id).length
+      : existingSnapshot.docs.length;
+    
+    if (existingCount >= 10) {
+      return res.status(400).json({
+        success: false,
+        error: 'Analysis limit reached. Maximum 10 custom analyses per form. Delete an existing analysis to create a new one.',
+        current_count: existingCount,
+        limit: 10
+      });
+    }
+    
+    const analysisId = analysis_id || `custom_${formId}_${Date.now()}`;
+    
+    // Get current submission count for cache freshness tracking
+    // Use date_range from request if provided, otherwise default to 30 days
+    let startDate, endDate;
+    if (date_range && date_range.start && date_range.end) {
+      startDate = new Date(date_range.start);
+      endDate = new Date(date_range.end);
+    } else {
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setUTCDate(startDate.getUTCDate() - 30);
+    }
+    startDate.setUTCHours(0, 0, 0, 0);
+    endDate.setUTCHours(23, 59, 59, 999);
+    
+    const submissions = await gcpClient.getFormSubmissions(formId, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+    
+    const analysisDoc = {
+      analysis_id: analysisId,
+      form_id: formId,
+      user_id: userId,
+      created_by: userId,
+      created_at: Firestore.FieldValue.serverTimestamp(),
+      updated_at: Firestore.FieldValue.serverTimestamp(),
+      template_type,
+      selected_fields,
+      filters,
+      aggregation,
+      time_granularity,
+      name: name.substring(0, 50), // Max 50 characters
+      pinned: Boolean(pinned),
+      order: pinned ? 0 : existingCount + 1,
+      generated_insights: generated_insights || {},
+      chart_config: chart_config || {},
+      last_computed_at: Firestore.FieldValue.serverTimestamp(),
+      computed_for_submission_count: submissions.length,
+      date_range: {
+        start: startDate.toISOString(),
+        end: endDate.toISOString()
+      },
+      fields_exist: true,
+      missing_fields: []
+    };
+    
+    await gcpClient.collection('custom_analyses').doc(analysisId).set(analysisDoc);
+    
+    res.json({
+      success: true,
+      analysis_id: analysisId
+    });
+  } catch (error) {
+    console.error('Error saving custom analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to save analysis'
+    });
+  }
+});
+
+// Get saved custom analyses
+app.get('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized'
+      });
+    }
+    
+    // Get saved analyses (form-level, shared with all collaborators)
+    // Note: Use in-memory sort to avoid Firestore composite index requirement
+    const snapshot = await gcpClient.collection('custom_analyses')
+      .where('form_id', '==', formId)
+      .limit(10)
+      .get();
+    
+    // Validate field existence
+    const form = await gcpClient.getFormStructure(formId, true);
+    const currentFields = form?.structure?.fields || form?.fields || [];
+    
+    // Get current submission count for cache freshness
+    const dateRangeParam = req.query.dateRange || '30';
+    const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30;
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setUTCDate(startDate.getUTCDate() - dateRange);
+    const submissions = await gcpClient.getFormSubmissions(formId, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+    
+    // Map and validate analyses
+    const analyses = snapshot.docs.map(doc => {
+      const analysis = doc.data();
+      
+      // Check if fields still exist
+      const primaryExists = currentFields.some(f => f.id === analysis.selected_fields.primary.id);
+      const secondaryExists = currentFields.some(f => f.id === analysis.selected_fields.secondary.id);
+      
+      const fieldsExist = primaryExists && secondaryExists;
+      const missingFields = [];
+      if (!primaryExists) missingFields.push(analysis.selected_fields.primary.label);
+      if (!secondaryExists) missingFields.push(analysis.selected_fields.secondary.label);
+      
+      return {
+        ...analysis,
+        fields_exist: fieldsExist,
+        missing_fields: missingFields
+      };
+    });
+    
+    // Sort in memory: pinned first, then by created_at (desc)
+    analyses.sort((a, b) => {
+      if (a.pinned !== b.pinned) {
+        return b.pinned ? 1 : -1; // Pinned items first
+      }
+      // Compare timestamps (handle both Date objects and Firestore Timestamps)
+      const aTime = a.created_at?.toMillis ? a.created_at.toMillis() : new Date(a.created_at).getTime();
+      const bTime = b.created_at?.toMillis ? b.created_at.toMillis() : new Date(b.created_at).getTime();
+      return bTime - aTime; // Most recent first
+    });
+    
+    res.json({
+      success: true,
+      analyses,
+      total_count: analyses.length,
+      limit: 10,
+      current_submission_count: submissions.length
+    });
+  } catch (error) {
+    console.error('Error fetching saved analyses:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch saved analyses'
+    });
+  }
+});
+
+// Update custom analysis (name, pinned, order)
+app.patch('/api/analytics/forms/:formId/custom/saved/:analysisId', async (req, res) => {
+  try {
+    const { formId, analysisId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized'
+      });
+    }
+    
+    const { name, pinned, order } = req.body;
+    
+    // Get existing analysis
+    const doc = await gcpClient.collection('custom_analyses').doc(analysisId).get();
+    if (!doc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analysis not found'
+      });
+    }
+    
+    const analysis = doc.data();
+    
+    // Verify form_id matches
+    if (analysis.form_id !== formId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Analysis does not belong to this form'
+      });
+    }
+    
+    // Build update object
+    const updateData = {
+      updated_at: Firestore.FieldValue.serverTimestamp()
+    };
+    
+    if (name !== undefined) {
+      updateData.name = name.substring(0, 50);
+    }
+    if (pinned !== undefined) {
+      updateData.pinned = Boolean(pinned);
+    }
+    if (order !== undefined) {
+      updateData.order = parseInt(order);
+    }
+    
+    await gcpClient.collection('custom_analyses').doc(analysisId).set(updateData, { merge: true });
+    
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    console.error('Error updating custom analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to update analysis'
+    });
+  }
+});
+
+// Delete custom analysis
+app.delete('/api/analytics/forms/:formId/custom/saved/:analysisId', async (req, res) => {
+  try {
+    const { formId, analysisId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized'
+      });
+    }
+    
+    // Get existing analysis
+    const doc = await gcpClient.collection('custom_analyses').doc(analysisId).get();
+    if (!doc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analysis not found'
+      });
+    }
+    
+    const analysis = doc.data();
+    
+    // Verify form_id matches
+    if (analysis.form_id !== formId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Analysis does not belong to this form'
+      });
+    }
+    
+    // Delete analysis
+    await gcpClient.collection('custom_analyses').doc(analysisId).delete();
+    
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    console.error('Error deleting custom analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to delete analysis'
+    });
+  }
+});
+
+// Recompute custom analysis (refresh data)
+app.post('/api/analytics/forms/:formId/custom/saved/:analysisId/recompute', async (req, res) => {
+  try {
+    const { formId, analysisId } = req.params;
+    const userId = getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized'
+      });
+    }
+    
+    // Get existing analysis
+    const doc = await gcpClient.collection('custom_analyses').doc(analysisId).get();
+    if (!doc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analysis not found'
+      });
+    }
+    
+    const analysis = doc.data();
+    
+    // Verify form_id matches
+    if (analysis.form_id !== formId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Analysis does not belong to this form'
+      });
+    }
+    
+    // Get form structure
+    const formDoc = await gcpClient.getFormStructure(formId, true);
+    if (!formDoc) {
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found'
+      });
+    }
+    
+    const fields = formDoc.structure?.fields || formDoc.fields || [];
+    const primaryField = fields.find(f => f.id === analysis.selected_fields.primary.id);
+    const secondaryField = fields.find(f => f.id === analysis.selected_fields.secondary.id);
+    
+    if (!primaryField || !secondaryField) {
+      return res.status(400).json({
+        success: false,
+        error: 'Fields not found in form',
+        missing_primary: !primaryField,
+        missing_secondary: !secondaryField
+      });
+    }
+    
+    // Calculate date range
+    const dateRangeParam = req.query.dateRange || '30';
+    const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30;
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setUTCDate(startDate.getUTCDate() - dateRange);
+    startDate.setUTCHours(0, 0, 0, 0);
+    endDate.setUTCHours(23, 59, 59, 999);
+    
+    // Load submissions
+    const submissions = await gcpClient.getFormSubmissions(formId, {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+    
+    // Compute analysis
+    const { computeCustomAnalysis } = require('./utils/custom-analytics');
+    const result = computeCustomAnalysis(
+      submissions,
+      analysis.template_type,
+      primaryField,
+      secondaryField,
+      {
+        filters: analysis.filters || [],
+        aggregation: analysis.aggregation || 'mean',
+        time_granularity: analysis.time_granularity
+      }
+    );
+    
+    // Update analysis with new results
+    await gcpClient.collection('custom_analyses').doc(analysisId).set({
+      generated_insights: {
+        bigNumber: result.bigNumber,
+        sampleSize: result.sampleSize,
+        strength: result.strength
+      },
+      chart_config: {
+        type: result.chartType,
+        data: result.chartData
+      },
+      last_computed_at: Firestore.FieldValue.serverTimestamp(),
+      computed_for_submission_count: submissions.length,
+      date_range: {
+        start: startDate.toISOString(),
+        end: endDate.toISOString()
+      },
+      updated_at: Firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    
+    res.json({
+      success: true,
+      analysis: {
+        template_type: analysis.template_type,
+        selected_fields: analysis.selected_fields,
+        bigNumber: result.bigNumber,
+        chartType: result.chartType,
+        chartData: result.chartData,
+        sampleSize: result.sampleSize,
+        strength: result.strength
+      }
+    });
+  } catch (error) {
+    console.error('Error recomputing custom analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to recompute analysis'
+    });
   }
 });
 
