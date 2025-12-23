@@ -176,14 +176,16 @@ function analyzeNumberNumber(pairs, field1, field2) {
   const range = maxX - minX;
 
   if (dataSize <= 75) {
-    // No aggregation - return individual points
+    // No aggregation - return individual points (sorted by x)
     aggregationLevel = 'none';
     numBins = 0;
-    chartData = numericPairs.map(p => ({
-      x: Math.round(p.x * 10) / 10,
-      y: Math.round(p.y * 10) / 10,
-      label: `${Math.round(p.x)}`
-    }));
+    chartData = numericPairs
+      .map(p => ({
+        x: Math.round(p.x * 10) / 10,
+        y: Math.round(p.y * 10) / 10,
+        label: `${Math.round(p.x)}`
+      }))
+      .sort((a, b) => a.x - b.x); // Sort by x-axis value
   } else if (dataSize <= 300) {
     // Light aggregation: 5-8 bins
     aggregationLevel = 'light';
