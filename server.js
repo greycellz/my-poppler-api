@@ -2797,15 +2797,18 @@ app.post('/api/analytics/forms/:formId/custom/analyze', async (req, res) => {
       });
     }
     
-    const {
-      template_type,
-      primary_field_id,
-      secondary_field_id,
-      filters = [],
-      aggregation = 'mean',
-      time_granularity = null,
-      date_range
-    } = req.body;
+    // 🔍 INSPECT ACTUAL REQUEST BODY (following repo rule: never assume field names)
+    console.log('🔍 ANALYZE - REQUEST BODY:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 ANALYZE - AVAILABLE KEYS:', Object.keys(req.body));
+    
+    // Handle both snake_case and camelCase field names
+    const template_type = req.body.template_type || req.body.templateType;
+    const primary_field_id = req.body.primary_field_id || req.body.primaryFieldId;
+    const secondary_field_id = req.body.secondary_field_id || req.body.secondaryFieldId;
+    const filters = req.body.filters || [];
+    const aggregation = req.body.aggregation || 'mean';
+    const time_granularity = req.body.time_granularity || req.body.timeGranularity || null;
+    const date_range = req.body.date_range || req.body.dateRange;
     
     console.log(`📊 Custom analysis request: formId=${formId}, template=${template_type}, userId=${userId}`);
     
@@ -2814,6 +2817,16 @@ app.post('/api/analytics/forms/:formId/custom/analyze', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'template_type, primary_field_id, and secondary_field_id are required'
+      });
+    }
+    
+    // Validate aggregation parameter
+    const validAggregations = ['mean', 'median', 'p90'];
+    if (aggregation && !validAggregations.includes(aggregation)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid aggregation. Must be one of: ${validAggregations.join(', ')}`,
+        received: aggregation
       });
     }
     
@@ -2982,18 +2995,22 @@ app.post('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
       });
     }
     
-    const {
-      analysis_id,
-      template_type,
-      selected_fields,
-      filters = [],
-      aggregation = 'mean',
-      time_granularity = null,
-      name,
-      pinned = false,
-      generated_insights,
-      chart_config
-    } = req.body;
+    // 🔍 INSPECT ACTUAL REQUEST BODY (following repo rule: never assume field names)
+    console.log('🔍 SAVE - REQUEST BODY:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 SAVE - AVAILABLE KEYS:', Object.keys(req.body));
+    
+    // Handle both snake_case and camelCase field names
+    const analysis_id = req.body.analysis_id || req.body.analysisId;
+    const template_type = req.body.template_type || req.body.templateType;
+    const selected_fields = req.body.selected_fields || req.body.selectedFields;
+    const filters = req.body.filters || [];
+    const aggregation = req.body.aggregation || 'mean';
+    const time_granularity = req.body.time_granularity || req.body.timeGranularity || null;
+    const name = req.body.name;
+    const pinned = req.body.pinned || false;
+    const generated_insights = req.body.generated_insights || req.body.generatedInsights;
+    const chart_config = req.body.chart_config || req.body.chartConfig;
+    const date_range = req.body.date_range || req.body.dateRange;
     
     // Validate required fields
     if (!template_type || !selected_fields || !name) {
@@ -3026,9 +3043,19 @@ app.post('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
     const analysisId = analysis_id || `custom_${formId}_${Date.now()}`;
     
     // Get current submission count for cache freshness tracking
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setUTCDate(startDate.getUTCDate() - 30);
+    // Use date_range from request if provided, otherwise default to 30 days
+    let startDate, endDate;
+    if (date_range && date_range.start && date_range.end) {
+      startDate = new Date(date_range.start);
+      endDate = new Date(date_range.end);
+    } else {
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setUTCDate(startDate.getUTCDate() - 30);
+    }
+    startDate.setUTCHours(0, 0, 0, 0);
+    endDate.setUTCHours(23, 59, 59, 999);
+    
     const submissions = await gcpClient.getFormSubmissions(formId, {
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString()
@@ -3090,10 +3117,9 @@ app.get('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
     }
     
     // Get saved analyses (form-level, shared with all collaborators)
+    // Note: Use in-memory sort to avoid Firestore composite index requirement
     const snapshot = await gcpClient.collection('custom_analyses')
       .where('form_id', '==', formId)
-      .orderBy('pinned', 'desc')
-      .orderBy('created_at', 'desc')
       .limit(10)
       .get();
     
@@ -3112,6 +3138,7 @@ app.get('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
       endDate: endDate.toISOString()
     });
     
+    // Map and validate analyses
     const analyses = snapshot.docs.map(doc => {
       const analysis = doc.data();
       
@@ -3129,6 +3156,17 @@ app.get('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
         fields_exist: fieldsExist,
         missing_fields: missingFields
       };
+    });
+    
+    // Sort in memory: pinned first, then by created_at (desc)
+    analyses.sort((a, b) => {
+      if (a.pinned !== b.pinned) {
+        return b.pinned ? 1 : -1; // Pinned items first
+      }
+      // Compare timestamps (handle both Date objects and Firestore Timestamps)
+      const aTime = a.created_at?.toMillis ? a.created_at.toMillis() : new Date(a.created_at).getTime();
+      const bTime = b.created_at?.toMillis ? b.created_at.toMillis() : new Date(b.created_at).getTime();
+      return bTime - aTime; // Most recent first
     });
     
     res.json({

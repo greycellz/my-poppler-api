@@ -78,7 +78,7 @@ function computeCustomAnalysis(submissions, templateType, primaryField, secondar
     case 'breakdown':
       return analyzeBreakdown(filteredSubmissions, primaryField, secondaryField, aggregation);
     case 'over-time':
-      return analyzeOverTime(filteredSubmissions, primaryField, secondaryField, timeGranularity || 'day');
+      return analyzeOverTime(filteredSubmissions, primaryField, secondaryField, timeGranularity || 'day', aggregation);
     case 'relationship':
       // Phase 1.5
       throw new Error('Relationship template not yet implemented (Phase 1.5)');
@@ -107,8 +107,14 @@ function applyFilters(submissions, filters) {
     return submissions;
   }
   
+  // 🔍 INSPECT ACTUAL SUBMISSION STRUCTURE FOR FILTERS
+  if (submissions.length > 0 && filters.length > 0) {
+    console.log('🔍 FILTERS - ACTUAL SUBMISSION STRUCTURE:', JSON.stringify(submissions[0], null, 2));
+  }
+  
   return submissions.filter(submission => {
-    const data = submission.submission_data || {};
+    // Handle both possible field names (submission_data, submissionData, data)
+    const data = submission.submission_data || submission.submissionData || submission.data || {};
     
     return filters.every(filter => {
       const fieldValue = data[filter.field_id];
@@ -150,10 +156,17 @@ function applyFilters(submissions, filters) {
  * @returns {Object} Analysis results
  */
 function analyzeBreakdown(submissions, primaryField, secondaryField, aggregation = 'mean') {
+  // 🔍 INSPECT ACTUAL SUBMISSION STRUCTURE (following repo rule: never assume field names)
+  if (submissions.length > 0) {
+    console.log('🔍 BREAKDOWN - ACTUAL SUBMISSION STRUCTURE:', JSON.stringify(submissions[0], null, 2));
+    console.log('🔍 BREAKDOWN - SUBMISSION KEYS:', Object.keys(submissions[0]));
+  }
+  
   // Extract pairs
   const pairs = [];
   for (const submission of submissions) {
-    const data = submission.submission_data || {};
+    // Handle both possible field names (submission_data, submissionData, data)
+    const data = submission.submission_data || submission.submissionData || submission.data || {};
     const primaryValue = data[primaryField.id];
     const secondaryValue = data[secondaryField.id];
     
@@ -270,13 +283,21 @@ function analyzeBreakdown(submissions, primaryField, secondaryField, aggregation
  * @param {Object} primaryField - Date field
  * @param {Object} secondaryField - Number or category field
  * @param {string} timeGranularity - 'day' | 'week' | 'month'
+ * @param {string} aggregation - 'mean' | 'median' | 'p90' (for numeric fields)
  * @returns {Object} Analysis results
  */
-function analyzeOverTime(submissions, primaryField, secondaryField, timeGranularity = 'day') {
+function analyzeOverTime(submissions, primaryField, secondaryField, timeGranularity = 'day', aggregation = 'mean') {
+  // 🔍 INSPECT ACTUAL SUBMISSION STRUCTURE (following repo rule: never assume field names)
+  if (submissions.length > 0) {
+    console.log('🔍 OVER TIME - ACTUAL SUBMISSION STRUCTURE:', JSON.stringify(submissions[0], null, 2));
+    console.log('🔍 OVER TIME - SUBMISSION KEYS:', Object.keys(submissions[0]));
+  }
+  
   // Extract pairs
   const pairs = [];
   for (const submission of submissions) {
-    const data = submission.submission_data || {};
+    // Handle both possible field names (submission_data, submissionData, data)
+    const data = submission.submission_data || submission.submissionData || submission.data || {};
     const dateValue = data[primaryField.id];
     const secondaryValue = data[secondaryField.id];
     
@@ -353,8 +374,26 @@ function analyzeOverTime(submissions, primaryField, secondaryField, timeGranular
     let label = timeKey;
     
     if (isNumeric) {
-      // Calculate mean for numeric values
-      aggregatedValue = values.reduce((sum, v) => sum + v, 0) / values.length;
+      // Apply aggregation parameter (mean/median/p90)
+      switch (aggregation) {
+        case 'mean':
+          aggregatedValue = values.reduce((sum, v) => sum + v, 0) / values.length;
+          break;
+        case 'median':
+          const sorted = [...values].sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          aggregatedValue = sorted.length % 2 === 0
+            ? (sorted[mid - 1] + sorted[mid]) / 2
+            : sorted[mid];
+          break;
+        case 'p90':
+          const sortedP90 = [...values].sort((a, b) => a - b);
+          const index = Math.ceil(sortedP90.length * 0.9) - 1;
+          aggregatedValue = sortedP90[Math.max(0, index)];
+          break;
+        default:
+          aggregatedValue = values.reduce((sum, v) => sum + v, 0) / values.length;
+      }
     } else {
       // For categories, count most common value
       const counts = {};
@@ -451,26 +490,11 @@ function validateFieldCompatibility(templateType, primaryField, secondaryField) 
   }
 }
 
-/**
- * Generate BigNumber for analysis result
- * @param {string} templateType - Template type
- * @param {Object} result - Analysis result
- * @param {Object} primaryField - Primary field
- * @param {Object} secondaryField - Secondary field
- * @param {string} aggregation - Aggregation type
- * @returns {Object} BigNumber object
- */
-function generateBigNumber(templateType, result, primaryField, secondaryField, aggregation = 'mean') {
-  // BigNumber is already generated in template-specific analyzers
-  return result.bigNumber;
-}
-
 module.exports = {
   computeCustomAnalysis,
   applyFilters,
   analyzeBreakdown,
   analyzeOverTime,
-  validateFieldCompatibility,
-  generateBigNumber
+  validateFieldCompatibility
 };
 
