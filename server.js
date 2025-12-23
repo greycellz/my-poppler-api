@@ -3039,7 +3039,6 @@ app.post('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
       });
     }
     
-    const db = require('firebase-admin').firestore();
     const analysisId = analysis_id || `custom_${formId}_${Date.now()}`;
     
     // Get current submission count for cache freshness tracking
@@ -3220,9 +3219,8 @@ app.patch('/api/analytics/forms/:formId/custom/saved/:analysisId', async (req, r
     }
     
     // Build update object
-    const db = require('firebase-admin').firestore();
     const updateData = {
-      updated_at: db.FieldValue.serverTimestamp()
+      updated_at: gcpClient.FieldValue.serverTimestamp()
     };
     
     if (name !== undefined) {
@@ -3380,7 +3378,6 @@ app.post('/api/analytics/forms/:formId/custom/saved/:analysisId/recompute', asyn
     );
     
     // Update analysis with new results
-    const db = require('firebase-admin').firestore();
     await gcpClient.collection('custom_analyses').doc(analysisId).set({
       generated_insights: {
         bigNumber: result.bigNumber,
