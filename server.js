@@ -34,6 +34,11 @@ const { Firestore } = require('@google-cloud/firestore');
 // Initialize Email Service
 const emailService = require('./email-service');
 
+// Import authentication and authorization middleware (must be before routes)
+const { authenticateToken, requireAuth, optionalAuth } = require('./auth/middleware');
+const { requireFormOwnership, requireSubmissionOwnership } = require('./auth/authorization');
+const featureFlags = require('./config/feature-flags');
+
 // Environment-aware base URL construction
 const getBaseUrl = () => {
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
@@ -5252,9 +5257,6 @@ app.get('/api/cleanup/expired-sessions', async (req, res) => {
 
 // Import authentication routes
 const authRoutes = require('./auth/routes');
-const { authenticateToken, requireAuth } = require('./auth/middleware');
-const { requireFormOwnership, requireSubmissionOwnership } = require('./auth/authorization');
-const featureFlags = require('./config/feature-flags');
 
 // Import billing routes
 const billingRoutes = require('./routes/billing');
