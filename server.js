@@ -2474,7 +2474,11 @@ app.get('/analytics/forms/:formId/preferences',
   async (req, res) => {
     try {
       const { formId } = req.params;
-      const userId = req.user.userId; // From middleware
+      const userId = req.user?.userId || req.user?.id; // From middleware (defensive check)
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
     
     const docId = `${userId}_${formId}`;
     const doc = await gcpClient.collection('analytics_preferences').doc(docId).get();
@@ -2766,7 +2770,11 @@ app.get('/analytics/forms/:formId/cross-field/favorites',
   async (req, res) => {
     try {
       const { formId } = req.params;
-      const userId = req.user.userId; // From middleware
+      const userId = req.user?.userId || req.user?.id; // From middleware (defensive check)
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
 
     const docId = `${userId}_${formId}`;
     const doc = await gcpClient.collection('analytics_preferences').doc(docId).get();
@@ -2793,7 +2801,11 @@ app.post('/analytics/forms/:formId/cross-field/favorites',
   async (req, res) => {
     try {
       const { formId } = req.params;
-      const userId = req.user.userId; // From middleware
+      const userId = req.user?.userId || req.user?.id; // From middleware (defensive check)
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const { comparisonId, isFavorite } = req.body;
 
     if (!comparisonId || typeof isFavorite !== 'boolean') {
@@ -2850,7 +2862,11 @@ app.post('/api/analytics/forms/:formId/custom/analyze',
   async (req, res) => {
     try {
       const { formId } = req.params;
-      const userId = req.user.userId; // From middleware
+      const userId = req.user?.userId || req.user?.id; // From middleware (defensive check)
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
     
     // 🔍 INSPECT ACTUAL REQUEST BODY (following repo rule: never assume field names)
     console.log('🔍 ANALYZE - REQUEST BODY:', JSON.stringify(req.body, null, 2));
@@ -3060,7 +3076,11 @@ app.post('/api/analytics/forms/:formId/custom/saved',
   async (req, res) => {
     try {
       const { formId } = req.params;
-      const userId = req.user.userId; // From middleware
+      const userId = req.user?.userId || req.user?.id; // From middleware (defensive check)
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
     
     // 🔍 INSPECT ACTUAL REQUEST BODY (following repo rule: never assume field names)
     console.log('🔍 SAVE - REQUEST BODY:', JSON.stringify(req.body, null, 2));
@@ -3177,7 +3197,11 @@ app.get('/api/analytics/forms/:formId/custom/saved',
   async (req, res) => {
     try {
       const { formId } = req.params;
-      const userId = req.user.userId; // From middleware
+      const userId = req.user?.userId || req.user?.id; // From middleware (defensive check)
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
     
     // Get saved analyses (form-level, shared with all collaborators)
     // Note: Use in-memory sort to avoid Firestore composite index requirement
@@ -4791,7 +4815,7 @@ app.get('/api/forms/:formId',
 app.get('/api/submissions/:submissionId/signature/:fieldId',
   authenticateToken,      // ✅ Require authentication
   requireAuth,            // ✅ Ensure user exists
-  requireSubmissionAccess,  // ✅ Verify submission ownership
+  requireSubmissionOwnership,  // ✅ Verify submission ownership
   async (req, res) => {
   try {
     const { submissionId, fieldId } = req.params;
