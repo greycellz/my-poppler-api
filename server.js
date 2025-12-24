@@ -877,13 +877,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ============== CORS CONFIGURATION ==============
 
 // Define allowed origins
+// TODO: Move to CORS_ALLOWED_ORIGINS environment variable (comma-separated list)
 const allowedOrigins = [
   'https://chatterforms.com',
   'https://www.chatterforms.com',
   'http://localhost:3000',  // Development
   'http://localhost:3001',  // Development alternate
   process.env.FRONTEND_URL,
-  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
 ].filter(Boolean); // Remove null values
 
 console.log('🔐 CORS allowed origins:', allowedOrigins);
