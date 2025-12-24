@@ -4,8 +4,11 @@
     "description": "ChatterForms backend API",
     "main": "server.js",
     "scripts": {
+        "prestart": "node scripts/validate-env.js",
         "start": "node server.js",
+        "predev": "node scripts/validate-env.js",
         "dev": "nodemon server.js",
+        "validate-env": "node scripts/validate-env.js",
         "test": "jest",
         "test:watch": "jest --watch",
         "test:coverage": "jest --coverage",

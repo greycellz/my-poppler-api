@@ -3,15 +3,62 @@ const jwt = require('jsonwebtoken')
 const { validationResult } = require('express-validator')
 
 // Configuration
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'
+// ✅ CRITICAL: No fallback - fail fast if JWT_SECRET not set
+const JWT_SECRET = process.env.JWT_SECRET
 const JWT_EXPIRES_IN = '7d'
 const SALT_ROUNDS = 12
 
-// Debug JWT_SECRET on startup
-console.log('🔧 JWT_SECRET environment variable check:')
-console.log('🔧 JWT_SECRET exists:', !!process.env.JWT_SECRET)
-console.log('🔧 JWT_SECRET length:', process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 'undefined')
-console.log('🔧 Using fallback:', !process.env.JWT_SECRET)
+// ✅ Validate JWT_SECRET on startup
+if (!JWT_SECRET) {
+  console.error('');
+  console.error('=====================================');
+  console.error('❌ CRITICAL CONFIGURATION ERROR');
+  console.error('=====================================');
+  console.error('JWT_SECRET environment variable is not set!');
+  console.error('');
+  console.error('This is a critical security configuration.');
+  console.error('The application cannot start without it.');
+  console.error('');
+  console.error('TO FIX:');
+  console.error('1. Generate a secure secret:');
+  console.error('   node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  console.error('');
+  console.error('2. Set in Railway:');
+  console.error('   Dashboard → Settings → Variables → Add Variable');
+  console.error('   Key: JWT_SECRET');
+  console.error('   Value: <your_generated_secret>');
+  console.error('');
+  console.error('3. Redeploy the application');
+  console.error('=====================================');
+  console.error('');
+  
+  // Fail fast - don't start the application
+  process.exit(1);
+}
+
+// Validate JWT_SECRET strength
+if (JWT_SECRET.length < 32) {
+  console.error('');
+  console.error('=====================================');
+  console.error('⚠️ WARNING: JWT_SECRET TOO SHORT');
+  console.error('=====================================');
+  console.error(`Current length: ${JWT_SECRET.length} characters`);
+  console.error('Recommended: At least 32 characters (256 bits)');
+  console.error('');
+  console.error('Your JWT_SECRET is too weak and could be vulnerable to brute force attacks.');
+  console.error('Please generate a stronger secret:');
+  console.error('node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  console.error('=====================================');
+  console.error('');
+  
+  // Still start but log warning
+  console.warn('⚠️ Application starting with weak JWT_SECRET - SECURITY RISK!');
+}
+
+// Log successful configuration (without revealing the secret)
+console.log('✅ JWT_SECRET configured');
+console.log(`✅ JWT_SECRET length: ${JWT_SECRET.length} characters`);
+console.log(`✅ JWT token expiration: ${JWT_EXPIRES_IN}`);
 
 /**
  * Hash a password using bcrypt
@@ -43,23 +90,35 @@ const comparePassword = async (password, hash) => {
  */
 const generateToken = (userId, email) => {
   try {
-    console.log('🔑 Generating token for user:', userId, email)
-    console.log('🔑 JWT_SECRET length:', JWT_SECRET ? JWT_SECRET.length : 'undefined')
+    // Additional runtime check
+    if (!JWT_SECRET) {
+      console.error('❌ CRITICAL: JWT_SECRET not available at runtime!');
+      throw new Error('JWT_SECRET not configured - cannot generate token');
+    }
+    
+    console.log('🔑 Generating token for user:', userId);
     
     const token = jwt.sign(
       { 
         userId, 
-        email
+        email,
+        iat: Math.floor(Date.now() / 1000)  // Issued at
       },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     )
     
-    console.log('✅ Token generated successfully, length:', token.length)
+    console.log('✅ Token generated successfully');
     return token
   } catch (error) {
-    console.error('❌ Token generation error:', error)
-    throw new Error('Failed to generate token')
+    console.error('❌ Token generation error:', error);
+    
+    // Provide helpful error message
+    if (error.message.includes('secretOrPrivateKey')) {
+      throw new Error('JWT_SECRET configuration error - cannot generate authentication token');
+    }
+    
+    throw new Error('Failed to generate authentication token');
   }
 }
 
@@ -68,10 +127,30 @@ const generateToken = (userId, email) => {
  */
 const verifyToken = (token) => {
   try {
+    // Additional runtime check
+    if (!JWT_SECRET) {
+      console.error('❌ CRITICAL: JWT_SECRET not available at runtime!');
+      throw new Error('JWT_SECRET not configured - cannot verify token');
+    }
+    
     return jwt.verify(token, JWT_SECRET)
   } catch (error) {
-    console.error('Token verification error:', error)
-    throw new Error('Invalid token')
+    console.error('Token verification error:', error.message);
+    
+    // Provide specific error messages
+    if (error.name === 'TokenExpiredError') {
+      throw new Error('Token has expired - please sign in again');
+    }
+    
+    if (error.name === 'JsonWebTokenError') {
+      throw new Error('Invalid token - authentication failed');
+    }
+    
+    if (error.message.includes('secretOrPublicKey')) {
+      throw new Error('JWT_SECRET configuration error - cannot verify token');
+    }
+    
+    throw new Error('Token verification failed');
   }
 }
 
