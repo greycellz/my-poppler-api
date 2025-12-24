@@ -1173,14 +1173,37 @@ async function captureFormScreenshot(url, urlHash, options = {}) {
 
 // ============== EXISTING PDF ENDPOINTS ==============
 
-app.post('/upload', upload.single('pdf'), async (req, res) => {
-  const uuid = req.uuid || uuidv4();
-  const pdfPath = path.join(__dirname, 'uploads', `${uuid}.pdf`);
-  const outputDir = path.join(__dirname, 'output', uuid);
-  const outputBase = path.join(outputDir, 'page');
+app.post('/upload', 
+  upload.single('pdf'),
+  optionalAuth,  // ✅ Check for auth but don't require it yet (for gradual rollout)
+  async (req, res) => {
+    try {
+      const userId = req.user?.userId || req.user?.id
+      
+      // ✅ NEW: Check authentication requirement for PDF analysis
+      if (featureFlags.ENABLE_FILE_UPLOAD_AUTH && !userId) {
+        console.log(`❌ Unauthenticated PDF upload attempt blocked`);
+        
+        // Clean up uploaded file if it exists
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+        
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required for PDF analysis',
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Please sign in or create an account to analyze PDFs. PDF analysis helps us track usage and prevent abuse.',
+          action: 'signup_or_login'
+        });
+      }
 
-  try {
-    if (!fs.existsSync(outputDir)) {
+      const uuid = req.uuid || uuidv4();
+      const pdfPath = path.join(__dirname, 'uploads', `${uuid}.pdf`);
+      const outputDir = path.join(__dirname, 'output', uuid);
+      const outputBase = path.join(outputDir, 'page');
+
+      if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
 
