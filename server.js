@@ -1954,9 +1954,13 @@ app.get('/analytics/:formId', async (req, res) => {
 // ============== ANALYTICS OVERVIEW ENDPOINT ==============
 
 // Get analytics overview for a form (with views, submissions, completion rate)
-app.get('/analytics/forms/:formId/overview', async (req, res) => {
-  try {
-    const { formId } = req.params;
+app.get('/analytics/forms/:formId/overview',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
     // Handle dateRange with or without 'd' suffix (e.g., "30d" or "30")
     const dateRangeParam = req.query.dateRange || '30';
     const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30; // Default 30 days
@@ -2280,9 +2284,13 @@ app.get('/analytics/forms/:formId/overview', async (req, res) => {
 // ============== FIELD ANALYTICS ENDPOINT ==============
 
 // Get field-level analytics for a form
-app.get('/analytics/forms/:formId/fields', async (req, res) => {
-  try {
-    const { formId } = req.params;
+app.get('/analytics/forms/:formId/fields',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
     
     // Handle dateRange with or without 'd' suffix (e.g., "30d" or "30")
     const dateRangeParam = req.query.dateRange || '30';
@@ -2459,15 +2467,14 @@ function getUserIdFromRequest(req) {
 }
 
 // Get user's analytics preferences for a form
-app.get('/analytics/forms/:formId/preferences', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    
-    // Require authentication - analytics page is authenticated-only
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+app.get('/analytics/forms/:formId/preferences',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId; // From middleware
     
     const docId = `${userId}_${formId}`;
     const doc = await gcpClient.collection('analytics_preferences').doc(docId).get();
@@ -2497,49 +2504,48 @@ app.get('/analytics/forms/:formId/preferences', async (req, res) => {
 });
 
 // Update user's analytics preferences for a form
-app.post('/analytics/forms/:formId/preferences', async (req, res) => {
-  try {
-    // 🔍 INSPECT ACTUAL REQUEST BODY STRUCTURE
-    console.log('🔍 ACTUAL REQUEST BODY:', JSON.stringify(req.body, null, 2));
-    console.log('🔍 AVAILABLE KEYS:', Object.keys(req.body || {}));
-    
-    const { formId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    
-    // If no userId, return 401 (can't save without auth)
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Validate and extract fields from request body
-    // Check actual field names (starredFields vs starred_fields, etc.)
-    const starredFields = req.body.starredFields || req.body.starred_fields;
-    const expandedFields = req.body.expandedFields || req.body.expanded_fields;
-    
-    // Validate field types if provided
-    if (starredFields !== undefined && !Array.isArray(starredFields)) {
-      return res.status(400).json({ error: 'starredFields must be an array' });
-    }
-    if (expandedFields !== undefined && !Array.isArray(expandedFields)) {
-      return res.status(400).json({ error: 'expandedFields must be an array' });
-    }
-    
-    const docId = `${userId}_${formId}`;
-    const updateData = {
-      userId,
-      formId,
-      updatedAt: new Date().toISOString()
-    };
-    
-    if (starredFields !== undefined) updateData.starredFields = starredFields;
-    if (expandedFields !== undefined) updateData.expandedFields = expandedFields;
-    
-    await gcpClient.collection('analytics_preferences')
-      .doc(docId)
-      .set(updateData, { merge: true });
-    
-    res.json({ success: true });
-  } catch (error) {
+app.post('/analytics/forms/:formId/preferences',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      // 🔍 INSPECT ACTUAL REQUEST BODY STRUCTURE
+      console.log('🔍 ACTUAL REQUEST BODY:', JSON.stringify(req.body, null, 2));
+      console.log('🔍 AVAILABLE KEYS:', Object.keys(req.body || {}));
+      
+      const { formId } = req.params;
+      const userId = req.user.userId; // From middleware
+      
+      // Validate and extract fields from request body
+      // Check actual field names (starredFields vs starred_fields, etc.)
+      const starredFields = req.body.starredFields || req.body.starred_fields;
+      const expandedFields = req.body.expandedFields || req.body.expanded_fields;
+      
+      // Validate field types if provided
+      if (starredFields !== undefined && !Array.isArray(starredFields)) {
+        return res.status(400).json({ error: 'starredFields must be an array' });
+      }
+      if (expandedFields !== undefined && !Array.isArray(expandedFields)) {
+        return res.status(400).json({ error: 'expandedFields must be an array' });
+      }
+      
+      const docId = `${userId}_${formId}`;
+      const updateData = {
+        userId,
+        formId,
+        updatedAt: new Date().toISOString()
+      };
+      
+      if (starredFields !== undefined) updateData.starredFields = starredFields;
+      if (expandedFields !== undefined) updateData.expandedFields = expandedFields;
+      
+      await gcpClient.collection('analytics_preferences')
+        .doc(docId)
+        .set(updateData, { merge: true });
+      
+      res.json({ success: true });
+    } catch (error) {
     console.error('Error saving analytics preferences:', error);
     res.status(500).json({ error: 'Failed to save preferences' });
   }
@@ -2548,9 +2554,13 @@ app.post('/analytics/forms/:formId/preferences', async (req, res) => {
 // ============== CROSS-FIELD ANALYTICS ENDPOINTS ==============
 
 // Get default cross-field comparisons for a form
-app.get('/analytics/forms/:formId/cross-field/defaults', async (req, res) => {
-  try {
-    const { formId } = req.params;
+app.get('/analytics/forms/:formId/cross-field/defaults',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
     const dateRangeParam = req.query.dateRange || '30';
     const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30;
 
@@ -2662,9 +2672,13 @@ app.get('/analytics/forms/:formId/cross-field/defaults', async (req, res) => {
 });
 
 // Analyze two specific fields
-app.get('/analytics/forms/:formId/cross-field/analyze', async (req, res) => {
-  try {
-    const { formId } = req.params;
+app.get('/analytics/forms/:formId/cross-field/analyze',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
     const { fieldId1, fieldId2 } = req.query;
     const dateRangeParam = req.query.dateRange || '30';
     const dateRange = parseInt(dateRangeParam.toString().replace(/d$/, '')) || 30;
@@ -2745,14 +2759,14 @@ app.get('/analytics/forms/:formId/cross-field/analyze', async (req, res) => {
 });
 
 // Get user's favorited comparisons
-app.get('/analytics/forms/:formId/cross-field/favorites', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const userId = getUserIdFromRequest(req);
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+app.get('/analytics/forms/:formId/cross-field/favorites',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId; // From middleware
 
     const docId = `${userId}_${formId}`;
     const doc = await gcpClient.collection('analytics_preferences').doc(docId).get();
@@ -2772,15 +2786,15 @@ app.get('/analytics/forms/:formId/cross-field/favorites', async (req, res) => {
 });
 
 // Update user's favorited comparisons
-app.post('/analytics/forms/:formId/cross-field/favorites', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    const { comparisonId, isFavorite } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+app.post('/analytics/forms/:formId/cross-field/favorites',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId; // From middleware
+      const { comparisonId, isFavorite } = req.body;
 
     if (!comparisonId || typeof isFavorite !== 'boolean') {
       return res.status(400).json({
@@ -2829,18 +2843,14 @@ app.post('/analytics/forms/:formId/cross-field/favorites', async (req, res) => {
 // ============== CUSTOM ANALYTICS ENDPOINTS ==============
 
 // Analyze custom fields with template
-app.post('/api/analytics/forms/:formId/custom/analyze', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    
-    // Require authentication
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized'
-      });
-    }
+app.post('/api/analytics/forms/:formId/custom/analyze',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId; // From middleware
     
     // 🔍 INSPECT ACTUAL REQUEST BODY (following repo rule: never assume field names)
     console.log('🔍 ANALYZE - REQUEST BODY:', JSON.stringify(req.body, null, 2));
@@ -3043,17 +3053,14 @@ app.post('/api/analytics/forms/:formId/custom/analyze', async (req, res) => {
 });
 
 // Save custom analysis
-app.post('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized'
-      });
-    }
+app.post('/api/analytics/forms/:formId/custom/saved',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId; // From middleware
     
     // 🔍 INSPECT ACTUAL REQUEST BODY (following repo rule: never assume field names)
     console.log('🔍 SAVE - REQUEST BODY:', JSON.stringify(req.body, null, 2));
@@ -3163,17 +3170,14 @@ app.post('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
 });
 
 // Get saved custom analyses
-app.get('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized'
-      });
-    }
+app.get('/api/analytics/forms/:formId/custom/saved',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId; // From middleware
     
     // Get saved analyses (form-level, shared with all collaborators)
     // Note: Use in-memory sort to avoid Firestore composite index requirement
@@ -3245,17 +3249,14 @@ app.get('/api/analytics/forms/:formId/custom/saved', async (req, res) => {
 });
 
 // Update custom analysis (name, pinned, order)
-app.patch('/api/analytics/forms/:formId/custom/saved/:analysisId', async (req, res) => {
-  try {
-    const { formId, analysisId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized'
-      });
-    }
+app.patch('/api/analytics/forms/:formId/custom/saved/:analysisId',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId, analysisId } = req.params;
+      const userId = req.user.userId; // From middleware
     
     const { name, pinned, order } = req.body;
     
@@ -3308,17 +3309,14 @@ app.patch('/api/analytics/forms/:formId/custom/saved/:analysisId', async (req, r
 });
 
 // Delete custom analysis
-app.delete('/api/analytics/forms/:formId/custom/saved/:analysisId', async (req, res) => {
-  try {
-    const { formId, analysisId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized'
-      });
-    }
+app.delete('/api/analytics/forms/:formId/custom/saved/:analysisId',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId, analysisId } = req.params;
+      const userId = req.user.userId; // From middleware
     
     // Get existing analysis
     const doc = await gcpClient.collection('custom_analyses').doc(analysisId).get();
@@ -3355,17 +3353,14 @@ app.delete('/api/analytics/forms/:formId/custom/saved/:analysisId', async (req, 
 });
 
 // Recompute custom analysis (refresh data)
-app.post('/api/analytics/forms/:formId/custom/saved/:analysisId/recompute', async (req, res) => {
-  try {
-    const { formId, analysisId } = req.params;
-    const userId = getUserIdFromRequest(req);
-    
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized'
-      });
-    }
+app.post('/api/analytics/forms/:formId/custom/saved/:analysisId/recompute',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId, analysisId } = req.params;
+      const userId = req.user.userId; // From middleware
     
     // Get existing analysis
     const doc = await gcpClient.collection('custom_analyses').doc(analysisId).get();
