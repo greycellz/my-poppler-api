@@ -1382,6 +1382,32 @@ class GCPClient {
   }
 
   /**
+   * Get submission by ID (for authorization checks)
+   * Returns minimal data needed for ownership verification
+   */
+  async getSubmissionById(submissionId) {
+    try {
+      const submissionRef = this.collection('submissions').doc(submissionId);
+      const submissionDoc = await submissionRef.get();
+      
+      if (!submissionDoc.exists) {
+        return null;
+      }
+      
+      const data = submissionDoc.data();
+      return {
+        submission_id: submissionDoc.id,
+        form_id: data.form_id || data.formId,
+        user_id: data.user_id || data.userId,
+        ...data
+      };
+    } catch (error) {
+      console.error('Error getting submission by ID:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get submission data on demand (lazy loading)
    */
   async getSubmissionData(submissionId) {
