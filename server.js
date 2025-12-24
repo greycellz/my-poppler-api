@@ -1175,14 +1175,16 @@ async function captureFormScreenshot(url, urlHash, options = {}) {
 
 app.post('/upload', 
   upload.single('pdf'),
-  optionalAuth,  // ✅ Check for auth but don't require it yet (for gradual rollout)
+  optionalAuth,  // ✅ Check for auth but don't require it (frontend handles auth check)
   async (req, res) => {
     try {
+      // Note: Frontend now handles authentication check before making this request
+      // Backend auth check is optional (controlled by feature flag) as a safety net
       const userId = req.user?.userId || req.user?.id
       
-      // ✅ NEW: Check authentication requirement for PDF analysis
+      // Optional backend safety check (frontend is primary gate)
       if (featureFlags.ENABLE_FILE_UPLOAD_AUTH && !userId) {
-        console.log(`❌ Unauthenticated PDF upload attempt blocked`);
+        console.log(`❌ Unauthenticated PDF upload attempt blocked (backend safety check)`);
         
         // Clean up uploaded file if it exists
         if (req.file && req.file.path && fs.existsSync(req.file.path)) {
