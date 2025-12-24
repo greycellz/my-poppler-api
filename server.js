@@ -4793,7 +4793,11 @@ app.get('/api/forms/:formId',
 );
 
 // ============== SIGNATURE DOWNLOAD ENDPOINT ==============
-app.get('/api/submissions/:submissionId/signature/:fieldId', async (req, res) => {
+app.get('/api/submissions/:submissionId/signature/:fieldId',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireSubmissionAccess,  // ✅ Verify submission ownership
+  async (req, res) => {
   try {
     const { submissionId, fieldId } = req.params;
 
@@ -4868,19 +4872,22 @@ app.get('/api/submissions/:submissionId/signature/:fieldId', async (req, res) =>
 });
 
 // ============== PDF DOWNLOAD ENDPOINT ==============
-app.get('/api/submissions/:submissionId/pdf/:fieldId', async (req, res) => {
-  try {
-    const { submissionId, fieldId } = req.params;
+app.get('/api/submissions/:submissionId/pdf/:fieldId',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireSubmissionOwnership,  // ✅ Verify submission ownership
+  async (req, res) => {
+    try {
+      const { submissionId, fieldId } = req.params;
+      const userId = req.user.userId;
 
-    console.log(`📄 Requesting PDF for submission ${submissionId}, field ${fieldId}`);
-    
-    // TODO: Add authentication middleware here
-    // For now, we'll rely on the signed URL security (60-minute expiration)
-    // In production, add proper user authentication
+      console.log(`📄 Requesting PDF: submission=${submissionId}, field=${fieldId}, user=${userId}`);
+      
+      // Ownership already verified by middleware
 
-    // Get submission data
-    const submissionRef = gcpClient.collection('submissions').doc(submissionId);
-    const submissionDoc = await submissionRef.get();
+      // Get submission data
+      const submissionRef = gcpClient.collection('submissions').doc(submissionId);
+      const submissionDoc = await submissionRef.get();
 
     if (!submissionDoc.exists) {
       return res.status(404).json({
@@ -5120,20 +5127,29 @@ app.get('/api/submissions/:submissionId/signatures',
 
 // ============== PDF GENERATE-OR-RETURN ==============
 
-app.post('/api/submissions/:submissionId/pdf/:fieldId/generate-or-return', async (req, res) => {
-  try {
-    const { submissionId, fieldId } = req.params;
-    console.log(`📄 Generate-or-return PDF for submission ${submissionId}, field ${fieldId}`);
-    const result = await gcpClient.getOrCreateSignedPDF(submissionId, fieldId);
-    if (!result.success) {
-      return res.status(500).json({ success: false, error: result.error });
+app.post('/api/submissions/:submissionId/pdf/:fieldId/generate-or-return',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireSubmissionOwnership,  // ✅ Verify submission ownership
+  async (req, res) => {
+    try {
+      const { submissionId, fieldId } = req.params;
+      const userId = req.user.userId;
+      
+      console.log(`📄 Generate-or-return PDF: submission=${submissionId}, field=${fieldId}, user=${userId}`);
+      
+      // Ownership already verified by middleware
+      const result = await gcpClient.getOrCreateSignedPDF(submissionId, fieldId);
+      if (!result.success) {
+        return res.status(500).json({ success: false, error: result.error });
+      }
+      res.json({ success: true, downloadUrl: result.downloadUrl, filename: result.filename, size: result.size });
+    } catch (error) {
+      console.error('❌ Error generate-or-return PDF:', error);
+      res.status(500).json({ success: false, error: 'Failed to generate or retrieve PDF' });
     }
-    res.json({ success: true, downloadUrl: result.downloadUrl, filename: result.filename, size: result.size });
-  } catch (error) {
-    console.error('❌ Error generate-or-return PDF:', error);
-    res.status(500).json({ success: false, error: 'Failed to generate or retrieve PDF' });
   }
-});
+);
 
 // ============== DELETE FORM ENDPOINT ==============
 app.delete('/api/forms/:formId',
