@@ -874,11 +874,50 @@ app.use('/output', express.static(path.join(__dirname, 'output')));
 app.use('/screenshots', express.static(path.join(__dirname, 'screenshots')));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Enable CORS
+// ============== CORS CONFIGURATION ==============
+
+// Define allowed origins
+const allowedOrigins = [
+  'https://chatterforms.com',
+  'https://www.chatterforms.com',
+  'http://localhost:3000',  // Development
+  'http://localhost:3001',  // Development alternate
+  process.env.FRONTEND_URL,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+].filter(Boolean); // Remove null values
+
+console.log('🔐 CORS allowed origins:', allowedOrigins);
+
+// CORS middleware
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  
+  // Check feature flag for strict CORS
+  if (featureFlags.ENABLE_STRICT_CORS) {
+    // Strict mode - only allow whitelisted origins
+    if (origin && allowedOrigins.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      console.log(`✅ CORS: Origin allowed (strict): ${origin}`);
+    } else {
+      console.warn(`⚠️ CORS: Origin not in whitelist: ${origin}`);
+      // Don't set CORS headers - browser will block
+    }
+  } else {
+    // Permissive mode (for gradual rollout)
+    if (origin && allowedOrigins.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+    } else {
+      // Fallback to wildcard for backward compatibility
+      res.header('Access-Control-Allow-Origin', '*');
+      console.warn(`⚠️ CORS: Using wildcard for origin: ${origin || 'unknown'}`);
+    }
+  }
+  
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
   } else {
@@ -3670,19 +3709,42 @@ app.get('/form/:formId/submissions', async (req, res) => {
 
 // ============== FILE UPLOAD ENDPOINT ==============
 
-app.post('/upload-file', upload.single('file'), async (req, res) => {
-  try {
-    const { formId, fieldId } = req.body
-    const file = req.file
-    
-    if (!file || !formId || !fieldId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: file, formId, or fieldId'
-      })
-    }
+app.post('/upload-file', 
+  upload.single('file'),
+  optionalAuth,  // ✅ Check for auth but don't require it yet (for gradual rollout)
+  async (req, res) => {
+    try {
+      const { formId, fieldId } = req.body
+      const file = req.file
+      const userId = req.user?.userId || req.user?.id
+      
+      if (!file || !formId || !fieldId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: file, formId, or fieldId'
+        })
+      }
 
-    console.log(`📁 File upload request: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)}MB) for form: ${formId}, field: ${fieldId}`)
+      // ✅ NEW: Check authentication requirement
+      if (featureFlags.ENABLE_FILE_UPLOAD_AUTH && !userId) {
+        console.log(`❌ Unauthenticated file upload attempt blocked - file: ${file.originalname}`);
+        
+        // Clean up uploaded file
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+        
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required for file uploads',
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Please sign in or create an account to upload files. File uploads help us track usage and prevent abuse.',
+          action: 'signup_or_login'
+        });
+      }
+
+      console.log(`📁 File upload: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
+      console.log(`📁 User: ${userId || 'anonymous'}, Form: ${formId}, Field: ${fieldId}`)
 
     // Generate unique filename with form and field context
     const timestamp = Date.now()
@@ -3702,37 +3764,43 @@ app.post('/upload-file', upload.single('file'), async (req, res) => {
       console.log(`🧹 Cleaned up local file: ${file.path}`)
     }
 
-    console.log(`✅ File uploaded successfully: ${fileName}`)
-    console.log(`🔗 GCP URL: ${uploadResult.publicUrl}`)
-    
-    // Generate backend file serving URL instead of direct GCP URL
-    const backendFileUrl = `${process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app'}/api/files/${formId}/${fieldId}/${timestamp}${fileExtension}`
+      console.log(`✅ File uploaded successfully: ${fileName}`)
+      console.log(`🔗 GCP URL: ${uploadResult.publicUrl}`)
+      
+      // ✅ NEW: Log upload for audit/abuse prevention
+      console.log(`📝 AUDIT: File uploaded - file=${fileName}, user=${userId || 'anonymous'}, size=${file.size}, timestamp=${new Date().toISOString()}`)
+      
+      // Generate backend file serving URL instead of direct GCP URL
+      const backendFileUrl = `${process.env.RAILWAY_PUBLIC_DOMAIN || 'https://my-poppler-api-dev.up.railway.app'}/api/files/${formId}/${fieldId}/${timestamp}${fileExtension}`
 
-    res.json({
-      success: true,
-      fileUrl: backendFileUrl,
-      fileName: file.originalname,
-      fileSize: file.size,
-      fileType: file.mimetype,
-      storedFileName: `${timestamp}${fileExtension}` // Store the actual unique filename
-    })
+      res.json({
+        success: true,
+        fileUrl: backendFileUrl,
+        fileName: file.originalname,
+        fileSize: file.size,
+        fileType: file.mimetype,
+        storedFileName: `${timestamp}${fileExtension}`,
+        uploadedBy: userId || 'anonymous',
+        uploadedAt: new Date().toISOString()
+      });
 
-  } catch (error) {
-    console.error('❌ File upload error:', error)
-    
-    // Clean up local file if it exists
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path)
-      console.log(`🧹 Cleaned up local file after error: ${req.file.path}`)
+    } catch (error) {
+      console.error('❌ File upload error:', error);
+      
+      // Clean up file on error
+      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+        console.log(`🧹 Cleaned up local file after error: ${req.file.path}`);
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to upload file',
+        details: error.message
+      });
     }
-    
-    res.status(500).json({
-      success: false,
-      error: 'File upload failed',
-      details: error.message
-    })
   }
-})
+);
 
 // ============== LOGO ENDPOINTS ==============
 
@@ -4479,61 +4547,120 @@ app.post('/api/debug/cleanup-payment-fields/:formId/:fieldId', async (req, res) 
 // ============== FILE SERVING ENDPOINT ==============
 
 // Serve uploaded files securely
-app.get('/api/files/:formId/:fieldId/:filename', async (req, res) => {
-  try {
-    const { formId, fieldId, filename } = req.params
-    
-    console.log(`📁 File request: ${filename} for form: ${formId}, field: ${fieldId}`)
-    
-    // Construct the file path in GCP Storage
-    const filePath = `form-uploads/${formId}/${fieldId}/${filename}`
-    
-    // Get file from GCP Cloud Storage
-    const bucket = gcpClient.storage.bucket('chatterforms-uploads-us-central1')
-    const file = bucket.file(filePath)
-    
-    // Check if file exists
-    const [exists] = await file.exists()
-    if (!exists) {
-      return res.status(404).json({
-        success: false,
-        error: 'File not found'
-      })
-    }
-    
-    // Get file metadata
-    const [metadata] = await file.getMetadata()
-    
-    // Set appropriate headers
-    res.set({
-      'Content-Type': metadata.contentType || 'application/octet-stream',
-      'Content-Length': metadata.size,
-      'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
-      'Content-Disposition': `inline; filename="${metadata.name}"`
-    })
-    
-    // Stream the file to the response
-    const stream = file.createReadStream()
-    stream.pipe(res)
-    
-    stream.on('error', (error) => {
-      console.error('❌ Error streaming file:', error)
+app.get('/api/files/:formId/:fieldId/:filename',
+  optionalAuth,  // ✅ Check for auth
+  async (req, res) => {
+    try {
+      const { formId, fieldId, filename } = req.params;
+      const userId = req.user?.userId || req.user?.id;
+      
+      console.log(`📁 File request: ${filename} for form: ${formId}, field: ${fieldId}`);
+      console.log(`📁 Requesting user: ${userId || 'anonymous'}`);
+      
+      // ✅ NEW: Check if user has access to the form
+      if (userId) {
+        // Authenticated user - verify form access
+        const { verifyFormAccess } = require('./auth/authorization');
+        const { hasAccess, reason } = await verifyFormAccess(userId, formId);
+        
+        if (!hasAccess) {
+          console.warn(`❌ File access denied: user=${userId}, form=${formId}, file=${filename}, reason=${reason}`);
+          
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: You do not have access to this file',
+            code: 'ACCESS_DENIED',
+            reason
+          });
+        }
+        
+        console.log(`✅ File access granted: user=${userId}, form=${formId}, reason=${reason}`);
+      } else {
+        // ✅ NEW: For anonymous users, only allow access to files from published forms
+        const form = await gcpClient.getFormStructure(formId, true);
+        
+        if (!form) {
+          return res.status(404).json({
+            success: false,
+            error: 'Form not found'
+          });
+        }
+        
+        // Check if form is published
+        if (!form.is_published && !form.isPublished) {
+          console.warn(`❌ Anonymous file access denied: form not published - form=${formId}, file=${filename}`);
+          
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: Please sign in to access files from unpublished forms',
+            code: 'AUTHENTICATION_REQUIRED',
+            action: 'signup_or_login'
+          });
+        }
+        
+        console.log(`✅ Anonymous file access granted: published form=${formId}`);
+      }
+      
+      // Construct the file path in GCP Storage
+      const filePath = `form-uploads/${formId}/${fieldId}/${filename}`;
+      
+      // Get file from GCP Cloud Storage
+      const bucket = gcpClient.storage.bucket('chatterforms-uploads-us-central1');
+      const file = bucket.file(filePath);
+      
+      // Check if file exists
+      const [exists] = await file.exists();
+      if (!exists) {
+        console.warn(`❌ File not found: ${filePath}`);
+        return res.status(404).json({
+          success: false,
+          error: 'File not found'
+        });
+      }
+      
+      // Get file metadata
+      const [metadata] = await file.getMetadata();
+      
+      // ✅ NEW: Audit log for file access
+      console.log(`📝 AUDIT: File accessed - file=${filename}, user=${userId || 'anonymous'}, form=${formId}, timestamp=${new Date().toISOString()}`);
+      
+      // Set appropriate headers
+      res.set({
+        'Content-Type': metadata.contentType || 'application/octet-stream',
+        'Content-Length': metadata.size,
+        'Cache-Control': 'private, max-age=3600', // ✅ Changed from 'public' to 'private'
+        'Content-Disposition': `inline; filename="${filename}"`,
+        'X-Content-Type-Options': 'nosniff', // ✅ NEW: Prevent MIME sniffing
+        'X-Frame-Options': 'SAMEORIGIN' // ✅ NEW: Prevent clickjacking
+      });
+      
+      // Stream the file to the response
+      const stream = file.createReadStream();
+      stream.pipe(res);
+      
+      stream.on('error', (error) => {
+        console.error('❌ Error streaming file:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: 'Failed to stream file'
+          });
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Error serving file:', error);
+      
       if (!res.headersSent) {
         res.status(500).json({
           success: false,
-          error: 'Failed to stream file'
-        })
+          error: 'Failed to serve file',
+          details: error.message
+        });
       }
-    })
-    
-  } catch (error) {
-    console.error('❌ Error serving file:', error)
-    res.status(500).json({
-      success: false,
-      error: 'Failed to serve file'
-    })
+    }
   }
-});
+);
 
 // ============== USER FORMS ENDPOINT ==============
 
@@ -4573,53 +4700,92 @@ app.get('/api/forms/user/:userId', async (req, res) => {
 
 // ============== SINGLE FORM ENDPOINT ==============
 
-app.get('/api/forms/:formId', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    
-    if (!formId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Form ID is required'
+app.get('/api/forms/:formId',
+  optionalAuth,  // ✅ Check for auth but don't require
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user?.userId || req.user?.id;
+      
+      if (!formId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Form ID is required'
+        });
+      }
+
+      console.log(`📋 Fetching form: ${formId}, user: ${userId || 'anonymous'}`);
+      
+      // Get the form data from GCP with fresh read to avoid cache issues after updates
+      const form = await gcpClient.getFormStructure(formId, true);
+
+      if (!form) {
+        return res.status(404).json({
+          success: false,
+          error: 'Form not found',
+          formId,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // ✅ NEW: Check access based on publish status
+      const isPublished = form.is_published || form.isPublished;
+      
+      if (!isPublished) {
+        // Draft form - require ownership
+        if (!userId) {
+          console.warn(`❌ Anonymous access denied to draft form: ${formId}`);
+          return res.status(401).json({
+            success: false,
+            error: 'Authentication required to access unpublished forms',
+            code: 'AUTHENTICATION_REQUIRED',
+            action: 'signup_or_login'
+          });
+        }
+        
+        // Verify ownership
+        const { verifyFormAccess } = require('./auth/authorization');
+        const { hasAccess, reason } = await verifyFormAccess(userId, formId);
+        
+        if (!hasAccess) {
+          console.warn(`❌ Access denied to draft form: user=${userId}, form=${formId}, reason=${reason}`);
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: You do not have access to this form',
+            code: 'ACCESS_DENIED',
+            reason
+          });
+        }
+        
+        console.log(`✅ Draft form access granted: user=${userId}, form=${formId}`);
+      } else {
+        // Published form - allow public access
+        console.log(`✅ Public form access granted: form=${formId}`);
+      }
+
+      // Prevent any intermediary/proxy/browser caching
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+      res.set('Surrogate-Control', 'no-store');
+
+      res.json({
+        success: true,
+        form,
+        timestamp: new Date().toISOString()
       });
-    }
 
-    console.log(`📋 Fetching form: ${formId}`);
-    
-    // Get the form data from GCP with fresh read to avoid cache issues after updates
-    const form = await gcpClient.getFormStructure(formId, true);
-
-    if (!form) {
-      return res.status(404).json({
+    } catch (error) {
+      console.error('❌ Form retrieval error:', error);
+      res.status(500).json({
         success: false,
-        error: 'Form not found',
-        formId,
+        error: 'Failed to retrieve form',
+        details: error.message,
         timestamp: new Date().toISOString()
       });
     }
-
-    // Prevent any intermediary/proxy/browser caching
-    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-    res.set('Surrogate-Control', 'no-store');
-
-    res.json({
-      success: true,
-      form,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('❌ Form retrieval error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to retrieve form',
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
   }
-});
+);
 
 // ============== SIGNATURE DOWNLOAD ENDPOINT ==============
 app.get('/api/submissions/:submissionId/signature/:fieldId', async (req, res) => {
@@ -4758,181 +4924,194 @@ app.get('/api/submissions/:submissionId/pdf/:fieldId', async (req, res) => {
 });
 
 // ============== GET FORM SUBMISSIONS ENDPOINT ==============
-app.get('/api/forms/:formId/submissions', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    if (!formId) {
-      return res.status(400).json({
+app.get('/api/forms/:formId/submissions', 
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId;
+      
+      console.log(`📋 Fetching submissions: form=${formId}, user=${userId}`);
+      
+      // Form ownership already verified by middleware
+      
+      // Initialize GCP client
+      const GCPClient = require('./gcp-client');
+      const gcpClient = new GCPClient();
+      
+      // Get submissions from BigQuery
+      const submissions = await gcpClient.getFormSubmissions(formId);
+      
+      if (submissions) {
+        console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
+        res.json({
+          success: true,
+          formId,
+          submissions,
+          count: submissions.length,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        console.log(`📤 Sending empty response for form: ${formId}`);
+        res.json({
+          success: true,
+          formId,
+          submissions: [],
+          count: 0,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error fetching form submissions:', error);
+      res.status(500).json({
         success: false,
-        error: 'Form ID is required'
-      });
-    }
-    
-    console.log(`📋 BACKEND: /api/forms/${formId}/submissions endpoint called`);
-    console.log(`📋 BACKEND: Request timestamp: ${new Date().toISOString()}`);
-    console.log(`📋 BACKEND: Request headers:`, JSON.stringify(req.headers, null, 2));
-    console.log(`📋 Fetching submissions for form: ${formId}`);
-    
-    // Initialize GCP client
-    const GCPClient = require('./gcp-client');
-    const gcpClient = new GCPClient();
-    
-    // Get submissions from BigQuery
-    const submissions = await gcpClient.getFormSubmissions(formId);
-    
-    if (submissions) {
-      console.log(`✅ Retrieved ${submissions.length} submissions for form: ${formId}`);
-      console.log(`📤 BACKEND: Sending response for form: ${formId} with ${submissions.length} submissions`);
-      res.json({
-        success: true,
-        formId,
-        submissions,
-        count: submissions.length,
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      console.log(`📤 BACKEND: Sending empty response for form: ${formId}`);
-      res.json({
-        success: true,
-        formId,
-        submissions: [],
-        count: 0,
+        error: 'Failed to fetch form submissions',
+        details: error.message,
         timestamp: new Date().toISOString()
       });
     }
-  } catch (error) {
-    console.error('❌ Error fetching form submissions:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch form submissions',
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
   }
-});
+);
 
 // ============== PAGINATED FORM SUBMISSIONS ENDPOINT ==============
-app.get('/api/forms/:formId/submissions/paginated', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const { 
-      page = 1, 
-      limit = 20, 
-      sort = 'desc',
-      search = '',
-      dateFrom = '',
-      dateTo = ''
-    } = req.query;
-    
-    if (!formId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Form ID is required'
-      });
-    }
-    
-    console.log(`📋 BACKEND: /api/forms/${formId}/submissions/paginated endpoint called`);
-    console.log(`📋 BACKEND: Page: ${page}, Limit: ${limit}, Sort: ${sort}`);
-    console.log(`📋 BACKEND: Search: "${search}", DateFrom: ${dateFrom}, DateTo: ${dateTo}`);
-    
-    // Initialize GCP client
-    const GCPClient = require('./gcp-client');
-    const gcpClient = new GCPClient();
-    
-    // Get paginated submissions
-    const result = await gcpClient.getFormSubmissionsPaginated(
-      formId, 
-      parseInt(limit), 
-      (parseInt(page) - 1) * parseInt(limit), 
-      sort,
-      search,
-      dateFrom,
-      dateTo
-    );
-    
-    console.log(`✅ Retrieved ${result.submissions.length} submissions (page ${page}) for form: ${formId}`);
-    console.log(`📊 Total submissions: ${result.total}, HasNext: ${result.hasNext}, HasPrev: ${result.hasPrev}`);
-    
-    res.json({
-      success: true,
-      formId,
-      submissions: result.submissions,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: result.total,
-        totalPages: Math.ceil(result.total / parseInt(limit)),
-        hasNext: result.hasNext,
-        hasPrev: result.hasPrev
-      },
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error('❌ Error fetching paginated form submissions:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch paginated form submissions',
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// ============== LAZY SUBMISSION DATA LOADING ==============
-app.get('/api/submissions/:submissionId/data', async (req, res) => {
-  try {
-    const { submissionId } = req.params;
-    
-    console.log(`📋 BACKEND: /api/submissions/${submissionId}/data endpoint called`);
-    
-    // Initialize GCP client
-    const GCPClient = require('./gcp-client');
-    const gcpClient = new GCPClient();
-    
-    // Get submission data on demand
-    const submissionData = await gcpClient.getSubmissionData(submissionId);
-    
-    if (submissionData !== null) {
-      console.log(`✅ Loaded submission data for: ${submissionId}`);
+app.get('/api/forms/:formId/submissions/paginated',
+  authenticateToken,
+  requireAuth,
+  requireFormOwnership,
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId;
+      const { 
+        page = 1, 
+        limit = 20, 
+        sort = 'desc',
+        search = '',
+        dateFrom = '',
+        dateTo = ''
+      } = req.query;
+      
+      console.log(`📋 Fetching paginated submissions: form=${formId}, user=${userId}, page=${page}`);
+      
+      // Form ownership already verified by middleware
+      
+      // Initialize GCP client
+      const GCPClient = require('./gcp-client');
+      const gcpClient = new GCPClient();
+      
+      // Get paginated submissions
+      const result = await gcpClient.getFormSubmissionsPaginated(
+        formId, 
+        parseInt(limit), 
+        (parseInt(page) - 1) * parseInt(limit), 
+        sort,
+        search,
+        dateFrom,
+        dateTo
+      );
+      
+      console.log(`✅ Retrieved ${result.submissions.length} submissions (page ${page}) for form: ${formId}`);
+      console.log(`📊 Total submissions: ${result.total}, HasNext: ${result.hasNext}, HasPrev: ${result.hasPrev}`);
+      
       res.json({
         success: true,
-        submissionId,
-        submission_data: submissionData,
+        formId,
+        submissions: result.submissions,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: result.total,
+          totalPages: Math.ceil(result.total / parseInt(limit)),
+          hasNext: result.hasNext,
+          hasPrev: result.hasPrev
+        },
         timestamp: new Date().toISOString()
       });
-    } else {
-      console.log(`❌ No submission data found for: ${submissionId}`);
-      res.status(404).json({
+      
+    } catch (error) {
+      console.error('❌ Error fetching paginated form submissions:', error);
+      res.status(500).json({
         success: false,
-        error: 'Submission data not found'
+        error: 'Failed to fetch paginated form submissions',
+        details: error.message,
+        timestamp: new Date().toISOString()
       });
     }
-    
-  } catch (error) {
-    console.error('❌ Error loading submission data:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load submission data',
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
   }
-});
+);
+
+// ============== LAZY SUBMISSION DATA LOADING ==============
+app.get('/api/submissions/:submissionId/data',
+  authenticateToken,
+  requireAuth,
+  requireSubmissionOwnership,  // ✅ Verify submission access via form ownership
+  async (req, res) => {
+    try {
+      const { submissionId } = req.params;
+      const userId = req.user.userId;
+      
+      // Ownership already verified by middleware
+      // req.submission contains the submission data
+      // req.formId contains the form ID
+      
+      // Initialize GCP client
+      const GCPClient = require('./gcp-client');
+      const gcpClient = new GCPClient();
+      
+      // Get submission data on demand
+      const submissionData = await gcpClient.getSubmissionData(submissionId);
+      
+      if (submissionData !== null) {
+        console.log(`✅ Loaded submission data: ${submissionId} for user ${userId}`);
+        res.json({
+          success: true,
+          submissionId,
+          submission_data: submissionData,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        console.log(`❌ No submission data found for: ${submissionId}`);
+        res.status(404).json({
+          success: false,
+          error: 'Submission data not found'
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error loading submission data:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to load submission data',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+);
 
 // ============== SIGNATURE SIGNED URLS (BATCH) ==============
 
-app.get('/api/submissions/:submissionId/signatures', async (req, res) => {
-  try {
-    const { submissionId } = req.params;
-    console.log(`🖊️ Fetching signature URLs for submission: ${submissionId}`);
-    const urls = await gcpClient.getSignatureSignedUrls(submissionId);
-    res.json({ success: true, submissionId, urls, timestamp: new Date().toISOString() });
-  } catch (error) {
-    console.error('❌ Error fetching signature URLs:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch signature URLs' });
+app.get('/api/submissions/:submissionId/signatures',
+  authenticateToken,
+  requireAuth,
+  requireSubmissionOwnership,
+  async (req, res) => {
+    try {
+      const { submissionId } = req.params;
+      const userId = req.user.userId;
+      
+      // Ownership already verified by middleware
+      
+      console.log(`🖊️ Fetching signature URLs: submission=${submissionId}, user=${userId}`);
+      const urls = await gcpClient.getSignatureSignedUrls(submissionId);
+      res.json({ success: true, submissionId, urls, timestamp: new Date().toISOString() });
+    } catch (error) {
+      console.error('❌ Error fetching signature URLs:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch signature URLs' });
+    }
   }
-});
+);
 
 // ============== PDF GENERATE-OR-RETURN ==============
 
@@ -4952,52 +5131,59 @@ app.post('/api/submissions/:submissionId/pdf/:fieldId/generate-or-return', async
 });
 
 // ============== DELETE FORM ENDPOINT ==============
-app.delete('/api/forms/:formId', async (req, res) => {
-  try {
-    const { formId } = req.params;
-    if (!formId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Form ID is required'
-      });
-    }
-    
-    console.log(`🗑️ Deleting form: ${formId}`);
-    
-    // Initialize GCP client
-    const GCPClient = require('./gcp-client');
-    const gcpClient = new GCPClient();
-    
-    // Delete form and all associated data (submissions, analytics)
-    const result = await gcpClient.deleteForm(formId);
-    
-    if (result.success) {
-      console.log(`✅ Form deleted successfully: ${formId}`);
-      res.json({ 
-        success: true, 
-        message: 'Form and all associated data deleted successfully',
-        formId,
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      console.error(`❌ Failed to delete form: ${formId}`, result.error);
+app.delete('/api/forms/:formId',
+  authenticateToken,      // ✅ Verify JWT token
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,   // ✅ Verify ownership
+  async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const userId = req.user.userId;
+      
+      console.log(`🗑️ Delete request: form=${formId}, user=${userId}`);
+      
+      // Form ownership already verified by middleware
+      // req.form contains the form data
+      
+      // Initialize GCP client
+      const GCPClient = require('./gcp-client');
+      const gcpClient = new GCPClient();
+      
+      // Delete form and all associated data (submissions, analytics)
+      const result = await gcpClient.deleteForm(formId);
+      
+      if (result.success) {
+        console.log(`✅ Form deleted successfully: ${formId} by user ${userId}`);
+        
+        // Audit log
+        console.log(`📝 AUDIT: Form deleted - formId=${formId}, userId=${userId}, timestamp=${new Date().toISOString()}`);
+        
+        res.json({ 
+          success: true, 
+          message: 'Form and all associated data deleted successfully',
+          formId,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        console.error(`❌ Failed to delete form: ${formId}`, result.error);
+        res.status(500).json({ 
+          success: false, 
+          error: 'Failed to delete form', 
+          details: result.error,
+          timestamp: new Date().toISOString() 
+        });
+      }
+    } catch (error) {
+      console.error('❌ Form deletion error:', error);
       res.status(500).json({ 
         success: false, 
         error: 'Failed to delete form', 
-        details: result.error,
+        details: error.message, 
         timestamp: new Date().toISOString() 
       });
     }
-  } catch (error) {
-    console.error('❌ Form deletion error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to delete form', 
-      details: error.message, 
-      timestamp: new Date().toISOString() 
-    });
   }
-});
+);
 
 // ============== FORM MIGRATION ENDPOINT ==============
 
@@ -5066,6 +5252,9 @@ app.get('/api/cleanup/expired-sessions', async (req, res) => {
 
 // Import authentication routes
 const authRoutes = require('./auth/routes');
+const { authenticateToken, requireAuth } = require('./auth/middleware');
+const { requireFormOwnership, requireSubmissionOwnership } = require('./auth/authorization');
+const featureFlags = require('./config/feature-flags');
 
 // Import billing routes
 const billingRoutes = require('./routes/billing');
