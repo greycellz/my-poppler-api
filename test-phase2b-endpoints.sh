@@ -140,19 +140,25 @@ else
 fi
 
 # Test 1.4: Update Other User's Form - Should fail (403)
+# Note: This test requires a form owned by a different user
+# Since we don't have USER_B's form ID, we'll skip this test or use a known form ID
+# The backend now treats non-existent forms as new forms (not an error)
+# To properly test this, we'd need a form ID owned by USER_B
 echo "Test 1.4: Update other user's form"
-# This test requires a form owned by a different user
-# We'll use a form ID that exists but is not owned by USER_A
-# For now, we'll test with a non-existent form to verify the logic
-UPDATE_OTHER_FORM_DATA="{\"formData\":{\"id\":\"form_other_user_test\",\"fields\":[{\"id\":\"field1\",\"type\":\"text\",\"label\":\"Hacked Field\"}],\"title\":\"Hacked Form\"},\"metadata\":{\"isEdit\":true,\"source\":\"test\"}}"
-test_endpoint \
-  "Store Form (Update Other)" \
-  "POST" \
-  "$BACKEND_URL/store-form" \
-  "$USER_A_TOKEN" \
-  "403" \
-  "Should block non-owner from updating form" \
-  "$UPDATE_OTHER_FORM_DATA"
+if [ -n "$FORM_B_ID" ] && [ "$FORM_B_ID" != "REPLACE_WITH_FORM_B_ID" ]; then
+  UPDATE_OTHER_FORM_DATA="{\"formData\":{\"id\":\"$FORM_B_ID\",\"fields\":[{\"id\":\"field1\",\"type\":\"text\",\"label\":\"Hacked Field\"}],\"title\":\"Hacked Form\"},\"metadata\":{\"isEdit\":true,\"source\":\"test\"}}"
+  test_endpoint \
+    "Store Form (Update Other)" \
+    "POST" \
+    "$BACKEND_URL/store-form" \
+    "$USER_A_TOKEN" \
+    "403" \
+    "Should block non-owner from updating form" \
+    "$UPDATE_OTHER_FORM_DATA"
+else
+  echo "⚠️  Skipping Test 1.4: FORM_B_ID not set (need form owned by different user)"
+  echo ""
+fi
 
 # Test 1.5: Clone Published Form (Any User) - Should succeed (200)
 echo "Test 1.5: Clone published form"
@@ -209,16 +215,17 @@ echo "TEST SUITE 2: /store-anonymous-form Endpoint"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Test 2.1: No Authentication - Should fail (401)
-echo "Test 2.1: Store anonymous form without authentication"
+# Test 2.1: Create New Anonymous Form (No Auth) - Should succeed (200) ✅ FIXED
+echo "Test 2.1: Create new anonymous form without authentication"
+NEW_ANON_FORM_NO_AUTH="{\"formData\":{\"fields\":[{\"id\":\"field1\",\"type\":\"text\",\"label\":\"Anonymous Test Field\"}],\"title\":\"Anonymous Test Form\"},\"metadata\":{\"source\":\"test\"}}"
 test_endpoint \
-  "Store Anonymous Form (No Auth)" \
+  "Store Anonymous Form (No Auth - New)" \
   "POST" \
   "$BACKEND_URL/store-anonymous-form" \
   "" \
-  "401" \
-  "Should require authentication" \
-  "{\"formData\":{\"id\":\"$TEST_FORM_ID_2\",\"fields\":[]}}"
+  "200" \
+  "Should allow anonymous users to create new forms" \
+  "$NEW_ANON_FORM_NO_AUTH"
 
 # Test 2.2: Create New Anonymous Form (Authenticated) - Should succeed (200)
 echo "Test 2.2: Create new anonymous form (authenticated)"

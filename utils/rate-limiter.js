@@ -18,7 +18,25 @@ const anonymousFormLimiter = rateLimit({
   legacyHeaders: false, // Disable `X-RateLimit-*` headers
   skip: (req) => {
     // Skip rate limiting if user is authenticated (they have unlimited forms)
-    return !!req.user && (req.user.userId || req.user.id);
+    // Check Authorization header (rate limiter runs before optionalAuth middleware sets req.user)
+    // Use req.get() which handles header normalization correctly
+    const authHeader = req.get('authorization') || req.get('Authorization');
+    const hasAuthHeader = authHeader && typeof authHeader === 'string' && authHeader.trim().startsWith('Bearer ');
+    
+    // Also check req.user if it's already set (from previous middleware)
+    const hasUser = !!req.user && (req.user.userId || req.user.id);
+    
+    const shouldSkip = hasUser || hasAuthHeader;
+    
+    // Debug logging to verify skip function behavior
+    if (shouldSkip) {
+      console.log(`✅ Rate limiter: Skipping for authenticated user (hasAuthHeader: ${hasAuthHeader}, hasUser: ${hasUser}, IP: ${req.ip || 'unknown'})`);
+    } else {
+      // Only log when NOT skipping to reduce noise
+      console.log(`⚠️ Rate limiter: Applying limit (authHeader: ${authHeader ? 'present' : 'missing'}, hasUser: ${hasUser}, IP: ${req.ip || 'unknown'})`);
+    }
+    
+    return shouldSkip; // Skip if authenticated via either method
   },
   keyGenerator: (req) => {
     // Use IP address for rate limiting
