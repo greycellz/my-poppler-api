@@ -7008,24 +7008,16 @@ app.get('/api/calendly/bookings/:submissionId', async (req, res) => {
  * Store anonymous form with full response data for migration
  */
 app.post('/store-anonymous-form',
-  authenticateToken,      // ✅ Require authentication
-  requireAuth,            // ✅ Ensure user exists
+  optionalAuth,            // ✅ Optional auth - allow anonymous users for new forms
   async (req, res) => {
     try {
       const { formData, metadata } = req.body;
-      const userId = req.user?.userId || req.user?.id; // ✅ From JWT, not body!
+      const userId = req.user?.userId || req.user?.id || 'anonymous'; // ✅ From JWT or default to anonymous
 
       if (!formData) {
         return res.status(400).json({
           success: false,
           error: 'Form data is required'
-        });
-      }
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          error: 'Authentication required'
         });
       }
 
@@ -7042,11 +7034,23 @@ app.post('/store-anonymous-form',
       // ===== SCENARIO 1: New Anonymous Form Creation =====
       if (isNewForm && !metadata?.originalFormId) {
         console.log(`✅ Creating new anonymous form - user: ${userId}, formId: ${formId}`);
+        // ✅ Allow anonymous users to create new forms (no auth required)
         // Continue to storage (no additional checks needed)
       }
       
       // ===== SCENARIO 2: Anonymous Form Update =====
       else if (metadata?.isEdit || (!isNewForm && !metadata?.originalFormId)) {
+        // ✅ Require authentication for updates
+        if (!req.user || (!req.user.userId && !req.user.id)) {
+          console.log(`❌ Anonymous form update requires authentication - formId: ${formId}`);
+          const auditLogger = require('./utils/audit-logger');
+          await auditLogger.logUnauthorizedAccess('anonymous', 'form', formId, 'Anonymous form update attempt without authentication', req.ip);
+          return res.status(401).json({
+            success: false,
+            error: 'Authentication required to update forms'
+          });
+        }
+        
         console.log(`🔍 Verifying ownership for anonymous form update - user: ${userId}, formId: ${formId}`);
         const { verifyFormAccess } = require('./auth/authorization');
         const { hasAccess, reason } = await verifyFormAccess(userId, formId);
@@ -7064,6 +7068,17 @@ app.post('/store-anonymous-form',
       
       // ===== SCENARIO 3: Anonymous Form Clone =====
       else if (metadata?.originalFormId) {
+        // ✅ Require authentication for clones
+        if (!req.user || (!req.user.userId && !req.user.id)) {
+          console.log(`❌ Anonymous form clone requires authentication - source: ${metadata.originalFormId}`);
+          const auditLogger = require('./utils/audit-logger');
+          await auditLogger.logUnauthorizedAccess('anonymous', 'form', metadata.originalFormId, 'Anonymous form clone attempt without authentication', req.ip);
+          return res.status(401).json({
+            success: false,
+            error: 'Authentication required to clone forms'
+          });
+        }
+        
         console.log(`🔍 Verifying clone access for anonymous form - user: ${userId}, source: ${metadata.originalFormId}`);
         const sourceForm = await gcpClient.getFormStructure(metadata.originalFormId, true);
         
