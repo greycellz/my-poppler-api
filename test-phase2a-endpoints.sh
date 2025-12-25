@@ -124,17 +124,36 @@ if [ "$USER_A_TOKEN" != "REPLACE_WITH_USER_A_TOKEN" ] && [ -n "$USER_A_TOKEN" ] 
   
   if [ $? -eq 0 ]; then ((PASSED++)); else ((FAILED++)); fi
   
-  # Test 2.2: Auto-save (unauthenticated) - Should fail
+  # Test 2.2: Auto-save (unauthenticated on authenticated user's form) - Should fail (403)
   test_endpoint \
-    "POST /api/auto-save-form (unauthenticated)" \
+    "POST /api/auto-save-form (unauthenticated on auth form)" \
     "POST" \
     "$BACKEND_URL/api/auto-save-form" \
     "" \
-    "401" \
-    "Unauthenticated user cannot auto-save" \
-    "{\"formId\":\"$FORM_A_ID\",\"formSchema\":{}}"
+    "403" \
+    "Anonymous user cannot auto-save authenticated user's form" \
+    "{\"formId\":\"$FORM_A_ID\",\"formSchema\":{\"title\":\"Test\"}}"
   
   if [ $? -eq 0 ]; then ((PASSED++)); else ((FAILED++)); fi
+  
+  # Test 2.2b: Auto-save (unauthenticated on anonymous form) - Should succeed (200)
+  # Note: This requires an anonymous form ID - we'll create one first or use a known anonymous form
+  # For now, we'll skip this test if we don't have an anonymous form ID
+  if [ -n "$ANONYMOUS_FORM_ID" ] && [ "$ANONYMOUS_FORM_ID" != "REPLACE_WITH_ANONYMOUS_FORM_ID" ]; then
+    test_endpoint \
+      "POST /api/auto-save-form (unauthenticated on anonymous form)" \
+      "POST" \
+      "$BACKEND_URL/api/auto-save-form" \
+      "" \
+      "200" \
+      "Anonymous user can auto-save anonymous form" \
+      "{\"formId\":\"$ANONYMOUS_FORM_ID\",\"formSchema\":{\"title\":\"Auto-saved anonymous\"}}"
+    
+    if [ $? -eq 0 ]; then ((PASSED++)); else ((FAILED++)); fi
+  else
+    echo -e "${YELLOW}⚠️  Skipping anonymous form auto-save test (ANONYMOUS_FORM_ID not configured)${NC}"
+    echo ""
+  fi
   
   # Test 2.3: Auto-save other user's form - Should fail
   if [ "$USER_B_TOKEN" != "REPLACE_WITH_USER_B_TOKEN" ] && [ -n "$USER_B_TOKEN" ]; then

@@ -118,25 +118,6 @@ class GCPClient {
       if (!formId || typeof formId !== 'string' || formId.trim() === '') {
         throw new Error(`Invalid formId: ${formId} (type: ${typeof formId})`);
       }
-      // Handle anonymous users by generating temporary user ID
-      let finalUserId = userId;
-      let isAnonymous = false;
-      let anonymousSessionId = null;
-
-      if (!userId || userId === 'anonymous') {
-        // Generate a new temporary user ID for anonymous users
-        finalUserId = this.generateTemporaryUserId();
-        isAnonymous = true;
-        anonymousSessionId = finalUserId.replace('temp_', '');
-        
-        // Create or update anonymous session
-        await this.createAnonymousSession(
-          anonymousSessionId,
-          metadata.userAgent || 'unknown',
-          metadata.ipAddress || 'unknown'
-        );
-      }
-
       // Check if this is an update (form already exists)
       const existingDoc = await this
         .collection('forms')
@@ -146,15 +127,52 @@ class GCPClient {
       const isUpdate = existingDoc.exists;
       const existingData = existingDoc.data();
 
+      // Handle anonymous users by generating temporary user ID
+      let finalUserId = userId;
+      let isAnonymous = false;
+      let anonymousSessionId = null;
+
+      if (!userId || userId === 'anonymous') {
+        // For updates: preserve existing user_id if form is anonymous
+        if (isUpdate && existingData?.isAnonymous) {
+          // Preserve the existing anonymous user_id
+          finalUserId = existingData.user_id || existingData.userId;
+          isAnonymous = true;
+          anonymousSessionId = existingData.anonymousSessionId || (finalUserId.replace('temp_', ''));
+          console.log(`✅ Preserving existing anonymous user_id for update: ${finalUserId}`);
+        } else {
+          // New form: generate a new temporary user ID for anonymous users
+          finalUserId = this.generateTemporaryUserId();
+          isAnonymous = true;
+          anonymousSessionId = finalUserId.replace('temp_', '');
+          
+          // Create or update anonymous session
+          await this.createAnonymousSession(
+            anonymousSessionId,
+            metadata.userAgent || 'unknown',
+            metadata.ipAddress || 'unknown'
+          );
+        }
+      }
+
       // Decide where to write: auto-save writes to draft_structure only
       const isAutoSave = (metadata?.source === 'auto-save');
+      
+      // ✅ Handle conversion: If authenticated user is taking over anonymous form, clear anonymous flags
+      if (isUpdate && existingData?.isAnonymous && userId !== 'anonymous' && finalUserId !== 'anonymous') {
+        console.log(`🔄 Converting anonymous form to authenticated user: ${finalUserId}`);
+        isAnonymous = false;
+        anonymousSessionId = null;
+      }
       
       console.log(`🔍 storeFormStructure debug:`, {
         formId,
         source: metadata?.source,
         isAutoSave,
         isUpdate,
-        formDataTitle: formData?.title
+        formDataTitle: formData?.title,
+        finalUserId,
+        isAnonymous
       });
 
       const formDoc = {
@@ -174,8 +192,8 @@ class GCPClient {
         },
         is_hipaa: metadata.isHipaa || existingData?.is_hipaa || false,
         is_published: metadata.isPublished ?? existingData?.is_published ?? false,
-        isAnonymous: existingData?.isAnonymous || isAnonymous,
-        anonymousSessionId: existingData?.anonymousSessionId || anonymousSessionId
+        isAnonymous: isAnonymous, // ✅ Use the potentially updated isAnonymous value
+        anonymousSessionId: anonymousSessionId // ✅ Use the potentially cleared anonymousSessionId
       };
 
       console.log(`🔍 About to store formDoc:`, {

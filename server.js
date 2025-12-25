@@ -5533,17 +5533,16 @@ app.use('/', screenshotPagesRoutes);
 // ============== AUTO-SAVE ENDPOINT ==============
 
 app.post('/api/auto-save-form',
-  authenticateToken,                  // ✅ Require authentication
-  requireAuth,                        // ✅ Ensure user exists
-  requireFormOwnershipFromBody,       // ✅ Verify ownership (formId from body)
+  optionalAuth,                       // ✅ Optional auth - allow anonymous users
   async (req, res) => {
     try {
       const { formId, formSchema } = req.body;
-      const userId = req.user?.userId || req.user?.id; // ✅ From JWT, not form data
+      const userId = req.user?.userId || req.user?.id || 'anonymous'; // ✅ From JWT or default to anonymous
       
       console.log('🔄 Auto-save API received:', {
         formId,
         userId,
+        isAuthenticated: !!req.user,
         hasFormSchema: !!formSchema
       });
 
@@ -5553,10 +5552,46 @@ app.post('/api/auto-save-form',
         });
       }
 
-      // ✅ Ownership already verified by requireFormOwnershipFromBody middleware
-      // Get the current form to preserve its published status
+      // Get the current form to check ownership and preserve published status
       const currentForm = await gcpClient.getFormById(formId);
+      
+      if (!currentForm) {
+        console.log(`❌ Auto-save failed - form not found: ${formId}`);
+        return res.status(404).json({
+          error: 'Form not found'
+        });
+      }
+
+      const currentFormUserId = currentForm.user_id || currentForm.userId;
+      const currentFormIsAnonymous = currentForm.isAnonymous === true; // Check isAnonymous flag
       const currentPublishedStatus = currentForm?.is_published || false;
+
+      // ✅ Authorization check:
+      // 1. If authenticated: must own the form (unless form is anonymous, then allow)
+      // 2. If anonymous: can only auto-save anonymous forms
+      if (userId !== 'anonymous') {
+        // Authenticated user - must own the form (unless form is anonymous)
+        if (!currentFormIsAnonymous && currentFormUserId !== userId) {
+          console.log(`❌ Auto-save failed - user ${userId} does not own form ${formId} (owned by ${currentFormUserId})`);
+          const auditLogger = require('./utils/audit-logger');
+          await auditLogger.logUnauthorizedAccess(userId, 'form', formId, 'Attempted to auto-save form owned by another user', req.ip);
+          return res.status(403).json({
+            error: 'You do not have permission to auto-save this form'
+          });
+        }
+        // ✅ Authenticated users can auto-save anonymous forms (for conversion scenarios)
+      } else {
+        // Anonymous user - can only auto-save anonymous forms
+        if (!currentFormIsAnonymous) {
+          console.log(`❌ Auto-save failed - anonymous user cannot auto-save form ${formId} (not anonymous, owned by ${currentFormUserId})`);
+          const auditLogger = require('./utils/audit-logger');
+          await auditLogger.logUnauthorizedAccess('anonymous', 'form', formId, 'Anonymous user attempted to auto-save authenticated user\'s form', req.ip);
+          return res.status(403).json({
+            error: 'Authentication required to auto-save this form'
+          });
+        }
+        // ✅ Anonymous users can auto-save anonymous forms
+      }
 
       // Use HIPAA setting from the form schema being sent (not from database)
       const hipaaStatus = formSchema?.isHipaa || false;
@@ -5565,7 +5600,7 @@ app.post('/api/auto-save-form',
       const result = await gcpClient.storeFormStructure(
         formId,
         formSchema,
-        userId, // ✅ Use authenticated user's ID
+        userId, // ✅ Use authenticated user's ID or 'anonymous'
       {
         source: 'auto-save',
         isUpdate: true,
