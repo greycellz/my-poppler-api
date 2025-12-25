@@ -40,6 +40,18 @@ async function verifyFormAccess(userId, formId) {
       return { hasAccess: true, form, reason: 'owner' };
     }
     
+    // ✅ SPECIAL CASE: Allow authenticated users to update anonymous forms (for conversion)
+    // This enables users to publish anonymous forms after signing up
+    const isFormAnonymous = form.isAnonymous === true;
+    const isOwnerAnonymous = formOwnerId && formOwnerId.startsWith('temp_');
+    if (isFormAnonymous || isOwnerAnonymous) {
+      // Form is anonymous - allow authenticated users to take ownership (conversion)
+      if (userId && userId !== 'anonymous' && !userId.startsWith('temp_')) {
+        console.log(`✅ Allowing authenticated user ${userId} to access anonymous form ${formId} (conversion)`);
+        return { hasAccess: true, form, reason: 'anonymous_form_conversion' };
+      }
+    }
+    
     // TODO: Check collaborators if feature exists
     // const isCollaborator = await checkCollaboratorAccess(formId, userId);
     // if (isCollaborator) {

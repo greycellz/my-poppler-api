@@ -2388,10 +2388,12 @@ class GCPClient {
 
       snapshot.docs.forEach(doc => {
         batch.update(doc.ref, {
-          user_id: realUserId,
-          isAnonymous: false,
-          migratedAt: new Date(),
-          updated_at: new Date()
+          userId: realUserId,              // ✅ Add for compatibility (some code may use userId)
+          user_id: realUserId,             // ✅ Primary field
+          isAnonymous: false,              // ✅ Clear anonymous flag
+          anonymousSessionId: null,        // ✅ Clear anonymous session ID
+          migratedAt: new Date(),          // ✅ Track migration timestamp
+          updatedAt: new Date()            // ✅ Use camelCase for consistency with other parts of codebase
         });
         migratedForms++;
         migratedFormIds.push(doc.id); // Collect the form IDs
@@ -2399,14 +2401,23 @@ class GCPClient {
 
       await batch.commit();
 
-      // Update the anonymous session to mark as migrated
-      await this
-        .collection('anonymousSessions')
-        .doc(tempUserId.replace('temp_', ''))
-        .update({
-          migratedTo: realUserId,
-          migratedAt: new Date()
-        });
+      // Update the anonymous session to mark as migrated (if it exists)
+      try {
+        const sessionRef = this.collection('anonymousSessions').doc(tempUserId.replace('temp_', ''));
+        const sessionDoc = await sessionRef.get();
+        if (sessionDoc.exists) {
+          await sessionRef.update({
+            migratedTo: realUserId,
+            migratedAt: new Date()
+          });
+          console.log(`✅ Updated anonymous session for ${tempUserId}`);
+        } else {
+          console.log(`⚠️ Anonymous session not found for ${tempUserId}, skipping session update`);
+        }
+      } catch (sessionError) {
+        // Don't fail migration if session update fails
+        console.warn(`⚠️ Failed to update anonymous session for ${tempUserId}:`, sessionError.message);
+      }
 
       console.log(`✅ Successfully migrated ${migratedForms} forms from ${tempUserId} to ${realUserId}`);
       console.log(`📋 Migrated form IDs: ${migratedFormIds.join(', ')}`);
