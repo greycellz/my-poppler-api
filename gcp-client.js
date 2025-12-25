@@ -4205,10 +4205,11 @@ class GCPClient {
 
   /**
    * Delete form image from GCP and Firestore
+   * Note: Ownership verification happens in server.js before calling this method
    */
-  async deleteFormImage(imageId, userId) {
+  async deleteFormImage(imageId) {
     try {
-      console.log(`🗑️ Deleting form image: ${imageId} for user: ${userId}`);
+      console.log(`🗑️ Deleting form image: ${imageId}`);
       
       // First, get the image metadata to find the GCP file path
       const imageRef = this.collection('form_images').doc(imageId);
@@ -4220,10 +4221,8 @@ class GCPClient {
       
       const imageData = imageDoc.data();
       
-      // Verify the image belongs to the user
-      if (imageData.userId !== userId) {
-        return { success: false, error: 'Unauthorized: Image does not belong to user' };
-      }
+      // ✅ Ownership verification happens in server.js before calling this method
+      // No need to check userId here
       
       // Delete from GCP Storage if gcpUrl exists
       if (imageData.gcpUrl && imageData.gcpUrl.startsWith('gs://')) {

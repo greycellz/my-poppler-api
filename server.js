@@ -4229,17 +4229,23 @@ app.delete('/admin/delete-all-logos/:userId', async (req, res) => {
 // ============== FORM IMAGE ENDPOINTS ==============
 
 // Upload form image endpoint
-app.post('/upload-form-image', upload.single('file'), async (req, res) => {
-  try {
-    const { formId, fieldId, userId, sequence } = req.body
-    const file = req.file
-    
-    if (!file || !formId || !fieldId || !userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: file, formId, fieldId, or userId'
-      })
-    }
+app.post('/upload-form-image',
+  upload.single('file'),        // ✅ File upload middleware first
+  authenticateToken,            // ✅ Require authentication
+  requireAuth,                  // ✅ Ensure user exists
+  requireFormOwnershipFromBody, // ✅ Verify ownership (formId from body)
+  async (req, res) => {
+    try {
+      const { formId, fieldId, sequence } = req.body  // ✅ Removed userId
+      const userId = req.user?.userId || req.user?.id  // ✅ From JWT
+      const file = req.file
+      
+      if (!file || !formId || !fieldId) {  // ✅ Removed userId check
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: file, formId, or fieldId'
+        })
+      }
 
     // Validate file type
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
@@ -4344,109 +4350,166 @@ app.post('/upload-form-image', upload.single('file'), async (req, res) => {
 })
 
 // Get form images endpoint
-app.get('/form-images/:formId/:fieldId', async (req, res) => {
-  try {
-    const { formId, fieldId } = req.params
-    
-    if (!formId || !fieldId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Form ID and Field ID are required'
-      })
-    }
+app.get('/form-images/:formId/:fieldId',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,  // ✅ Verify ownership (formId in params)
+  async (req, res) => {
+    try {
+      const { formId, fieldId } = req.params
+      
+      // ✅ Ownership already verified by requireFormOwnership middleware
+      if (!formId || !fieldId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Form ID and Field ID are required'
+        })
+      }
 
-    console.log(`🖼️ Getting form images for form: ${formId}, field: ${fieldId}`)
+      console.log(`🖼️ Getting form images for form: ${formId}, field: ${fieldId}`)
 
-    const images = await gcpClient.getFormImages(formId, fieldId)
+      const images = await gcpClient.getFormImages(formId, fieldId)
 
-    res.json({
-      success: true,
-      images: images
-    })
-
-  } catch (error) {
-    console.error('❌ Error getting form images:', error)
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get form images',
-      details: error.message
-    })
-  }
-})
-
-// Delete form image endpoint
-app.delete('/form-image/:imageId', async (req, res) => {
-  try {
-    const { imageId } = req.params
-    const { userId } = req.body
-    
-    if (!imageId || !userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Image ID and User ID are required'
-      })
-    }
-
-    console.log(`🗑️ Deleting form image: ${imageId} for user: ${userId}`)
-
-    const result = await gcpClient.deleteFormImage(imageId, userId)
-
-    if (result.success) {
       res.json({
         success: true,
-        message: 'Form image deleted successfully'
+        images: images
       })
-    } else {
-      res.status(404).json({
+
+    } catch (error) {
+      console.error('❌ Error getting form images:', error)
+      res.status(500).json({
         success: false,
-        error: result.error || 'Form image not found'
+        error: 'Failed to get form images',
+        details: error.message
       })
     }
-
-  } catch (error) {
-    console.error('❌ Error deleting form image:', error)
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete form image',
-      details: error.message
-    })
   }
-})
+)
+
+// Delete form image endpoint
+app.delete('/form-image/:imageId',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  async (req, res) => {
+    try {
+      const { imageId } = req.params
+      const userId = req.user?.userId || req.user?.id  // ✅ From JWT
+      
+      if (!imageId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Image ID is required'
+        })
+      }
+
+      // ✅ Get image metadata to find formId
+      const imageRef = gcpClient.collection('form_images').doc(imageId)
+      const imageDoc = await imageRef.get()
+      
+      if (!imageDoc.exists) {
+        return res.status(404).json({
+          success: false,
+          error: 'Form image not found'
+        })
+      }
+
+      const imageData = imageDoc.data()
+      const formId = imageData.formId
+
+      if (!formId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Image metadata missing formId'
+        })
+      }
+
+      // ✅ Verify form ownership (not just userId match)
+      const { verifyFormAccess } = require('./auth/authorization')
+      const { hasAccess, reason } = await verifyFormAccess(userId, formId)
+      
+      if (!hasAccess) {
+        console.log(`❌ Unauthorized image deletion - user: ${userId}, form: ${formId}, reason: ${reason}`)
+        const auditLogger = require('./utils/audit-logger')
+        await auditLogger.logUnauthorizedAccess(userId, 'form_image', imageId, `Delete attempt: ${reason}`, req.ip)
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: You do not have access to delete this image',
+          code: 'ACCESS_DENIED',
+          reason
+        })
+      }
+
+      // ✅ Ownership verified, proceed with deletion
+      console.log(`🗑️ Deleting form image: ${imageId} for user: ${userId}`)
+
+      const result = await gcpClient.deleteFormImage(imageId)  // ✅ Remove userId parameter
+
+      if (result.success) {
+        res.json({
+          success: true,
+          message: 'Form image deleted successfully'
+        })
+      } else {
+        res.status(404).json({
+          success: false,
+          error: result.error || 'Form image not found'
+        })
+      }
+    } catch (error) {
+      console.error('❌ Error deleting form image:', error)
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete form image',
+        details: error.message
+      })
+    }
+  }
+)
 
 // Update image sequence endpoint
-app.put('/form-images/:formId/:fieldId/sequence', async (req, res) => {
-  try {
-    const { formId, fieldId } = req.params
-    const { images } = req.body
-    
-    if (!formId || !fieldId || !images || !Array.isArray(images)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Form ID, Field ID, and images array are required'
-      })
-    }
-
-    console.log(`🔄 Updating image sequence for form: ${formId}, field: ${fieldId}`)
-    console.log('🔄 Images to update:', images.map(img => ({ id: img.id, fileName: img.fileName, sequence: img.sequence })))
-
-    // Validate that all image IDs exist in Firestore before updating
-    console.log('🔍 Validating image IDs exist in database...')
-    const validationPromises = images.map(async (image) => {
-      try {
-        const doc = await gcpClient.collection('form_images').doc(image.id).get()
-        if (!doc.exists) {
-          throw new Error(`Image ${image.id} not found in database`)
-        }
-        console.log(`✅ Image ${image.id} validated`)
-        return true
-      } catch (error) {
-        console.error(`❌ Validation failed for image ${image.id}:`, error.message)
-        throw error
+app.put('/form-images/:formId/:fieldId/sequence',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  requireFormOwnership,  // ✅ Verify ownership (formId in params)
+  async (req, res) => {
+    try {
+      const { formId, fieldId } = req.params
+      const { images } = req.body
+      
+      // ✅ Ownership already verified by requireFormOwnership middleware
+      if (!formId || !fieldId || !images || !Array.isArray(images)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Form ID, Field ID, and images array are required'
+        })
       }
-    })
-    
-    await Promise.all(validationPromises)
-    console.log('✅ All image IDs validated successfully')
+
+      console.log(`🔄 Updating image sequence for form: ${formId}, field: ${fieldId}`)
+      console.log('🔄 Images to update:', images.map(img => ({ id: img.id, fileName: img.fileName, sequence: img.sequence })))
+
+      // ✅ Validate that all image IDs exist AND belong to this form/field
+      console.log('🔍 Validating image IDs exist and belong to form/field...')
+      const validationPromises = images.map(async (image) => {
+        try {
+          const doc = await gcpClient.collection('form_images').doc(image.id).get()
+          if (!doc.exists) {
+            throw new Error(`Image ${image.id} not found in database`)
+          }
+          const imageData = doc.data()
+          // ✅ ADD: Verify image belongs to this form and field
+          if (imageData.formId !== formId || imageData.fieldId !== fieldId) {
+            throw new Error(`Image ${image.id} does not belong to form ${formId}, field ${fieldId}`)
+          }
+          console.log(`✅ Image ${image.id} validated`)
+          return true
+        } catch (error) {
+          console.error(`❌ Validation failed for image ${image.id}:`, error.message)
+          throw error
+        }
+      })
+      
+      await Promise.all(validationPromises)
+      console.log('✅ All image IDs validated successfully')
 
     // Update sequence for each image using the provided sequence number
     const updatePromises = images.map((image) => 
@@ -4556,87 +4619,129 @@ app.get('/api/files/logo/:userId/:logoId', async (req, res) => {
 })
 
 // Serve form image files through backend to avoid CORS issues
-app.get('/api/files/form-image/:formId/:fieldId/:imageId', async (req, res) => {
-  try {
-    const { formId, fieldId, imageId } = req.params
-    
-    if (!formId || !fieldId || !imageId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Form ID, Field ID, and Image ID are required'
-      })
-    }
-
-    console.log(`🖼️ Serving form image file: ${imageId} for form: ${formId}, field: ${fieldId}`)
-
-    // Get image metadata from Firestore
-    const imageRef = gcpClient.collection('form_images').doc(imageId)
-    const imageDoc = await imageRef.get()
-    
-    if (!imageDoc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: 'Form image not found'
-      })
-    }
-    
-    const imageData = imageDoc.data()
-    
-    // Verify the image belongs to the form and field
-    if (imageData.formId !== formId || imageData.fieldId !== fieldId) {
-      return res.status(403).json({
-        success: false,
-        error: 'Unauthorized: Image does not belong to this form/field'
-      })
-    }
-    
-    // Get the file from GCP Storage
-    const gcpUrl = imageData.gcpUrl
-    if (gcpUrl && gcpUrl.startsWith('gs://')) {
-      const bucketName = gcpUrl.split('/')[2]
-      const fileName = gcpUrl.split('/').slice(3).join('/')
+app.get('/api/files/form-image/:formId/:fieldId/:imageId',
+  optionalAuth,  // ✅ Optional auth - allow public access for published forms
+  async (req, res) => {
+    try {
+      const { formId, fieldId, imageId } = req.params
+      const userId = req.user?.userId || req.user?.id  // ✅ From JWT (if authenticated)
       
-      const bucket = gcpClient.storage.bucket(bucketName)
-      const file = bucket.file(fileName)
+      if (!formId || !fieldId || !imageId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Form ID, Field ID, and Image ID are required'
+        })
+      }
+
+      console.log(`🖼️ Serving form image file: ${imageId} for form: ${formId}, field: ${fieldId}`)
+
+      // Get image metadata from Firestore
+      const imageRef = gcpClient.collection('form_images').doc(imageId)
+      const imageDoc = await imageRef.get()
       
-      // Check if file exists
-      const [exists] = await file.exists()
-      if (!exists) {
+      if (!imageDoc.exists) {
         return res.status(404).json({
           success: false,
-          error: 'Form image file not found in storage'
+          error: 'Form image not found'
         })
       }
       
-      // Set appropriate headers
-      res.set({
-        'Content-Type': imageData.fileType || 'image/png',
-        'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
-        'Access-Control-Allow-Origin': '*', // Allow CORS
-        'Access-Control-Allow-Methods': 'GET',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      })
+      const imageData = imageDoc.data()
       
-      // Stream the file
-      file.createReadStream().pipe(res)
+      // ✅ Verify the image belongs to the form and field (existing check)
+      if (imageData.formId !== formId || imageData.fieldId !== fieldId) {
+        return res.status(403).json({
+          success: false,
+          error: 'Unauthorized: Image does not belong to this form/field'
+        })
+      }
+
+      // ✅ NEW: Check form publish status to determine access
+      const form = await gcpClient.getFormStructure(formId, true)
+      if (!form) {
+        return res.status(404).json({
+          success: false,
+          error: 'Form not found'
+        })
+      }
+
+      const isPublished = form.is_published || form.isPublished
       
-      console.log(`✅ Form image file served: ${fileName}`)
-    } else {
-      return res.status(404).json({
+      if (!isPublished) {
+        // Draft form - require authentication and ownership
+        if (!userId) {
+          return res.status(401).json({
+            success: false,
+            error: 'Authentication required to access images in unpublished forms',
+            code: 'AUTHENTICATION_REQUIRED'
+          })
+        }
+
+        // Verify ownership
+        const { verifyFormAccess } = require('./auth/authorization')
+        const { hasAccess, reason } = await verifyFormAccess(userId, formId)
+        
+        if (!hasAccess) {
+          console.log(`❌ Unauthorized image access - user: ${userId}, form: ${formId}, reason: ${reason}`)
+          const auditLogger = require('./utils/audit-logger')
+          await auditLogger.logUnauthorizedAccess(userId, 'form_image', imageId, `Access attempt: ${reason}`, req.ip)
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: You do not have access to images in this form',
+            code: 'ACCESS_DENIED',
+            reason
+          })
+        }
+      }
+      // ✅ Published form - allow public access (no auth required)
+    
+      // Get the file from GCP Storage
+      const gcpUrl = imageData.gcpUrl
+      if (gcpUrl && gcpUrl.startsWith('gs://')) {
+        const bucketName = gcpUrl.split('/')[2]
+        const fileName = gcpUrl.split('/').slice(3).join('/')
+        
+        const bucket = gcpClient.storage.bucket(bucketName)
+        const file = bucket.file(fileName)
+        
+        // Check if file exists
+        const [exists] = await file.exists()
+        if (!exists) {
+          return res.status(404).json({
+            success: false,
+            error: 'Form image file not found in storage'
+          })
+        }
+        
+        // Set appropriate headers
+        res.set({
+          'Content-Type': imageData.fileType || 'image/png',
+          'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
+          'Access-Control-Allow-Origin': '*', // Allow CORS
+          'Access-Control-Allow-Methods': 'GET',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        })
+        
+        // Stream the file
+        file.createReadStream().pipe(res)
+        
+        console.log(`✅ Form image file served: ${fileName}`)
+      } else {
+        return res.status(404).json({
+          success: false,
+          error: 'Invalid form image file path'
+        })
+      }
+    } catch (error) {
+      console.error('❌ Error serving form image file:', error)
+      res.status(500).json({
         success: false,
-        error: 'Invalid form image file path'
+        error: 'Failed to serve form image file',
+        details: error.message
       })
     }
-
-  } catch (error) {
-    console.error('❌ Error serving form image file:', error)
-    res.status(500).json({
-      success: false,
-      error: 'Failed to serve form image file',
-      details: error.message
-    })
   }
-})
+)
 
 // ============== DEBUG ENDPOINTS ==============
 
