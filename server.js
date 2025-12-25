@@ -1524,35 +1524,134 @@ app.get('/debug-env', (req, res) => {
 // ============== FORM STORAGE ENDPOINT ==============
 
 // Store form structure in GCP
-app.post('/store-form', async (req, res) => {
-  try {
-    const { formData, userId, metadata } = req.body;
+app.post('/store-form',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  async (req, res) => {
+    try {
+      const { formData, metadata } = req.body;
+      const userId = req.user?.userId || req.user?.id; // ✅ From JWT, not body!
 
-    if (!formData) {
-      return res.status(400).json({
-        success: false,
-        error: 'Form data is required'
-      });
-    }
+      if (!formData) {
+        return res.status(400).json({
+          success: false,
+          error: 'Form data is required'
+        });
+      }
 
-    console.log('📝 Storing form structure in GCP...');
-    console.log('🔍 Received metadata:', JSON.stringify(metadata, null, 2));
-    
-    // Initialize GCP client
-    const GCPClient = require('./gcp-client');
-    const gcpClient = new GCPClient();
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+      }
 
-    // Use the form ID from the form data, or generate a new one
-    const formId = formData.id || formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log('📝 Storing form structure in GCP...');
+      console.log('🔍 Received metadata:', JSON.stringify(metadata, null, 2));
+      
+      // Initialize GCP client
+      const GCPClient = require('./gcp-client');
+      const gcpClient = new GCPClient();
 
-    // Store form structure
-    console.log(`📝 Attempting to store form in Firestore: ${formId}`);
-    console.log(`📝 Form data:`, JSON.stringify(formData, null, 2));
-    
-    const result = await gcpClient.storeFormStructure(
-      formId,
-      formData,
-      userId || 'anonymous',
+      // Use the form ID from the form data, or generate a new one
+      const formId = formData.id || formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const isNewForm = !formData.id && !formData.formId;
+      
+      // ===== SCENARIO 1: New Form Creation =====
+      if (isNewForm && !metadata?.originalFormId) {
+        console.log(`✅ Creating new form - user: ${userId}, formId: ${formId}`);
+        // Continue to storage (no additional checks needed)
+      }
+      
+      // ===== SCENARIO 2: Form Update =====
+      else if (metadata?.isEdit || (!isNewForm && !metadata?.originalFormId)) {
+        console.log(`🔍 Verifying ownership for form update - user: ${userId}, formId: ${formId}`);
+        const { verifyFormAccess } = require('./auth/authorization');
+        const { hasAccess, reason } = await verifyFormAccess(userId, formId);
+        if (!hasAccess) {
+          console.log(`❌ Unauthorized form update - user: ${userId}, form: ${formId}, reason: ${reason}`);
+          const auditLogger = require('./utils/audit-logger');
+          await auditLogger.logUnauthorizedAccess(userId, 'form', formId, `Update attempt: ${reason}`, req.ip);
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: You do not have access to update this form'
+          });
+        }
+        console.log(`✅ Ownership verified for form update - user: ${userId}, formId: ${formId}`);
+      }
+      
+      // ===== SCENARIO 3: Form Clone =====
+      else if (metadata?.originalFormId) {
+        console.log(`🔍 Verifying clone access - user: ${userId}, source: ${metadata.originalFormId}`);
+        const sourceForm = await gcpClient.getFormStructure(metadata.originalFormId, true);
+        
+        if (!sourceForm) {
+          console.log(`❌ Clone failed: Source form not found - ${metadata.originalFormId}`);
+          const auditLogger = require('./utils/audit-logger');
+          await auditLogger.logUnauthorizedAccess(userId, 'form', metadata.originalFormId, 'Clone attempt: Source form not found', req.ip);
+          return res.status(404).json({
+            success: false,
+            error: 'Source form not found'
+          });
+        }
+        
+        const isPublished = sourceForm.is_published || sourceForm.isPublished;
+        
+        // If draft form, require ownership of source
+        if (!isPublished) {
+          console.log(`🔍 Source form is draft, verifying ownership - user: ${userId}, source: ${metadata.originalFormId}`);
+          const { verifyFormAccess } = require('./auth/authorization');
+          const { hasAccess, reason } = await verifyFormAccess(userId, metadata.originalFormId);
+          if (!hasAccess) {
+            console.log(`❌ Unauthorized clone - user: ${userId}, source: ${metadata.originalFormId}, reason: ${reason}`);
+            const auditLogger = require('./utils/audit-logger');
+            await auditLogger.logUnauthorizedAccess(userId, 'form', metadata.originalFormId, `Clone attempt of draft form: ${reason}`, req.ip);
+            return res.status(403).json({
+              success: false,
+              error: 'Forbidden: You cannot clone this draft form. Only the owner can clone draft forms.',
+              code: 'CANNOT_CLONE_DRAFT'
+            });
+          }
+          console.log(`✅ Draft form clone authorized - user: ${userId}, source: ${metadata.originalFormId}`);
+        } else {
+          console.log(`✅ Published form clone authorized - user: ${userId}, source: ${metadata.originalFormId}`);
+        }
+        // Published forms can be cloned by any authenticated user
+      }
+      
+      // ===== SCENARIO 4: Anonymous Form Conversion =====
+      else if (metadata?.convertFromAnonymous && metadata?.anonymousFormId) {
+        console.log(`🔍 Converting anonymous form - user: ${userId}, anonymousFormId: ${metadata.anonymousFormId}`);
+        const anonymousForm = await gcpClient.getFormStructure(metadata.anonymousFormId, true);
+        
+        if (!anonymousForm) {
+          console.log(`❌ Conversion failed: Anonymous form not found - ${metadata.anonymousFormId}`);
+          return res.status(404).json({
+            success: false,
+            error: 'Anonymous form not found'
+          });
+        }
+        
+        // Verify form is actually anonymous (no user_id or is_anonymous flag)
+        if (anonymousForm.user_id && !anonymousForm.is_anonymous) {
+          console.log(`❌ Conversion failed: Form is not anonymous - ${metadata.anonymousFormId}`);
+          return res.status(400).json({
+            success: false,
+            error: 'Form is not anonymous and cannot be converted'
+          });
+        }
+        
+        console.log(`✅ Anonymous form conversion authorized - user: ${userId}, anonymousFormId: ${metadata.anonymousFormId}`);
+      }
+
+      // Store form structure
+      console.log(`📝 Attempting to store form in Firestore: ${formId}`);
+      console.log(`📝 Form data:`, JSON.stringify(formData, null, 2));
+      
+      const result = await gcpClient.storeFormStructure(
+        formId,
+        formData,
+        userId, // ✅ Use authenticated user's ID
       {
         ...metadata,
         source: 'railway-backend',
@@ -1566,30 +1665,32 @@ app.post('/store-form', async (req, res) => {
     console.log(`✅ Form structure stored: ${formId}`);
     console.log(`✅ Storage result:`, JSON.stringify(result, null, 2));
 
-    const responseData = {
-      success: true,
-      formId,
-      userId: userId || 'anonymous',
-      isAnonymous: !userId || userId === 'anonymous',
-      isUpdate: metadata?.isEdit || false,
-      isLLMUpdate: metadata?.isLLMUpdate || false,
-      message: 'Form structure stored successfully',
-      timestamp: new Date().toISOString()
-    };
-    
-    console.log('🔍 Sending response:', JSON.stringify(responseData, null, 2));
-    res.json(responseData);
+      const responseData = {
+        success: true,
+        formId: formId,
+        userId: userId,
+        isAnonymous: false,
+        isUpdate: !isNewForm,
+        isLLMUpdate: metadata?.isLLMUpdate || false,
+        message: 'Form structure stored successfully',
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log(`✅ Form stored successfully - user: ${userId}, formId: ${formId}`);
+      console.log('🔍 Sending response:', JSON.stringify(responseData, null, 2));
+      res.json(responseData);
 
-  } catch (error) {
-    console.error('❌ Form storage error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Form storage failed',
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
+    } catch (error) {
+      console.error('❌ Form storage error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error while storing form',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
   }
-});
+);
 
 // ============== VIEW TRACKING ENDPOINT ==============
 
@@ -6906,34 +7007,108 @@ app.get('/api/calendly/bookings/:submissionId', async (req, res) => {
 /**
  * Store anonymous form with full response data for migration
  */
-app.post('/store-anonymous-form', async (req, res) => {
-  try {
-    const { formData, userId, metadata } = req.body;
+app.post('/store-anonymous-form',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  async (req, res) => {
+    try {
+      const { formData, metadata } = req.body;
+      const userId = req.user?.userId || req.user?.id; // ✅ From JWT, not body!
 
-    if (!formData) {
-      return res.status(400).json({
-        success: false,
-        error: 'Form data is required'
-      });
-    }
+      if (!formData) {
+        return res.status(400).json({
+          success: false,
+          error: 'Form data is required'
+        });
+      }
 
-    console.log('📝 Storing anonymous form structure in GCP...');
-    
-    // Initialize GCP client
-    const GCPClient = require('./gcp-client');
-    const gcpClient = new GCPClient();
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+      }
 
-    // Use the form ID from the form data, or generate a new one
-    const formId = formData.id || formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log('📝 Storing anonymous form structure in GCP...');
+      
+      // Initialize GCP client
+      const GCPClient = require('./gcp-client');
+      const gcpClient = new GCPClient();
 
-    // Store form structure
-    console.log(`📝 Attempting to store anonymous form in Firestore: ${formId}`);
-    console.log(`📝 Form data:`, JSON.stringify(formData, null, 2));
-    
-    const result = await gcpClient.storeFormStructure(
-      formId,
-      formData,
-      userId || 'anonymous',
+      // Use the form ID from the form data, or generate a new one
+      const formId = formData.id || formData.formId || `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const isNewForm = !formData.id && !formData.formId;
+      
+      // ===== SCENARIO 1: New Anonymous Form Creation =====
+      if (isNewForm && !metadata?.originalFormId) {
+        console.log(`✅ Creating new anonymous form - user: ${userId}, formId: ${formId}`);
+        // Continue to storage (no additional checks needed)
+      }
+      
+      // ===== SCENARIO 2: Anonymous Form Update =====
+      else if (metadata?.isEdit || (!isNewForm && !metadata?.originalFormId)) {
+        console.log(`🔍 Verifying ownership for anonymous form update - user: ${userId}, formId: ${formId}`);
+        const { verifyFormAccess } = require('./auth/authorization');
+        const { hasAccess, reason } = await verifyFormAccess(userId, formId);
+        if (!hasAccess) {
+          console.log(`❌ Unauthorized anonymous form update - user: ${userId}, form: ${formId}, reason: ${reason}`);
+          const auditLogger = require('./utils/audit-logger');
+          await auditLogger.logUnauthorizedAccess(userId, 'form', formId, `Anonymous form update attempt: ${reason}`, req.ip);
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: You do not have access to update this form'
+          });
+        }
+        console.log(`✅ Ownership verified for anonymous form update - user: ${userId}, formId: ${formId}`);
+      }
+      
+      // ===== SCENARIO 3: Anonymous Form Clone =====
+      else if (metadata?.originalFormId) {
+        console.log(`🔍 Verifying clone access for anonymous form - user: ${userId}, source: ${metadata.originalFormId}`);
+        const sourceForm = await gcpClient.getFormStructure(metadata.originalFormId, true);
+        
+        if (!sourceForm) {
+          console.log(`❌ Clone failed: Source form not found - ${metadata.originalFormId}`);
+          const auditLogger = require('./utils/audit-logger');
+          await auditLogger.logUnauthorizedAccess(userId, 'form', metadata.originalFormId, 'Anonymous form clone attempt: Source form not found', req.ip);
+          return res.status(404).json({
+            success: false,
+            error: 'Source form not found'
+          });
+        }
+        
+        const isPublished = sourceForm.is_published || sourceForm.isPublished;
+        
+        // If draft form, require ownership of source
+        if (!isPublished) {
+          console.log(`🔍 Source form is draft, verifying ownership - user: ${userId}, source: ${metadata.originalFormId}`);
+          const { verifyFormAccess } = require('./auth/authorization');
+          const { hasAccess, reason } = await verifyFormAccess(userId, metadata.originalFormId);
+          if (!hasAccess) {
+            console.log(`❌ Unauthorized anonymous form clone - user: ${userId}, source: ${metadata.originalFormId}, reason: ${reason}`);
+            const auditLogger = require('./utils/audit-logger');
+            await auditLogger.logUnauthorizedAccess(userId, 'form', metadata.originalFormId, `Anonymous form clone attempt of draft form: ${reason}`, req.ip);
+            return res.status(403).json({
+              success: false,
+              error: 'Forbidden: You cannot clone this draft form. Only the owner can clone draft forms.',
+              code: 'CANNOT_CLONE_DRAFT'
+            });
+          }
+          console.log(`✅ Draft form clone authorized for anonymous form - user: ${userId}, source: ${metadata.originalFormId}`);
+        } else {
+          console.log(`✅ Published form clone authorized for anonymous form - user: ${userId}, source: ${metadata.originalFormId}`);
+        }
+        // Published forms can be cloned by any authenticated user
+      }
+
+      // Store form structure
+      console.log(`📝 Attempting to store anonymous form in Firestore: ${formId}`);
+      console.log(`📝 Form data:`, JSON.stringify(formData, null, 2));
+      
+      const result = await gcpClient.storeFormStructure(
+        formId,
+        formData,
+        userId, // ✅ Use authenticated user's ID
       {
         ...metadata,
         source: 'railway-backend-anonymous',
@@ -6944,31 +7119,33 @@ app.post('/store-anonymous-form', async (req, res) => {
       }
     );
 
-    console.log(`✅ Anonymous form structure stored: ${formId}`);
-    console.log(`✅ Storage result:`, JSON.stringify(result, null, 2));
+      console.log(`✅ Anonymous form structure stored: ${formId}`);
+      console.log(`✅ Storage result:`, JSON.stringify(result, null, 2));
 
-    // Return the FULL response from GCP client for migration purposes
-    res.json({
-      success: true,
-      formId: result.formId,
-      userId: result.userId,
-      isAnonymous: result.isAnonymous,
-      anonymousSessionId: result.anonymousSessionId,
-      isUpdate: result.isUpdate,
-      message: 'Anonymous form structure stored successfully',
-      timestamp: new Date().toISOString()
-    });
+      // Return the FULL response from GCP client for migration purposes
+      console.log(`✅ Anonymous form stored successfully - user: ${userId}, formId: ${formId}`);
+      res.json({
+        success: true,
+        formId: result.formId,
+        userId: result.userId,
+        isAnonymous: result.isAnonymous,
+        anonymousSessionId: result.anonymousSessionId,
+        isUpdate: result.isUpdate,
+        message: 'Anonymous form structure stored successfully',
+        timestamp: new Date().toISOString()
+      });
 
-  } catch (error) {
-    console.error('❌ Anonymous form storage error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Anonymous form storage failed',
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
+    } catch (error) {
+      console.error('❌ Anonymous form storage error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error while storing anonymous form',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
   }
-});
+);
 
 // ============== ANONYMOUS SESSION ENDPOINT ==============
 
