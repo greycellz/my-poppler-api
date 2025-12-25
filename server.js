@@ -5447,11 +5447,15 @@ app.post('/api/forms/migrate-anonymous', async (req, res) => {
     }
 
     console.log(`🔄 Migrating forms from ${tempUserId} to ${realUserId}`);
+    console.log(`🔍 DEBUG: tempUserId type: ${typeof tempUserId}, value: ${tempUserId}`);
+    console.log(`🔍 DEBUG: realUserId type: ${typeof realUserId}, value: ${realUserId}`);
     
     const gcpClient = new GCPClient();
     // ✅ FIX: Use migrateAnonymousFormsToUser which queries by user_id (not anonymousSessionId)
     // This correctly finds forms with user_id = temp_xxx
     const result = await gcpClient.migrateAnonymousFormsToUser(tempUserId, realUserId);
+    
+    console.log(`🔍 DEBUG: Migration result:`, JSON.stringify(result, null, 2));
 
     res.json({
       success: true,

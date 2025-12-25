@@ -2370,6 +2370,7 @@ class GCPClient {
   async migrateAnonymousFormsToUser(tempUserId, realUserId) {
     try {
       console.log(`🔄 Migrating forms from ${tempUserId} to ${realUserId}`);
+      console.log(`🔍 DEBUG: Querying forms with user_id == "${tempUserId}"`);
       
       // Get all forms with the temporary user ID
       const snapshot = await this
@@ -2377,8 +2378,30 @@ class GCPClient {
         .where('user_id', '==', tempUserId)
         .get();
 
+      console.log(`🔍 DEBUG: Query returned ${snapshot.size} forms`);
+      
       if (snapshot.empty) {
         console.log(`ℹ️ No forms found for temporary user: ${tempUserId}`);
+        console.log(`🔍 DEBUG: Checking if any anonymous forms exist with different user_id...`);
+        
+        // Debug: Check if there are any anonymous forms at all
+        const allAnonymousSnapshot = await this
+          .collection('forms')
+          .where('isAnonymous', '==', true)
+          .limit(10)
+          .get();
+        
+        console.log(`🔍 DEBUG: Found ${allAnonymousSnapshot.size} anonymous forms total`);
+        if (allAnonymousSnapshot.size > 0) {
+          console.log(`🔍 DEBUG: Sample anonymous form user_ids:`, 
+            allAnonymousSnapshot.docs.map(doc => ({
+              formId: doc.id,
+              user_id: doc.data().user_id,
+              anonymousSessionId: doc.data().anonymousSessionId
+            }))
+          );
+        }
+        
         return { success: true, migratedForms: 0, migratedFormIds: [] };
       }
 
