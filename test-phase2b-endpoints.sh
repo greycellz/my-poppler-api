@@ -65,7 +65,7 @@ test_endpoint() {
     fi
   fi
   
-  local http_code=$(echo "$response_output" | tail -n1)
+  local http_code=$(echo "$response_output" | tail -n1 | grep -oE '[0-9]{3}' | tail -1)
   local body=$(echo "$response_output" | sed '$d')
   
   if [ "$http_code" = "$expected_status" ]; then

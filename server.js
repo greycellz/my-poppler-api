@@ -38,6 +38,7 @@ const emailService = require('./email-service');
 const { authenticateToken, requireAuth, optionalAuth } = require('./auth/middleware');
 const { requireFormOwnership, requireSubmissionOwnership, requireFormOwnershipFromBody } = require('./auth/authorization');
 const featureFlags = require('./config/feature-flags');
+const { anonymousFormLimiter } = require('./utils/rate-limiter');
 
 // Environment-aware base URL construction
 const getBaseUrl = () => {
@@ -1569,15 +1570,22 @@ app.post('/store-form',
         const { verifyFormAccess } = require('./auth/authorization');
         const { hasAccess, reason } = await verifyFormAccess(userId, formId);
         if (!hasAccess) {
-          console.log(`❌ Unauthorized form update - user: ${userId}, form: ${formId}, reason: ${reason}`);
-          const auditLogger = require('./utils/audit-logger');
-          await auditLogger.logUnauthorizedAccess(userId, 'form', formId, `Update attempt: ${reason}`, req.ip);
-          return res.status(403).json({
-            success: false,
-            error: 'Forbidden: You do not have access to update this form'
-          });
+          // ✅ FIX: If form doesn't exist, treat as new form creation instead of error
+          if (reason === 'form_not_found') {
+            console.log(`⚠️ Form ${formId} doesn't exist, treating as new form creation`);
+            // Continue as new form (no additional checks needed)
+          } else {
+            console.log(`❌ Unauthorized form update - user: ${userId}, form: ${formId}, reason: ${reason}`);
+            const auditLogger = require('./utils/audit-logger');
+            await auditLogger.logUnauthorizedAccess(userId, 'form', formId, `Update attempt: ${reason}`, req.ip);
+            return res.status(403).json({
+              success: false,
+              error: 'Forbidden: You do not have access to update this form'
+            });
+          }
+        } else {
+          console.log(`✅ Ownership verified for form update - user: ${userId}, formId: ${formId}`);
         }
-        console.log(`✅ Ownership verified for form update - user: ${userId}, formId: ${formId}`);
       }
       
       // ===== SCENARIO 3: Form Clone =====
@@ -7008,6 +7016,7 @@ app.get('/api/calendly/bookings/:submissionId', async (req, res) => {
  * Store anonymous form with full response data for migration
  */
 app.post('/store-anonymous-form',
+  anonymousFormLimiter,    // ✅ Rate limiting: 5 forms/hour per IP for anonymous users
   optionalAuth,            // ✅ Optional auth - allow anonymous users for new forms
   async (req, res) => {
     try {
