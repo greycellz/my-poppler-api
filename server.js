@@ -4947,11 +4947,18 @@ app.get('/api/forms/:formId',
       }
 
       console.log(`📋 Fetching form: ${formId}, user: ${userId || 'anonymous'}`);
+      console.log(`🔍 DEBUG FORM RETRIEVAL:`, {
+        formId,
+        requestingUserId: userId || 'anonymous',
+        hasAuth: !!req.user,
+        authUser: req.user?.userId || req.user?.id || 'none'
+      });
       
       // Get the form data from GCP with fresh read to avoid cache issues after updates
       const form = await gcpClient.getFormStructure(formId, true);
 
       if (!form) {
+        console.log(`❌ DEBUG FORM RETRIEVAL: Form not found - ${formId}`);
         return res.status(404).json({
           success: false,
           error: 'Form not found',
@@ -4959,6 +4966,19 @@ app.get('/api/forms/:formId',
           timestamp: new Date().toISOString()
         });
       }
+
+      // 🔍 DEBUG: Log form details
+      const formOwnerId = form.user_id || form.userId || form.createdBy || form.owner_id;
+      console.log(`🔍 DEBUG FORM RETRIEVAL - Form Details:`, {
+        formId,
+        formOwnerId: formOwnerId || 'none',
+        isAnonymous: form.isAnonymous || false,
+        isPublished: form.is_published || form.isPublished || false,
+        requestingUserId: userId || 'anonymous',
+        ownerMatch: formOwnerId === userId,
+        isTempOwner: formOwnerId && formOwnerId.startsWith('temp_'),
+        formKeys: Object.keys(form)
+      });
 
       // ✅ NEW: Check access based on publish status
       const isPublished = form.is_published || form.isPublished;
@@ -4977,10 +4997,28 @@ app.get('/api/forms/:formId',
         
         // Verify ownership
         const { verifyFormAccess } = require('./auth/authorization');
+        console.log(`🔍 DEBUG ACCESS CHECK: Checking access for user=${userId}, form=${formId}, formOwner=${formOwnerId}`);
         const { hasAccess, reason } = await verifyFormAccess(userId, formId);
+        
+        console.log(`🔍 DEBUG ACCESS CHECK RESULT:`, {
+          hasAccess,
+          reason,
+          requestingUserId: userId,
+          formOwnerId: formOwnerId,
+          isAnonymous: form.isAnonymous || false,
+          isTempOwner: formOwnerId && formOwnerId.startsWith('temp_')
+        });
         
         if (!hasAccess) {
           console.warn(`❌ Access denied to draft form: user=${userId}, form=${formId}, reason=${reason}`);
+          console.log(`🔍 DEBUG ACCESS DENIED DETAILS:`, {
+            formId,
+            formOwnerId,
+            requestingUserId: userId,
+            isAnonymous: form.isAnonymous,
+            isPublished: isPublished,
+            reason
+          });
           return res.status(403).json({
             success: false,
             error: 'Forbidden: You do not have access to this form',
@@ -5447,15 +5485,28 @@ app.post('/api/forms/migrate-anonymous', async (req, res) => {
     }
 
     console.log(`🔄 Migrating forms from ${tempUserId} to ${realUserId}`);
-    console.log(`🔍 DEBUG: tempUserId type: ${typeof tempUserId}, value: ${tempUserId}`);
-    console.log(`🔍 DEBUG: realUserId type: ${typeof realUserId}, value: ${realUserId}`);
+    console.log(`🔍 DEBUG MIGRATION START:`, {
+      tempUserId,
+      realUserId,
+      tempUserIdType: typeof tempUserId,
+      realUserIdType: typeof realUserId,
+      timestamp: new Date().toISOString()
+    });
     
     const gcpClient = new GCPClient();
     // ✅ FIX: Use migrateAnonymousFormsToUser which queries by user_id (not anonymousSessionId)
     // This correctly finds forms with user_id = temp_xxx
     const result = await gcpClient.migrateAnonymousFormsToUser(tempUserId, realUserId);
     
-    console.log(`🔍 DEBUG: Migration result:`, JSON.stringify(result, null, 2));
+    console.log(`🔍 DEBUG MIGRATION RESULT:`, {
+      success: result.success,
+      migratedCount: result.migratedForms || 0,
+      migratedFormIds: result.migratedFormIds || [],
+      tempUserId,
+      realUserId,
+      fullResult: JSON.stringify(result, null, 2),
+      timestamp: new Date().toISOString()
+    });
 
     res.json({
       success: true,

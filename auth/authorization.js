@@ -25,6 +25,17 @@ async function verifyFormAccess(userId, formId) {
     // Handle field name variations (user_id vs userId vs createdBy)
     const formOwnerId = form.user_id || form.userId || form.createdBy || form.owner_id;
     
+    console.log(`🔍 DEBUG VERIFY_FORM_ACCESS:`, {
+      formId,
+      formOwnerId: formOwnerId || 'none',
+      requestingUserId: userId || 'none',
+      isAnonymous: form.isAnonymous || false,
+      isPublished: form.is_published || form.isPublished || false,
+      isTempOwner: formOwnerId && formOwnerId.startsWith('temp_'),
+      isTempRequesting: userId && userId.startsWith('temp_'),
+      ownerMatch: formOwnerId === userId
+    });
+    
     if (!formOwnerId) {
       console.warn(`⚠️ Form ${formId} has no owner field`);
       // For backward compatibility with old forms, allow access

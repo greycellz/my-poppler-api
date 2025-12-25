@@ -132,6 +132,16 @@ class GCPClient {
       let isAnonymous = false;
       let anonymousSessionId = null;
 
+      console.log(`🔍 DEBUG STORE_FORM_STRUCTURE START:`, {
+        formId,
+        incomingUserId: userId || 'none',
+        isUpdate,
+        existingDataUserId: existingData?.user_id || existingData?.userId || 'none',
+        existingDataIsAnonymous: existingData?.isAnonymous || false,
+        metadataSource: metadata?.source || 'unknown',
+        metadataIsPublished: metadata?.isPublished || false
+      });
+
       if (!userId || userId === 'anonymous') {
         // For updates: preserve existing user_id if form is anonymous
         if (isUpdate && existingData?.isAnonymous) {
@@ -159,8 +169,19 @@ class GCPClient {
       const isAutoSave = (metadata?.source === 'auto-save');
       
       // ✅ Handle conversion: If authenticated user is taking over anonymous form, clear anonymous flags
-      if (isUpdate && existingData?.isAnonymous && userId !== 'anonymous' && finalUserId !== 'anonymous') {
-        console.log(`🔄 Converting anonymous form to authenticated user: ${finalUserId}`);
+      // Only convert if userId is a real authenticated user ID (not anonymous or temp_xxx)
+      if (isUpdate && existingData?.isAnonymous && userId && userId !== 'anonymous' && !userId.startsWith('temp_')) {
+        console.log(`🔄 Converting anonymous form to authenticated user: ${userId} (was: ${existingData.user_id || existingData.userId})`);
+        console.log(`🔍 DEBUG CONVERSION:`, {
+          formId,
+          oldUserId: existingData.user_id || existingData.userId,
+          newUserId: userId,
+          wasAnonymous: existingData.isAnonymous,
+          willBeAnonymous: false,
+          metadataSource: metadata?.source,
+          metadataIsPublished: metadata?.isPublished
+        });
+        finalUserId = userId; // ✅ EXPLICITLY update user_id to authenticated user's ID
         isAnonymous = false;
         anonymousSessionId = null;
       }
@@ -172,7 +193,17 @@ class GCPClient {
         isUpdate,
         formDataTitle: formData?.title,
         finalUserId,
-        isAnonymous
+        isAnonymous,
+        incomingUserId: userId
+      });
+      
+      console.log(`🔍 DEBUG STORE_FORM_STRUCTURE END:`, {
+        formId,
+        finalUserId,
+        isAnonymous,
+        isPublished: metadata?.isPublished ?? existingData?.is_published ?? false,
+        willStoreUserId: finalUserId,
+        willStoreIsAnonymous: isAnonymous
       });
 
       const formDoc = {
@@ -3218,6 +3249,18 @@ class GCPClient {
       }
 
       const data = doc.data();
+      
+      // 🔍 DEBUG: Log form details when retrieved
+      const formOwnerId = data.user_id || data.userId || data.createdBy || data.owner_id;
+      console.log(`🔍 DEBUG GET_FORM_STRUCTURE:`, {
+        formId,
+        formOwnerId: formOwnerId || 'none',
+        isAnonymous: data.isAnonymous || false,
+        isPublished: data.is_published || data.isPublished || false,
+        isTempOwner: formOwnerId && formOwnerId.startsWith('temp_'),
+        formKeys: Object.keys(data),
+        timestamp: new Date().toISOString()
+      });
       console.log(`✅ Found form: ${formId}`);
       return {
         id: doc.id,
