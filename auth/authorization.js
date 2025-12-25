@@ -216,10 +216,89 @@ function requireSubmissionOwnership(req, res, next) {
     });
 }
 
+/**
+ * Middleware: Require form ownership (formId from request body)
+ * Similar to requireFormOwnership but gets formId from req.body instead of req.params.
+ * Used for endpoints like auto-save and upload-form-image.
+ */
+async function requireFormOwnershipFromBody(req, res, next) {
+  // Check feature flag
+  if (!featureFlags.ENABLE_FORM_OWNERSHIP_CHECK) {
+    console.log('⚠️ Form ownership check disabled (feature flag)');
+    return next();
+  }
+
+  const userId = req.user?.userId || req.user?.id;
+  const { formId } = req.body; // ✅ Get from body instead of params
+
+  if (!userId) {
+    const auditLogger = require('../utils/audit-logger');
+    await auditLogger.logUnauthorizedAccess(null, 'form', formId, 'Missing userId in token', req.ip);
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required',
+      code: 'AUTHENTICATION_REQUIRED'
+    });
+  }
+
+  if (!formId) {
+    const auditLogger = require('../utils/audit-logger');
+    await auditLogger.logUnauthorizedAccess(userId, 'form', null, 'Missing formId in request body', req.ip);
+    return res.status(400).json({
+      success: false,
+      error: 'Form ID is required in request body',
+      code: 'FORM_ID_MISSING'
+    });
+  }
+
+  // Log authorization attempt
+  if (featureFlags.LOG_AUTH_ATTEMPTS) {
+    console.log(`🔐 Authorization check (from body): user=${userId}, form=${formId}, endpoint=${req.path}`);
+  }
+
+  try {
+    const { hasAccess, form, reason } = await verifyFormAccess(userId, formId);
+    
+    if (!hasAccess) {
+      // Log authorization failure
+      if (featureFlags.LOG_AUTHZ_FAILURES) {
+        console.warn(`❌ Authorization denied (from body): user=${userId}, form=${formId}, reason=${reason}`);
+      }
+      
+      const auditLogger = require('../utils/audit-logger');
+      await auditLogger.logUnauthorizedAccess(userId, 'form', formId, `User does not own form: ${reason}`, req.ip);
+      
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: You do not have access to this form',
+        code: 'ACCESS_DENIED',
+        reason
+      });
+    }
+
+    // Attach form to request for use in route handler
+    req.form = form;
+    req.accessReason = reason;
+
+    console.log(`✅ Authorization granted (from body): user=${userId}, form=${formId}, reason=${reason}`);
+    next();
+  } catch (error) {
+    console.error('❌ Authorization middleware error (from body):', error);
+    const auditLogger = require('../utils/audit-logger');
+    await auditLogger.logUnauthorizedAccess(userId, 'form', formId, `Internal server error: ${error.message}`, req.ip);
+    res.status(500).json({
+      success: false,
+      error: 'Authorization check failed',
+      code: 'AUTHORIZATION_ERROR'
+    });
+  }
+}
+
 module.exports = {
   verifyFormAccess,
   verifySubmissionAccess,
   requireFormOwnership,
-  requireSubmissionOwnership
+  requireSubmissionOwnership,
+  requireFormOwnershipFromBody // ✅ NEW
 };
 

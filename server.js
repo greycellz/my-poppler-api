@@ -36,7 +36,7 @@ const emailService = require('./email-service');
 
 // Import authentication and authorization middleware (must be before routes)
 const { authenticateToken, requireAuth, optionalAuth } = require('./auth/middleware');
-const { requireFormOwnership, requireSubmissionOwnership } = require('./auth/authorization');
+const { requireFormOwnership, requireSubmissionOwnership, requireFormOwnershipFromBody } = require('./auth/authorization');
 const featureFlags = require('./config/feature-flags');
 
 // Environment-aware base URL construction
@@ -1701,12 +1701,50 @@ app.post('/submit-form', async (req, res) => {
       });
     }
 
-    console.log(`📤 Processing form submission: ${formId}`);
-    console.log(`🛡️ HIPAA flag received: ${isHipaa} (type: ${typeof isHipaa})`);
-    
     // Initialize GCP client
     const GCPClient = require('./gcp-client');
     const gcpClient = new GCPClient();
+    
+    // ✅ NEW: Verify form exists
+    const form = await gcpClient.getFormStructure(formId, true);
+    if (!form) {
+      console.log(`❌ Form submission to non-existent form: ${formId}`);
+      const auditLogger = require('./utils/audit-logger');
+      await auditLogger.logUnauthorizedAccess(
+        userId || 'anonymous', 
+        'form_submission', 
+        formId, 
+        'Attempted submission to non-existent form', 
+        req.ip
+      );
+      return res.status(404).json({
+        success: false,
+        error: 'Form not found'
+      });
+    }
+    
+    // ✅ NEW: Verify form is published (draft forms should not accept submissions)
+    const isPublished = form.is_published || form.isPublished;
+    if (!isPublished) {
+      console.log(`❌ Form submission to draft form: ${formId}`);
+      const auditLogger = require('./utils/audit-logger');
+      await auditLogger.logUnauthorizedAccess(
+        userId || 'anonymous', 
+        'form_submission', 
+        formId, 
+        'Attempted submission to unpublished/draft form', 
+        req.ip
+      );
+      return res.status(403).json({
+        success: false,
+        error: 'Form is not published. Only published forms accept submissions.',
+        code: 'FORM_NOT_PUBLISHED'
+      });
+    }
+    
+    console.log(`✅ Form submission validation passed - form: ${formId}, published: ${isPublished}`);
+    console.log(`📤 Processing form submission: ${formId}`);
+    console.log(`🛡️ HIPAA flag received: ${isHipaa} (type: ${typeof isHipaa})`);
 
     // Generate submission ID
     const submissionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -4495,6 +4533,13 @@ app.get('/api/files/form-image/:formId/:fieldId/:imageId', async (req, res) => {
 
 // Debug endpoint to check payment fields for a form
 app.get('/api/debug/payment-fields/:formId', async (req, res) => {
+  // ✅ Disable in production
+  if (process.env.NODE_ENV === 'production' || featureFlags.DISABLE_DEBUG_ENDPOINTS) {
+    return res.status(404).json({
+      error: 'Not found'
+    });
+  }
+  
   try {
     const { formId } = req.params;
     console.log(`🔍 DEBUG: Getting payment fields for form: ${formId}`);
@@ -4529,6 +4574,13 @@ app.get('/api/debug/payment-fields/:formId', async (req, res) => {
 
 // Cleanup endpoint to remove duplicate payment fields
 app.post('/api/debug/cleanup-payment-fields/:formId/:fieldId', async (req, res) => {
+  // ✅ Disable in production
+  if (process.env.NODE_ENV === 'production' || featureFlags.DISABLE_DEBUG_ENDPOINTS) {
+    return res.status(404).json({
+      error: 'Not found'
+    });
+  }
+  
   try {
     const { formId, fieldId } = req.params;
     console.log(`🧹 CLEANUP: Cleaning up duplicate payment fields for form: ${formId}, field: ${fieldId}`);
@@ -4713,30 +4765,52 @@ app.get('/api/files/:formId/:fieldId/:filename',
 
 // ============== USER FORMS ENDPOINT ==============
 
-app.get('/api/forms/user/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'User ID is required'
+app.get('/api/forms/user/:userId',
+  authenticateToken,      // ✅ Require authentication
+  requireAuth,            // ✅ Ensure user exists
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const authenticatedUserId = req.user?.userId || req.user?.id;
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      // ✅ NEW: Verify authenticated user matches URL userId
+      if (userId !== authenticatedUserId) {
+        console.log(`❌ Unauthorized forms list access - requested: ${userId}, authenticated: ${authenticatedUserId}`);
+        const auditLogger = require('./utils/audit-logger');
+        await auditLogger.logUnauthorizedAccess(
+          authenticatedUserId, 
+          'forms_list', 
+          userId, 
+          'User ID mismatch - attempted to access another user\'s forms list', 
+          req.ip
+        );
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: You can only view your own forms'
+        });
+      }
+
+      console.log(`📋 Fetching forms for user: ${userId}`);
+      
+      const forms = await gcpClient.getFormsByUserId(userId);
+
+      console.log(`✅ Forms list retrieved - user: ${userId}, count: ${forms.length}`);
+      res.json({
+        success: true,
+        userId,
+        forms,
+        count: forms.length,
+        timestamp: new Date().toISOString()
       });
-    }
 
-    console.log(`📋 Fetching forms for user: ${userId}`);
-    
-    const forms = await gcpClient.getFormsByUserId(userId);
-
-    res.json({
-      success: true,
-      userId,
-      forms,
-      count: forms.length,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
+    } catch (error) {
     console.error('❌ User forms retrieval error:', error);
     res.status(500).json({
       success: false,
@@ -5349,33 +5423,40 @@ app.use('/', screenshotPagesRoutes);
 
 // ============== AUTO-SAVE ENDPOINT ==============
 
-app.post('/api/auto-save-form', async (req, res) => {
-  try {
-    const { formId, formSchema } = req.body;
-    
-    console.log('🔄 Auto-save API received:', {
-      formId,
-      hasFormSchema: !!formSchema
-    });
-
-    if (!formId || !formSchema) {
-      return res.status(400).json({
-        error: 'Form ID and schema are required'
+app.post('/api/auto-save-form',
+  authenticateToken,                  // ✅ Require authentication
+  requireAuth,                        // ✅ Ensure user exists
+  requireFormOwnershipFromBody,       // ✅ Verify ownership (formId from body)
+  async (req, res) => {
+    try {
+      const { formId, formSchema } = req.body;
+      const userId = req.user?.userId || req.user?.id; // ✅ From JWT, not form data
+      
+      console.log('🔄 Auto-save API received:', {
+        formId,
+        userId,
+        hasFormSchema: !!formSchema
       });
-    }
 
-    // Get the current form to preserve its published status
-    const currentForm = await gcpClient.getFormById(formId);
-    const currentPublishedStatus = currentForm?.is_published || false;
+      if (!formId || !formSchema) {
+        return res.status(400).json({
+          error: 'Form ID and schema are required'
+        });
+      }
 
-    // Use HIPAA setting from the form schema being sent (not from database)
-    const hipaaStatus = formSchema?.isHipaa || false;
+      // ✅ Ownership already verified by requireFormOwnershipFromBody middleware
+      // Get the current form to preserve its published status
+      const currentForm = await gcpClient.getFormById(formId);
+      const currentPublishedStatus = currentForm?.is_published || false;
 
-    // Store the form structure with auto-save metadata
-    const result = await gcpClient.storeFormStructure(
-      formId,
-      formSchema,
-      currentForm?.user_id || 'anonymous',
+      // Use HIPAA setting from the form schema being sent (not from database)
+      const hipaaStatus = formSchema?.isHipaa || false;
+
+      // Store the form structure with auto-save metadata
+      const result = await gcpClient.storeFormStructure(
+        formId,
+        formSchema,
+        userId, // ✅ Use authenticated user's ID
       {
         source: 'auto-save',
         isUpdate: true,
@@ -5385,24 +5466,24 @@ app.post('/api/auto-save-form', async (req, res) => {
       }
     );
 
-    if (result.success) {
-      console.log('✅ Auto-save successful for form:', formId);
-      return res.json({ 
-        success: true, 
-        formId,
-        message: 'Form auto-saved successfully' 
+      if (result.success) {
+        console.log(`✅ Auto-save successful - user: ${userId}, form: ${formId}`);
+        return res.json({ 
+          success: true, 
+          formId,
+          message: 'Form auto-saved successfully' 
+        });
+      } else {
+        throw new Error('Failed to auto-save form');
+      }
+    } catch (error) {
+      console.error('❌ Auto-save error:', error);
+      return res.status(500).json({
+        error: 'Failed to auto-save form'
       });
-    } else {
-      throw new Error('Failed to auto-save form');
     }
-
-  } catch (error) {
-    console.error('❌ Auto-save error:', error);
-    return res.status(500).json({
-      error: 'Failed to auto-save form'
-    });
   }
-});
+);
 
 // ============== HEALTH CHECK ==============
 

@@ -21,5 +21,8 @@ module.exports = {
   // Logging
   LOG_AUTH_ATTEMPTS: process.env.LOG_AUTH_ATTEMPTS === 'true',
   LOG_AUTHZ_FAILURES: process.env.LOG_AUTHZ_FAILURES === 'true',
+  
+  // Debug endpoints (disable in production)
+  DISABLE_DEBUG_ENDPOINTS: process.env.DISABLE_DEBUG_ENDPOINTS === 'true',
 };
 

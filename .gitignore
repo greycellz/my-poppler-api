@@ -15,3 +15,4 @@ test-secrets.js
 # MaxMind GeoIP database directories (but include the .mmdb file itself)
 GeoLite2-City_*/
 GeoLite2-City.tar.gz
+test-phase2-config-local.sh
