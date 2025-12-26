@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 
 /**
  * Rate limiter for anonymous form creation
@@ -39,8 +40,9 @@ const anonymousFormLimiter = rateLimit({
     return shouldSkip; // Skip if authenticated via either method
   },
   keyGenerator: (req) => {
-    // Use IP address for rate limiting
-    return req.ip || req.connection.remoteAddress || 'unknown';
+    // Use IP address for rate limiting with IPv6-safe key generation
+    const ip = req.ip || req.connection.remoteAddress || 'unknown';
+    return ipKeyGenerator(ip);
   },
   handler: (req, res) => {
     console.log(`⚠️ Rate limit exceeded for anonymous form creation - IP: ${req.ip || 'unknown'}`);
