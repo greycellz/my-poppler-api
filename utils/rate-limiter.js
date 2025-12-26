@@ -18,6 +18,11 @@ const anonymousFormLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false, // Disable `X-RateLimit-*` headers
   skip: (req) => {
+    // Skip rate limiting for OPTIONS preflight requests (CORS)
+    if (req.method === 'OPTIONS') {
+      return true;
+    }
+    
     // Skip rate limiting if user is authenticated (they have unlimited forms)
     // Check Authorization header (rate limiter runs before optionalAuth middleware sets req.user)
     // Use req.get() which handles header normalization correctly
