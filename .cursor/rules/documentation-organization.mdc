@@ -1,0 +1,71 @@
+---
+alwaysApply: true
+description: Documentation organization rules - all planning/review files go to plan/ folder
+---
+
+# Documentation Organization Rule
+
+## Important Note: Cursor Plan Mode vs Workspace Documentation
+
+**Cursor Plan Mode Files** (`.cursor/plans/*.plan.md`):
+- These are Cursor's internal plan files, managed by Cursor itself
+- They are stored in `.cursor/plans/` directory (usually in home directory)
+- These are separate from workspace documentation and are handled automatically by Cursor
+
+**Workspace Documentation Files** (this rule applies to these):
+- Documentation files created in the workspace root during development
+- Review documents, analysis documents, implementation plans, etc.
+- These should follow the organization rules below
+
+## Planning and Review Files
+- All workspace documentation files with patterns: *REVIEW*, *PLAN*, *ANALYSIS*, *FIX*, *SUMMARY*, *STATUS*, *COMPARISON*, *VERIFICATION*, *CODE_REVIEW*
+- Should be created in `plan/` folder (workspace root, not `.cursor/plans/`)
+- This folder is excluded from git tracking (via .gitignore)
+
+## Strategic Documentation
+- Files like README.md, setup guides, deployment guides, testing guides, etc.
+- Should be kept in root directory
+- Should be tracked in git (since git is not public)
+- Patterns to keep: *SETUP*, *DESIGN*, *SCHEMA*, *ENHANCEMENT*, *DOCUMENTATION*, *METHODOLOGY*, *ROADMAP*, *STRATEGY*, *GUIDE*, *TESTING_GUIDE*, *TESTING_CHECKLIST*, *README*, *ROLLBACK_GUIDE*, *DEPLOYMENT*
+
+## Essential Documentation
+- README.md, setup guides, integration guides
+- Should be tracked in git
+- Keep in root directory
+
+## File Organization Workflow
+
+When creating new workspace documentation (NOT Cursor's plan mode files):
+
+1. **If it's a temporary planning/review/analysis file:**
+   - Create it in `plan/` folder (workspace root)
+   - It will be automatically ignored by git
+   - Example: `plan/FEATURE_X_IMPLEMENTATION_PLAN.md`
+
+2. **If it's a strategic/setup/design/schema/enhancement document:**
+   - Create it in root directory
+   - It will be tracked in git
+   - Example: `GEOLOCATION_SETUP.md`, `RAILWAY_DEPLOYMENT.md`
+
+3. **If it's essential documentation (README, setup guides):**
+   - Create it in root directory
+   - It will be tracked in git
+   - Example: `README.md`, `TESTING_GUIDE.md`
+
+**Note**: Cursor's plan mode files (`.cursor/plans/*.plan.md`) are managed separately by Cursor and are not affected by this rule.
+
+## Examples
+
+**Move to plan/:**
+- `FEATURE_X_IMPLEMENTATION_PLAN.md`
+- `BUG_FIX_REVIEW.md`
+- `ANALYSIS_OF_ISSUE.md`
+- `PHASE2_IMPLEMENTATION_REVIEW.md`
+- `TEST_RESULTS_*.md`
+
+**Keep in root (tracked):**
+- `README.md`
+- `GEOLOCATION_SETUP.md`
+- `RAILWAY_DEPLOYMENT.md`
+- `TESTING_GUIDE.md`
+- `PHASE2C_ROLLBACK_GUIDE.md`

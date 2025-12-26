@@ -79,3 +79,4 @@ module.exports = {
   quickComplexityCheck,
   detectImageComplexity
 }
+

@@ -29,3 +29,4 @@ export IMAGE_ID="REPLACE_WITH_IMAGE_ID"   # img_xxx
 # 2. Edit test-phase2-config-local.sh with real values
 # 3. Run tests: ./test-phase2-endpoints-after.sh
 
+

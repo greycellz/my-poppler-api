@@ -809,3 +809,4 @@ module.exports = {
   calculateCrossFieldAnalysis,
   detectDefaultComparisons
 };
+

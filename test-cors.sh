@@ -124,3 +124,4 @@ echo "  - Allowed origins return specific origin"
 echo "  - Disallowed origins fall back to wildcard (*)"
 echo ""
 
+

@@ -897,7 +897,7 @@ console.log('🔐 CORS allowed origins:', allowedOrigins);
 // CORS middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const hasAuthHeader = !!req.headers.authorization;
+  const hasAuthHeader = !!req.headers['authorization']; // Use bracket notation for consistency with auth middleware
   
   // If request includes Authorization header (credentials), we MUST use exact origin, not wildcard
   // Browsers reject wildcard CORS when credentials are included
@@ -5755,11 +5755,15 @@ app.post('/api/auto-save-form',
       const { formId, formSchema } = req.body;
       const userId = req.user?.userId || req.user?.id || 'anonymous'; // ✅ From JWT or default to anonymous
       
+      // ✅ Enhanced logging for authentication debugging
       console.log('🔄 Auto-save API received:', {
         formId,
         userId,
         isAuthenticated: !!req.user,
-        hasFormSchema: !!formSchema
+        hasFormSchema: !!formSchema,
+        hasAuthHeader: !!req.headers.authorization,
+        authHeaderPreview: req.headers.authorization ? `${req.headers.authorization.substring(0, 20)}...` : 'none',
+        userObject: req.user ? { userId: req.user.userId, id: req.user.id } : 'none'
       });
 
       if (!formId || !formSchema) {

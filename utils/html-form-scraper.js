@@ -777,3 +777,4 @@ async function extractFormFieldsFromDOM(page) {
 module.exports = {
   extractFormFieldsFromDOM
 }
+

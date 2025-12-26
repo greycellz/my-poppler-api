@@ -16,3 +16,6 @@ test-secrets.js
 GeoLite2-City_*/
 GeoLite2-City.tar.gz
 test-phase2-config-local.sh
+
+# Planning and review documents (not tracked)
+plan/
