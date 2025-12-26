@@ -897,27 +897,45 @@ console.log('🔐 CORS allowed origins:', allowedOrigins);
 // CORS middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
+  const hasAuthHeader = !!req.headers.authorization;
   
-  // Check feature flag for strict CORS
-  if (featureFlags.ENABLE_STRICT_CORS) {
-    // Strict mode - only allow whitelisted origins
-    if (origin && allowedOrigins.includes(origin)) {
+  // If request includes Authorization header (credentials), we MUST use exact origin, not wildcard
+  // Browsers reject wildcard CORS when credentials are included
+  if (hasAuthHeader) {
+    if (origin) {
+      // For credentialed requests, use exact origin (even if not whitelisted in permissive mode)
       res.header('Access-Control-Allow-Origin', origin);
       res.header('Access-Control-Allow-Credentials', 'true');
-      console.log(`✅ CORS: Origin allowed (strict): ${origin}`);
+      console.log(`✅ CORS: Credentialed request - using exact origin: ${origin}`);
     } else {
-      console.warn(`⚠️ CORS: Origin not in whitelist: ${origin}`);
+      // No origin header with credentials - browser will block, but we'll still set headers
+      // This shouldn't happen in normal browser requests
+      console.warn(`⚠️ CORS: Credentialed request without origin header`);
       // Don't set CORS headers - browser will block
     }
   } else {
-    // Permissive mode (for gradual rollout)
-    if (origin && allowedOrigins.includes(origin)) {
-      res.header('Access-Control-Allow-Origin', origin);
-      res.header('Access-Control-Allow-Credentials', 'true');
+    // No credentials - can use wildcard if needed
+    // Check feature flag for strict CORS
+    if (featureFlags.ENABLE_STRICT_CORS) {
+      // Strict mode - only allow whitelisted origins
+      if (origin && allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+        console.log(`✅ CORS: Origin allowed (strict): ${origin}`);
+      } else {
+        console.warn(`⚠️ CORS: Origin not in whitelist: ${origin}`);
+        // Don't set CORS headers - browser will block
+      }
     } else {
-      // Fallback to wildcard for backward compatibility
-      res.header('Access-Control-Allow-Origin', '*');
-      console.warn(`⚠️ CORS: Using wildcard for origin: ${origin || 'unknown'}`);
+      // Permissive mode (for gradual rollout)
+      if (origin && allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+      } else {
+        // Fallback to wildcard for backward compatibility (only for non-credentialed requests)
+        res.header('Access-Control-Allow-Origin', '*');
+        console.warn(`⚠️ CORS: Using wildcard for origin: ${origin || 'unknown'}`);
+      }
     }
   }
   
@@ -4589,12 +4607,11 @@ app.get('/api/files/logo/:userId/:logoId', async (req, res) => {
       }
       
       // Set appropriate headers
+      // Note: CORS headers are handled by global middleware
+      // Do NOT set Access-Control-Allow-Origin here to avoid conflicts with credentialed requests
       res.set({
         'Content-Type': logoData.fileType || 'image/png',
-        'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
-        'Access-Control-Allow-Origin': '*', // Allow CORS
-        'Access-Control-Allow-Methods': 'GET',
-        'Access-Control-Allow-Headers': 'Content-Type'
+        'Cache-Control': 'public, max-age=31536000' // Cache for 1 year
       })
       
       // Stream the file
@@ -4714,12 +4731,11 @@ app.get('/api/files/form-image/:formId/:fieldId/:imageId',
         }
         
         // Set appropriate headers
+        // Note: CORS headers are handled by global middleware
+        // Do NOT set Access-Control-Allow-Origin here to avoid conflicts with credentialed requests
         res.set({
           'Content-Type': imageData.fileType || 'image/png',
-          'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
-          'Access-Control-Allow-Origin': '*', // Allow CORS
-          'Access-Control-Allow-Methods': 'GET',
-          'Access-Control-Allow-Headers': 'Content-Type'
+          'Cache-Control': 'public, max-age=31536000' // Cache for 1 year
         })
         
         // Stream the file
