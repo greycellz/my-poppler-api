@@ -884,13 +884,23 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Define allowed origins
 // TODO: Move to CORS_ALLOWED_ORIGINS environment variable (comma-separated list)
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT_NAME === 'production';
 const allowedOrigins = [
   'https://chatterforms.com',
   'https://www.chatterforms.com',
-  'http://localhost:3000',  // Development
-  'http://localhost:3001',  // Development alternate
+  // Only include localhost in development
+  ...(isProduction ? [] : ['http://localhost:3000', 'http://localhost:3001']),
   process.env.FRONTEND_URL,
-].filter(Boolean); // Remove null values
+].filter((origin) => {
+  // Remove null/undefined/empty values
+  if (!origin) return false;
+  // In production, explicitly filter out any localhost URLs (safety check for FRONTEND_URL)
+  if (isProduction && (origin.startsWith('http://localhost') || origin.startsWith('https://localhost'))) {
+    console.warn(`⚠️ CORS: Filtering out localhost from allowedOrigins in production: ${origin}`);
+    return false;
+  }
+  return true;
+});
 
 console.log('🔐 CORS allowed origins:', allowedOrigins);
 
@@ -903,10 +913,16 @@ app.use((req, res, next) => {
   // Browsers reject wildcard CORS when credentials are included
   if (hasAuthHeader) {
     if (origin) {
-      // For credentialed requests, use exact origin (even if not whitelisted in permissive mode)
-      res.header('Access-Control-Allow-Origin', origin);
-      res.header('Access-Control-Allow-Credentials', 'true');
-      console.log(`✅ CORS: Credentialed request - using exact origin: ${origin}`);
+      // For credentialed requests, check if origin is allowed (even in production, must be whitelisted)
+      if (allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+        console.log(`✅ CORS: Credentialed request - using exact origin: ${origin}`);
+      } else {
+        // Origin not in whitelist - don't allow even with credentials
+        console.warn(`⚠️ CORS: Credentialed request from disallowed origin: ${origin}`);
+        // Don't set CORS headers - browser will block
+      }
     } else {
       // No origin header with credentials - browser will block, but we'll still set headers
       // This shouldn't happen in normal browser requests
@@ -933,8 +949,14 @@ app.use((req, res, next) => {
         res.header('Access-Control-Allow-Credentials', 'true');
       } else {
         // Fallback to wildcard for backward compatibility (only for non-credentialed requests)
-        res.header('Access-Control-Allow-Origin', '*');
-        console.warn(`⚠️ CORS: Using wildcard for origin: ${origin || 'unknown'}`);
+        // BUT: Never allow localhost in production, even with wildcard fallback
+        if (isProduction && origin && (origin.startsWith('http://localhost') || origin.startsWith('https://localhost'))) {
+          console.warn(`⚠️ CORS: Blocking localhost origin in production: ${origin}`);
+          // Don't set CORS headers - browser will block
+        } else {
+          res.header('Access-Control-Allow-Origin', '*');
+          console.warn(`⚠️ CORS: Using wildcard for origin: ${origin || 'unknown'}`);
+        }
       }
     }
   }
