@@ -7329,14 +7329,25 @@ app.post('/store-anonymous-form',
         // Check if form exists and is anonymous
         const existingForm = await gcpClient.getFormStructure(formId, true);
         
-        if (existingForm && existingForm.is_anonymous) {
+        // Check both field name variations (isAnonymous and is_anonymous)
+        // Also check if user_id starts with "temp_" as a fallback indicator of anonymous form
+        const formUserId = existingForm?.user_id || existingForm?.userId;
+        const isFormAnonymous = existingForm && (
+          existingForm.isAnonymous || 
+          existingForm.is_anonymous || 
+          (formUserId && formUserId.startsWith('temp_'))
+        );
+        
+        console.log(`🔍 Anonymous form update check - formId: ${formId}, existingForm: ${!!existingForm}, isAnonymous: ${isFormAnonymous}, formUserId: ${formUserId}, hasAuth: ${!!req.user}`);
+        
+        if (isFormAnonymous) {
           // ✅ Allow anonymous users to update their own anonymous forms
           // The GCP client will preserve the existing anonymous user_id
           console.log(`✅ Allowing anonymous form update - formId: ${formId}, isAnonymous: true`);
           // No additional checks needed - GCP client handles preserving user_id
         } else if (!req.user || (!req.user.userId && !req.user.id)) {
           // Form is not anonymous or doesn't exist - require authentication
-          console.log(`❌ Form update requires authentication - formId: ${formId}, isAnonymous: ${existingForm?.is_anonymous || false}`);
+          console.log(`❌ Form update requires authentication - formId: ${formId}, isAnonymous: ${isFormAnonymous}, formExists: ${!!existingForm}`);
           const auditLogger = require('./utils/audit-logger');
           await auditLogger.logUnauthorizedAccess('anonymous', 'form', formId, 'Form update attempt without authentication', req.ip);
           return res.status(401).json({
