@@ -7326,30 +7326,46 @@ app.post('/store-anonymous-form',
       
       // ===== SCENARIO 2: Anonymous Form Update =====
       else if (metadata?.isEdit || (!isNewForm && !metadata?.originalFormId)) {
-        // ✅ Require authentication for updates
-        if (!req.user || (!req.user.userId && !req.user.id)) {
-          console.log(`❌ Anonymous form update requires authentication - formId: ${formId}`);
+        // Check if form exists and is anonymous
+        const existingForm = await gcpClient.getFormStructure(formId, true);
+        
+        if (existingForm && existingForm.is_anonymous) {
+          // ✅ Allow anonymous users to update their own anonymous forms
+          // The GCP client will preserve the existing anonymous user_id
+          console.log(`✅ Allowing anonymous form update - formId: ${formId}, isAnonymous: true`);
+          // No additional checks needed - GCP client handles preserving user_id
+        } else if (!req.user || (!req.user.userId && !req.user.id)) {
+          // Form is not anonymous or doesn't exist - require authentication
+          console.log(`❌ Form update requires authentication - formId: ${formId}, isAnonymous: ${existingForm?.is_anonymous || false}`);
           const auditLogger = require('./utils/audit-logger');
-          await auditLogger.logUnauthorizedAccess('anonymous', 'form', formId, 'Anonymous form update attempt without authentication', req.ip);
+          await auditLogger.logUnauthorizedAccess('anonymous', 'form', formId, 'Form update attempt without authentication', req.ip);
           return res.status(401).json({
             success: false,
             error: 'Authentication required to update forms'
           });
+        } else {
+          // Authenticated user updating a form - verify ownership
+          console.log(`🔍 Verifying ownership for form update - user: ${userId}, formId: ${formId}`);
+          const { verifyFormAccess } = require('./auth/authorization');
+          const { hasAccess, reason } = await verifyFormAccess(userId, formId);
+          if (!hasAccess) {
+            // ✅ FIX: If form doesn't exist, treat as new form creation instead of error
+            if (reason === 'form_not_found') {
+              console.log(`⚠️ Form ${formId} doesn't exist, treating as new form creation`);
+              // Continue as new form (no additional checks needed)
+            } else {
+              console.log(`❌ Unauthorized form update - user: ${userId}, form: ${formId}, reason: ${reason}`);
+              const auditLogger = require('./utils/audit-logger');
+              await auditLogger.logUnauthorizedAccess(userId, 'form', formId, `Form update attempt: ${reason}`, req.ip);
+              return res.status(403).json({
+                success: false,
+                error: 'Forbidden: You do not have access to update this form'
+              });
+            }
+          } else {
+            console.log(`✅ Ownership verified for form update - user: ${userId}, formId: ${formId}`);
+          }
         }
-        
-        console.log(`🔍 Verifying ownership for anonymous form update - user: ${userId}, formId: ${formId}`);
-        const { verifyFormAccess } = require('./auth/authorization');
-        const { hasAccess, reason } = await verifyFormAccess(userId, formId);
-        if (!hasAccess) {
-          console.log(`❌ Unauthorized anonymous form update - user: ${userId}, form: ${formId}, reason: ${reason}`);
-          const auditLogger = require('./utils/audit-logger');
-          await auditLogger.logUnauthorizedAccess(userId, 'form', formId, `Anonymous form update attempt: ${reason}`, req.ip);
-          return res.status(403).json({
-            success: false,
-            error: 'Forbidden: You do not have access to update this form'
-          });
-        }
-        console.log(`✅ Ownership verified for anonymous form update - user: ${userId}, formId: ${formId}`);
       }
       
       // ===== SCENARIO 3: Anonymous Form Clone =====
