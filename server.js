@@ -4607,12 +4607,31 @@ app.get('/api/files/logo/:userId/:logoId', async (req, res) => {
       }
       
       // Set appropriate headers
-      // Note: CORS headers are handled by global middleware
-      // Do NOT set Access-Control-Allow-Origin here to avoid conflicts with credentialed requests
-      res.set({
+      // Explicitly set CORS headers for credentialed requests (when Authorization header is present)
+      const origin = req.headers.origin;
+      const hasAuthHeader = !!req.headers.authorization;
+      
+      const headers = {
         'Content-Type': logoData.fileType || 'image/png',
         'Cache-Control': 'public, max-age=31536000' // Cache for 1 year
-      })
+      };
+      
+      // For credentialed requests, MUST use exact origin (not wildcard)
+      if (hasAuthHeader && origin) {
+        headers['Access-Control-Allow-Origin'] = origin;
+        headers['Access-Control-Allow-Credentials'] = 'true';
+        console.log(`✅ CORS: Setting exact origin for credentialed logo request: ${origin}`);
+      } else if (origin && allowedOrigins.includes(origin)) {
+        // Whitelisted origin (even without credentials)
+        headers['Access-Control-Allow-Origin'] = origin;
+        headers['Access-Control-Allow-Credentials'] = 'true';
+      } else if (!hasAuthHeader) {
+        // Non-credentialed request from non-whitelisted origin - can use wildcard
+        headers['Access-Control-Allow-Origin'] = '*';
+      }
+      // If hasAuthHeader but no origin, don't set CORS headers (browser will block)
+      
+      res.set(headers);
       
       // Stream the file
       file.createReadStream().pipe(res)
@@ -4731,12 +4750,31 @@ app.get('/api/files/form-image/:formId/:fieldId/:imageId',
         }
         
         // Set appropriate headers
-        // Note: CORS headers are handled by global middleware
-        // Do NOT set Access-Control-Allow-Origin here to avoid conflicts with credentialed requests
-        res.set({
+        // Explicitly set CORS headers for credentialed requests (when Authorization header is present)
+        const origin = req.headers.origin;
+        const hasAuthHeader = !!req.headers.authorization;
+        
+        const headers = {
           'Content-Type': imageData.fileType || 'image/png',
           'Cache-Control': 'public, max-age=31536000' // Cache for 1 year
-        })
+        };
+        
+        // For credentialed requests, MUST use exact origin (not wildcard)
+        if (hasAuthHeader && origin) {
+          headers['Access-Control-Allow-Origin'] = origin;
+          headers['Access-Control-Allow-Credentials'] = 'true';
+          console.log(`✅ CORS: Setting exact origin for credentialed image request: ${origin}`);
+        } else if (origin && allowedOrigins.includes(origin)) {
+          // Whitelisted origin (even without credentials)
+          headers['Access-Control-Allow-Origin'] = origin;
+          headers['Access-Control-Allow-Credentials'] = 'true';
+        } else if (!hasAuthHeader) {
+          // Non-credentialed request from non-whitelisted origin - can use wildcard
+          headers['Access-Control-Allow-Origin'] = '*';
+        }
+        // If hasAuthHeader but no origin, don't set CORS headers (browser will block)
+        
+        res.set(headers);
         
         // Stream the file
         file.createReadStream().pipe(res)
