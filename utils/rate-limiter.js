@@ -11,7 +11,10 @@ const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
  */
 const anonymousFormLimiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
-  max: parseInt(process.env.RATE_LIMIT_ANONYMOUS_FORMS) || 2, // Default: 2 forms per hour per IP
+  max: (() => {
+    const limit = parseInt(process.env.RATE_LIMIT_ANONYMOUS_FORMS);
+    return (limit >= 0 && !isNaN(limit)) ? limit : 2; // Default: 2 forms per hour per IP
+  })(),
   message: {
     success: false,
     error: 'Too many anonymous form creation attempts. Please sign up to create unlimited forms.',
@@ -70,7 +73,10 @@ const anonymousFormLimiter = rateLimit({
  */
 const anonymousAutoSaveLimiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
-  max: parseInt(process.env.RATE_LIMIT_ANONYMOUS_AUTO_SAVE) || 50, // Default: 50 updates per hour per IP
+  max: (() => {
+    const limit = parseInt(process.env.RATE_LIMIT_ANONYMOUS_AUTO_SAVE);
+    return (limit >= 0 && !isNaN(limit)) ? limit : 50; // Default: 50 updates per hour per IP
+  })(),
   message: {
     success: false,
     error: 'Too many auto-save attempts. Please sign up for unlimited auto-save.',
@@ -121,7 +127,10 @@ const anonymousAutoSaveLimiter = rateLimit({
  */
 const formSubmissionLimiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
-  max: parseInt(process.env.RATE_LIMIT_FORM_SUBMISSIONS) || 50, // Default: 50 submissions per hour per IP
+  max: (() => {
+    const limit = parseInt(process.env.RATE_LIMIT_FORM_SUBMISSIONS);
+    return (limit >= 0 && !isNaN(limit)) ? limit : 50; // Default: 50 submissions per hour per IP
+  })(),
   message: {
     success: false,
     error: 'Too many form submissions. Please try again later.',

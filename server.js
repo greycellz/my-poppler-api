@@ -7296,7 +7296,7 @@ app.get('/api/calendly/bookings/:submissionId', async (req, res) => {
  * Store anonymous form with full response data for migration
  */
 app.post('/store-anonymous-form',
-  anonymousFormLimiter,    // ✅ Rate limiting: 5 forms/hour per IP for anonymous users
+  anonymousFormLimiter,    // ✅ Rate limiting: 2 forms/hour per IP for anonymous users (configurable via RATE_LIMIT_ANONYMOUS_FORMS)
   optionalAuth,            // ✅ Optional auth - allow anonymous users for new forms
   async (req, res) => {
     try {
