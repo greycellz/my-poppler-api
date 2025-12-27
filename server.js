@@ -38,7 +38,7 @@ const emailService = require('./email-service');
 const { authenticateToken, requireAuth, optionalAuth } = require('./auth/middleware');
 const { requireFormOwnership, requireSubmissionOwnership, requireFormOwnershipFromBody } = require('./auth/authorization');
 const featureFlags = require('./config/feature-flags');
-const { anonymousFormLimiter } = require('./utils/rate-limiter');
+const { anonymousFormLimiter, anonymousAutoSaveLimiter, formSubmissionLimiter } = require('./utils/rate-limiter');
 
 // Environment-aware base URL construction
 const getBaseUrl = () => {
@@ -1839,7 +1839,9 @@ app.post('/api/forms/:formId/view', async (req, res) => {
 // ============== FORM SUBMISSION ENDPOINT ==============
 
 // Submit form data with GCP integration
-app.post('/submit-form', async (req, res) => {
+app.post('/submit-form',
+  formSubmissionLimiter,              // ✅ Rate limiting: 50 submissions/hour per IP (all users)
+  async (req, res) => {
   try {
     const { formId, formData, userId, isHipaa, metadata } = req.body;
 
@@ -5771,6 +5773,7 @@ app.use('/', screenshotPagesRoutes);
 // ============== AUTO-SAVE ENDPOINT ==============
 
 app.post('/api/auto-save-form',
+  anonymousAutoSaveLimiter,            // ✅ Rate limiting: 50 updates/hour per IP for anonymous users
   optionalAuth,                       // ✅ Optional auth - allow anonymous users
   async (req, res) => {
     try {
