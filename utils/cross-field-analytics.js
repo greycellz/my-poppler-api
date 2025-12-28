@@ -618,8 +618,8 @@ function isFlat(pairs, type1, type2) {
  * @returns {boolean} True if comparison should be shown
  */
 function shouldSurfaceComparison(field1, field2, submissions, pairs) {
-  // Criterion 1: Minimum response count (≥10)
-  if (pairs.length < 10) {
+  // Criterion 1: Minimum response count (≥5)
+  if (pairs.length < 5) {
     return false;
   }
 
@@ -805,8 +805,167 @@ function detectDefaultComparisons(fields, submissions) {
   return uniqueComparisons.slice(0, 5);
 }
 
+/**
+ * Get potential field combinations that would work with more data
+ * Returns field pairs that don't meet threshold but would be analyzable
+ * @param {Array} fields - Array of form field objects
+ * @param {Array} submissions - Array of submission objects
+ * @returns {Array} Array of { field1, field2, currentCount, neededCount, missingCount, question } objects
+ */
+function getPotentialComparisons(fields, submissions) {
+  const potential = [];
+  
+  // Filter to analyzable fields
+  const analyzableFields = fields.filter(field => {
+    if (!field.id) return false;
+    const type = getFieldType(field);
+    return type !== null && type !== undefined;
+  });
+
+  if (analyzableFields.length < 2) {
+    return [];
+  }
+
+  // Sort fields by popularity
+  const fieldsWithResponseCount = analyzableFields.map(field => {
+    const responseCount = submissions.filter(s => {
+      const data = s.submission_data || {};
+      const val = data[field.id];
+      return val !== undefined && val !== null && val !== '';
+    }).length;
+    return { ...field, responseCount };
+  });
+
+  fieldsWithResponseCount.sort((a, b) => b.responseCount - a.responseCount);
+  const popularFields = fieldsWithResponseCount;
+
+  // Get number, category, and date fields
+  const numberFields = popularFields.filter(f => getFieldType(f) === 'number');
+  const categoryFields = popularFields.filter(f => getFieldType(f) === 'category');
+  const dateFields = popularFields.filter(f => getFieldType(f) === 'date');
+
+  // Check all potential combinations
+  const MIN_THRESHOLD = 5;
+  
+  // Number vs Number
+  if (numberFields.length >= 2) {
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[numberFields[0].id];
+      const val2 = data[numberFields[1].id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    if (pairs.length > 0 && pairs.length < MIN_THRESHOLD) {
+      potential.push({
+        field1: numberFields[0],
+        field2: numberFields[1],
+        currentCount: pairs.length,
+        neededCount: MIN_THRESHOLD,
+        missingCount: MIN_THRESHOLD - pairs.length,
+        question: `Do different ${numberFields[0].label || 'values'} give different ${numberFields[1].label || 'ratings'}?`
+      });
+    }
+  }
+
+  // Category vs Number (up to 3 category fields)
+  if (categoryFields.length > 0 && numberFields.length > 0) {
+    categoryFields.slice(0, 3).forEach(categoryField => {
+      const pairs = [];
+      for (const submission of submissions) {
+        const data = submission.submission_data || {};
+        const val1 = data[categoryField.id];
+        const val2 = data[numberFields[0].id];
+        if (val1 !== undefined && val1 !== null && val1 !== '' &&
+            val2 !== undefined && val2 !== null && val2 !== '') {
+          pairs.push({ x: val1, y: val2 });
+        }
+      }
+      
+      if (pairs.length > 0 && pairs.length < MIN_THRESHOLD) {
+        potential.push({
+          field1: categoryField,
+          field2: numberFields[0],
+          currentCount: pairs.length,
+          neededCount: MIN_THRESHOLD,
+          missingCount: MIN_THRESHOLD - pairs.length,
+          question: `Which ${categoryField.label || 'groups'} have higher ${numberFields[0].label || 'ratings'}?`
+        });
+      }
+    });
+  }
+
+  // Date vs Number
+  if (dateFields.length > 0 && numberFields.length > 0) {
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[dateFields[0].id];
+      const val2 = data[numberFields[0].id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    if (pairs.length > 0 && pairs.length < MIN_THRESHOLD) {
+      potential.push({
+        field1: dateFields[0],
+        field2: numberFields[0],
+        currentCount: pairs.length,
+        neededCount: MIN_THRESHOLD,
+        missingCount: MIN_THRESHOLD - pairs.length,
+        question: `Are ${numberFields[0].label || 'ratings'} improving over time?`
+      });
+    }
+  }
+
+  // Category vs Category
+  if (categoryFields.length >= 2) {
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[categoryFields[0].id];
+      const val2 = data[categoryFields[1].id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    if (pairs.length > 0 && pairs.length < MIN_THRESHOLD) {
+      potential.push({
+        field1: categoryFields[0],
+        field2: categoryFields[1],
+        currentCount: pairs.length,
+        neededCount: MIN_THRESHOLD,
+        missingCount: MIN_THRESHOLD - pairs.length,
+        question: `How do ${categoryFields[0].label || 'groups'} differ in ${categoryFields[1].label || 'preferences'}?`
+      });
+    }
+  }
+
+  // Remove duplicates
+  const uniquePotential = [];
+  const seenIds = new Set();
+  for (const comp of potential) {
+    const id = `${comp.field1.id}_${comp.field2.id}`;
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      uniquePotential.push(comp);
+    }
+  }
+
+  return uniquePotential.slice(0, 5); // Limit to 5
+}
+
 module.exports = {
   calculateCrossFieldAnalysis,
-  detectDefaultComparisons
+  detectDefaultComparisons,
+  getPotentialComparisons
 };
 
