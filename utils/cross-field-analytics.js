@@ -48,9 +48,9 @@ function calculateCrossFieldAnalysis(submissions, field1, field2) {
     };
   }
 
-  // Determine field types
-  const type1 = getFieldType(field1);
-  const type2 = getFieldType(field2);
+  // Determine field types (pass submissions for observed type detection)
+  const type1 = getFieldType(field1, submissions);
+  const type2 = getFieldType(field2, submissions);
 
   // Route to appropriate analyzer
   if (type1 === 'number' && type2 === 'number') {
@@ -87,12 +87,98 @@ function calculateCrossFieldAnalysis(submissions, field1, field2) {
 }
 
 /**
- * Get simplified field type for cross-field analysis
+ * Check if field is Identity Text (should be excluded from analytics)
+ * @param {Object} field - Field object
+ * @returns {boolean} True if field is identity text
  */
-function getFieldType(field) {
+function isIdentityText(field) {
+  if (!field || !field.label) return false;
+  const labelLower = String(field.label).toLowerCase();
+  const identityKeywords = ['name', 'email', 'phone', 'id', 'identifier', 'username', 'contact name', 'contact email', 'contact phone'];
+  return identityKeywords.some(keyword => labelLower.includes(keyword));
+}
+
+/**
+ * Detect observed type from actual data values
+ * @param {Object} field - Field object
+ * @param {Array} submissions - Array of submission objects
+ * @returns {string|null} 'number', 'date', or null (use declared type)
+ */
+function detectObservedType(field, submissions) {
+  if (!field || !field.id) return null;
+  
+  // Extract non-empty values
+  const values = submissions
+    .map(s => {
+      const data = s.submission_data || {};
+      return data[field.id];
+    })
+    .filter(v => v !== undefined && v !== null && v !== '');
+  
+  if (values.length === 0) return null;
+  
+  // Check if date FIRST (dates can parse as numbers, so check dates before numbers)
+  // Date patterns: YYYY-MM-DD, MM/DD/YYYY, etc.
+  const dateCount = values.filter(v => {
+    const str = String(v).trim();
+    // Check if it looks like a date string (contains dashes or slashes, or is ISO format)
+    if (str.includes('-') || str.includes('/')) {
+      const date = new Date(str);
+      return !isNaN(date.getTime()) && date.getFullYear() > 1900 && date.getFullYear() < 2100;
+    }
+    // Also check if it's a valid date even without separators
+    const date = new Date(str);
+    if (!isNaN(date.getTime()) && date.getFullYear() > 1900 && date.getFullYear() < 2100) {
+      // Make sure it's not just a number that happens to parse as a date
+      const num = parseFloat(str);
+      if (!isNaN(num) && num < 10000) {
+        // If it's a small number, it's probably not a date
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }).length;
+  
+  if (dateCount / values.length >= 0.70) {
+    console.log(`🔍 Observed type for ${field.label}: date (${dateCount}/${values.length} are dates)`);
+    return 'date';
+  }
+  
+  // Check if numeric (≥70% are numeric)
+  const numericCount = values.filter(v => {
+    const str = String(v).trim();
+    const num = parseFloat(str);
+    // Must be a valid number, not NaN, finite, and the string representation matches
+    return !isNaN(num) && isFinite(num) && str !== '' && (str === String(num) || str.replace(/[,\$]/g, '') === String(num));
+  }).length;
+  
+  if (numericCount / values.length >= 0.70) {
+    console.log(`🔍 Observed type for ${field.label}: number (${numericCount}/${values.length} are numeric)`);
+    return 'number';
+  }
+  
+  return null; // Keep declared type
+}
+
+/**
+ * Get simplified field type for cross-field analysis
+ * @param {Object} field - Field object
+ * @param {Array} submissions - Optional array of submissions for observed type detection
+ * @returns {string} Field type: 'number', 'category', or 'date'
+ */
+function getFieldType(field, submissions = null) {
   if (!field || !field.type) {
     console.warn(`⚠️ getFieldType: Field missing type`, field);
     return 'category'; // Default fallback
+  }
+  
+  // Check for observed type first (if submissions provided)
+  if (submissions && submissions.length > 0) {
+    const observedType = detectObservedType(field, submissions);
+    if (observedType) {
+      return observedType; // Override with observed type
+    }
   }
   
   const type = field.type;
@@ -433,13 +519,36 @@ function analyzeCategoryCategory(pairs, field1, field2) {
     preferences[cat1] = { option: maxCat2, percent: maxPercent };
   });
 
-  // Build answer with precise language
-  const answerParts = Object.keys(preferences).map(cat1 => {
+  // Build improved answer format
+  // Find all pairings with percentages
+  const allPairings = [];
+  Object.keys(preferences).forEach(cat1 => {
     const pref = preferences[cat1];
-    return `Among ${cat1}, ${Math.round(pref.percent)}% prefer ${pref.option}`;
+    allPairings.push({
+      category1: cat1,
+      category2: pref.option,
+      percent: pref.percent
+    });
   });
 
-  // Find most common preference overall
+  // Sort by percentage
+  allPairings.sort((a, b) => b.percent - a.percent);
+  const topPairing = allPairings[0];
+
+  // Check if there's meaningful contrast (>15% difference)
+  const secondPairing = allPairings[1];
+  const hasContrast = secondPairing && (topPairing.percent - secondPairing.percent) > 15;
+
+  let answer;
+  if (hasContrast && allPairings.length > 1) {
+    // Show contrast: "Male respondents favor Action more than Female respondents"
+    answer = `${topPairing.category1} respondents favor ${topPairing.category2} more than ${secondPairing.category1} respondents`;
+  } else {
+    // Show dominant pairing: "The most common pairing is Male → Action"
+    answer = `The most common pairing is ${topPairing.category1} → ${topPairing.category2}`;
+  }
+
+  // Find most common preference overall for bigNumber
   const allPreferences = {};
   category1Values.forEach(cat1 => {
     const prefOption = preferences[cat1].option;
@@ -451,10 +560,10 @@ function analyzeCategoryCategory(pairs, field1, field2) {
 
   return {
     question: `How do ${field1.label || 'groups'} differ in ${field2.label || 'preferences'}?`,
-    answer: answerParts.join(', '),
+    answer: answer,
     bigNumber: {
       value: `Most prefer ${mostCommonPref}`,
-      comparison: `Among ${category1Values[0]}: ${Math.round(preferences[category1Values[0]].percent)}%`
+      comparison: `${topPairing.category1}: ${Math.round(topPairing.percent)}%`
     },
     chartData,
     chartType: 'bars',
@@ -618,24 +727,28 @@ function isFlat(pairs, type1, type2) {
  * @returns {boolean} True if comparison should be shown
  */
 function shouldSurfaceComparison(field1, field2, submissions, pairs) {
-  // Criterion 1: Minimum response count (≥10)
-  if (pairs.length < 10) {
+  // Criterion 1: Minimum response count (≥5)
+  if (pairs.length < 5) {
+    console.log(`⏭️ Skipping ${field1.label} vs ${field2.label}: Only ${pairs.length} pairs (need ≥5)`);
     return false;
   }
 
   // Criterion 2: Variation exists (not flat data)
-  const type1 = getFieldType(field1);
-  const type2 = getFieldType(field2);
+  const type1 = getFieldType(field1, submissions);
+  const type2 = getFieldType(field2, submissions);
   if (isFlat(pairs, type1, type2)) {
+    console.log(`⏭️ Skipping ${field1.label} vs ${field2.label}: Data is flat (no variation)`);
     return false;
   }
 
   // Criterion 3: Insight confidence threshold
   const analysis = calculateCrossFieldAnalysis(submissions, field1, field2);
   if (analysis.strength === 'no clear pattern') {
+    console.log(`⏭️ Skipping ${field1.label} vs ${field2.label}: No clear pattern detected`);
     return false;
   }
 
+  console.log(`✅ Surfacing comparison: ${field1.label} vs ${field2.label} (${pairs.length} pairs, strength: ${analysis.strength})`);
   return true;
 }
 
@@ -648,16 +761,21 @@ function shouldSurfaceComparison(field1, field2, submissions, pairs) {
 function detectDefaultComparisons(fields, submissions) {
   const comparisons = [];
   
-  // Filter to analyzable fields
+  // Filter to analyzable fields (exclude identity text)
   const analyzableFields = fields.filter(field => {
     if (!field.id) return false;
-    const type = getFieldType(field);
+    // Skip identity text fields
+    if (isIdentityText(field)) {
+      console.log(`⏭️ Skipping identity text field: ${field.label}`);
+      return false;
+    }
+    const type = getFieldType(field, submissions);
     return type !== null && type !== undefined;
   });
 
   console.log(`🔍 detectDefaultComparisons: ${fields.length} total fields, ${analyzableFields.length} analyzable fields`);
   if (analyzableFields.length > 0) {
-    console.log(`🔍 Analyzable fields:`, analyzableFields.map(f => ({ id: f.id, label: f.label, type: f.type, detectedType: getFieldType(f) })));
+    console.log(`🔍 Analyzable fields:`, analyzableFields.map(f => ({ id: f.id, label: f.label, type: f.type, detectedType: getFieldType(f, submissions) })));
   }
 
   if (analyzableFields.length < 2) {
@@ -681,7 +799,7 @@ function detectDefaultComparisons(fields, submissions) {
   const popularFields = fieldsWithResponseCount;
 
   // Priority 1: Number vs Number (e.g., Age vs Rating) - Use most popular fields
-  const numberFields = popularFields.filter(f => getFieldType(f) === 'number');
+  const numberFields = popularFields.filter(f => getFieldType(f, submissions) === 'number');
   console.log(`🔍 Number fields found: ${numberFields.length}`, numberFields.map(f => f.label));
   if (numberFields.length >= 2) {
     // Extract pairs for quality check
@@ -696,6 +814,8 @@ function detectDefaultComparisons(fields, submissions) {
       }
     }
     
+    console.log(`🔍 Number×Number pairs for ${numberFields[0].label} vs ${numberFields[1].label}: ${pairs.length} pairs`);
+    
     // Apply quality filter
     if (shouldSurfaceComparison(numberFields[0], numberFields[1], submissions, pairs)) {
       comparisons.push({
@@ -708,7 +828,7 @@ function detectDefaultComparisons(fields, submissions) {
   }
 
   // Priority 2: Category vs Number (e.g., Gender vs Rating) - Create multiple comparisons
-  const categoryFields = popularFields.filter(f => getFieldType(f) === 'category');
+  const categoryFields = popularFields.filter(f => getFieldType(f, submissions) === 'category');
   console.log(`🔍 Category fields found: ${categoryFields.length}`, categoryFields.map(f => f.label));
   if (categoryFields.length > 0 && numberFields.length > 0) {
     // Create comparison for each category field with the most popular number field
@@ -725,6 +845,8 @@ function detectDefaultComparisons(fields, submissions) {
         }
       }
       
+      console.log(`🔍 Category×Number pairs for ${categoryField.label} vs ${numberFields[0].label}: ${pairs.length} pairs`);
+      
       // Apply quality filter
       if (shouldSurfaceComparison(categoryField, numberFields[0], submissions, pairs)) {
         comparisons.push({
@@ -738,7 +860,7 @@ function detectDefaultComparisons(fields, submissions) {
   }
 
   // Priority 3: Date vs Number (e.g., Rating over Time) - Use most popular fields
-  const dateFields = popularFields.filter(f => getFieldType(f) === 'date');
+  const dateFields = popularFields.filter(f => getFieldType(f, submissions) === 'date');
   console.log(`🔍 Date fields found: ${dateFields.length}`, dateFields.map(f => f.label));
   if (dateFields.length > 0 && numberFields.length > 0) {
     // Extract pairs for quality check
@@ -766,27 +888,54 @@ function detectDefaultComparisons(fields, submissions) {
 
   // Priority 4: Category vs Category (e.g., Movie Length vs Gender) - if we have multiple categories
   if (categoryFields.length >= 2) {
+    const field1 = categoryFields[0];
+    const field2 = categoryFields[1];
+    
     // Extract pairs for quality check
     const pairs = [];
     for (const submission of submissions) {
       const data = submission.submission_data || {};
-      const val1 = data[categoryFields[0].id];
-      const val2 = data[categoryFields[1].id];
+      const val1 = data[field1.id];
+      const val2 = data[field2.id];
       if (val1 !== undefined && val1 !== null && val1 !== '' &&
           val2 !== undefined && val2 !== null && val2 !== '') {
         pairs.push({ x: val1, y: val2 });
       }
     }
     
-    // Apply quality filter
-    if (shouldSurfaceComparison(categoryFields[0], categoryFields[1], submissions, pairs)) {
-      // Create comparison between top 2 category fields
-      comparisons.push({
-        field1: categoryFields[0],
-        field2: categoryFields[1],
-        comparisonId: `default_${categoryFields[0].id}_${categoryFields[1].id}`,
-        question: `How do ${categoryFields[0].label || 'groups'} differ in ${categoryFields[1].label || 'preferences'}?`
-      });
+    // Check unique value counts
+    const field1UniqueCount = new Set(
+      pairs.map(p => p.x).filter(v => v !== undefined && v !== null && v !== '')
+    ).size;
+    
+    const field2UniqueCount = new Set(
+      pairs.map(p => p.y).filter(v => v !== undefined && v !== null && v !== '')
+    ).size;
+    
+    // Skip if either field has too many unique values (>12)
+    if (field1UniqueCount > 12 || field2UniqueCount > 12) {
+      console.log(`⏭️ Skipping Category×Category: ${field1.label} has ${field1UniqueCount} unique values, ${field2.label} has ${field2UniqueCount} unique values`);
+    } else {
+      // Check if mostly unique (>80%)
+      const field1Total = pairs.length;
+      const field2Total = pairs.length;
+      const field1MostlyUnique = field1UniqueCount / Math.max(field1Total, 1) > 0.80;
+      const field2MostlyUnique = field2UniqueCount / Math.max(field2Total, 1) > 0.80;
+      
+      if (field1MostlyUnique || field2MostlyUnique) {
+        console.log(`⏭️ Skipping Category×Category: Field is mostly unique (>80%)`);
+      } else {
+        // Apply quality filter
+        if (shouldSurfaceComparison(field1, field2, submissions, pairs)) {
+          // Create comparison between top 2 category fields
+          comparisons.push({
+            field1: field1,
+            field2: field2,
+            comparisonId: `default_${field1.id}_${field2.id}`,
+            question: `How do ${field1.label || 'groups'} differ in ${field2.label || 'preferences'}?`
+          });
+        }
+      }
     }
   }
 
@@ -805,8 +954,188 @@ function detectDefaultComparisons(fields, submissions) {
   return uniqueComparisons.slice(0, 5);
 }
 
+/**
+ * Get potential field combinations that would work with more data
+ * Returns field pairs that don't meet threshold but would be analyzable
+ * @param {Array} fields - Array of form field objects
+ * @param {Array} submissions - Array of submission objects
+ * @returns {Array} Array of { field1, field2, currentCount, neededCount, missingCount, question } objects
+ */
+function getPotentialComparisons(fields, submissions) {
+  const potential = [];
+  
+  // Filter to analyzable fields (exclude identity text)
+  const analyzableFields = fields.filter(field => {
+    if (!field.id) return false;
+    // Skip identity text fields
+    if (isIdentityText(field)) {
+      return false;
+    }
+    const type = getFieldType(field, submissions);
+    return type !== null && type !== undefined;
+  });
+
+  if (analyzableFields.length < 2) {
+    return [];
+  }
+
+  // Sort fields by popularity
+  const fieldsWithResponseCount = analyzableFields.map(field => {
+    const responseCount = submissions.filter(s => {
+      const data = s.submission_data || {};
+      const val = data[field.id];
+      return val !== undefined && val !== null && val !== '';
+    }).length;
+    return { ...field, responseCount };
+  });
+
+  fieldsWithResponseCount.sort((a, b) => b.responseCount - a.responseCount);
+  const popularFields = fieldsWithResponseCount;
+
+  // Get number, category, and date fields
+  const numberFields = popularFields.filter(f => getFieldType(f, submissions) === 'number');
+  const categoryFields = popularFields.filter(f => getFieldType(f, submissions) === 'category');
+  const dateFields = popularFields.filter(f => getFieldType(f, submissions) === 'date');
+
+  // Check all potential combinations
+  const MIN_THRESHOLD = 5;
+  
+  // Number vs Number
+  if (numberFields.length >= 2) {
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[numberFields[0].id];
+      const val2 = data[numberFields[1].id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    if (pairs.length > 0 && pairs.length < MIN_THRESHOLD) {
+      potential.push({
+        field1: numberFields[0],
+        field2: numberFields[1],
+        currentCount: pairs.length,
+        neededCount: MIN_THRESHOLD,
+        missingCount: MIN_THRESHOLD - pairs.length,
+        question: `Do different ${numberFields[0].label || 'values'} give different ${numberFields[1].label || 'ratings'}?`
+      });
+    }
+  }
+
+  // Category vs Number (up to 3 category fields)
+  if (categoryFields.length > 0 && numberFields.length > 0) {
+    categoryFields.slice(0, 3).forEach(categoryField => {
+      const pairs = [];
+      for (const submission of submissions) {
+        const data = submission.submission_data || {};
+        const val1 = data[categoryField.id];
+        const val2 = data[numberFields[0].id];
+        if (val1 !== undefined && val1 !== null && val1 !== '' &&
+            val2 !== undefined && val2 !== null && val2 !== '') {
+          pairs.push({ x: val1, y: val2 });
+        }
+      }
+      
+      if (pairs.length > 0 && pairs.length < MIN_THRESHOLD) {
+        potential.push({
+          field1: categoryField,
+          field2: numberFields[0],
+          currentCount: pairs.length,
+          neededCount: MIN_THRESHOLD,
+          missingCount: MIN_THRESHOLD - pairs.length,
+          question: `Which ${categoryField.label || 'groups'} have higher ${numberFields[0].label || 'ratings'}?`
+        });
+      }
+    });
+  }
+
+  // Date vs Number
+  if (dateFields.length > 0 && numberFields.length > 0) {
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[dateFields[0].id];
+      const val2 = data[numberFields[0].id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    if (pairs.length > 0 && pairs.length < MIN_THRESHOLD) {
+      potential.push({
+        field1: dateFields[0],
+        field2: numberFields[0],
+        currentCount: pairs.length,
+        neededCount: MIN_THRESHOLD,
+        missingCount: MIN_THRESHOLD - pairs.length,
+        question: `Are ${numberFields[0].label || 'ratings'} improving over time?`
+      });
+    }
+  }
+
+  // Category vs Category (with filtering)
+  if (categoryFields.length >= 2) {
+    const field1 = categoryFields[0];
+    const field2 = categoryFields[1];
+    
+    const pairs = [];
+    for (const submission of submissions) {
+      const data = submission.submission_data || {};
+      const val1 = data[field1.id];
+      const val2 = data[field2.id];
+      if (val1 !== undefined && val1 !== null && val1 !== '' &&
+          val2 !== undefined && val2 !== null && val2 !== '') {
+        pairs.push({ x: val1, y: val2 });
+      }
+    }
+    
+    // Check unique value counts (only include if would be eligible)
+    if (pairs.length > 0) {
+      const field1UniqueCount = new Set(pairs.map(p => p.x)).size;
+      const field2UniqueCount = new Set(pairs.map(p => p.y)).size;
+      
+      // Only include if both fields have ≤12 unique values and not mostly unique
+      const field1Total = pairs.length;
+      const field2Total = pairs.length;
+      const field1MostlyUnique = field1UniqueCount / Math.max(field1Total, 1) > 0.80;
+      const field2MostlyUnique = field2UniqueCount / Math.max(field2Total, 1) > 0.80;
+      
+      if (field1UniqueCount <= 12 && field2UniqueCount <= 12 && !field1MostlyUnique && !field2MostlyUnique) {
+        if (pairs.length < MIN_THRESHOLD) {
+          potential.push({
+            field1: field1,
+            field2: field2,
+            currentCount: pairs.length,
+            neededCount: MIN_THRESHOLD,
+            missingCount: MIN_THRESHOLD - pairs.length,
+            question: `How do ${field1.label || 'groups'} differ in ${field2.label || 'preferences'}?`
+          });
+        }
+      }
+    }
+  }
+
+  // Remove duplicates
+  const uniquePotential = [];
+  const seenIds = new Set();
+  for (const comp of potential) {
+    const id = `${comp.field1.id}_${comp.field2.id}`;
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      uniquePotential.push(comp);
+    }
+  }
+
+  return uniquePotential.slice(0, 5); // Limit to 5
+}
+
 module.exports = {
   calculateCrossFieldAnalysis,
-  detectDefaultComparisons
+  detectDefaultComparisons,
+  getPotentialComparisons
 };
 

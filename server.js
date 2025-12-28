@@ -2817,8 +2817,11 @@ app.get('/analytics/forms/:formId/cross-field/defaults',
     });
 
     // Auto-detect default comparisons
-    const { detectDefaultComparisons } = require('./utils/cross-field-analytics');
+    const { detectDefaultComparisons, getPotentialComparisons } = require('./utils/cross-field-analytics');
     const defaultComparisons = detectDefaultComparisons(fields, submissions);
+    
+    // Get potential comparisons (for empty state)
+    const potentialComparisons = getPotentialComparisons(fields, submissions);
 
     // Calculate analysis for each comparison with timeout protection
     const { calculateCrossFieldAnalysis } = require('./utils/cross-field-analytics');
@@ -2871,9 +2874,67 @@ app.get('/analytics/forms/:formId/cross-field/defaults',
     
     const comparisonsWithData = await Promise.all(comparisonsPromises);
 
+    // Calculate summary
+    const totalSubmissions = submissions.length;
+    let submissionsWithBothFields = 0;
+    if (defaultComparisons.length > 0 || potentialComparisons.length > 0) {
+      // Count submissions that have at least one field pair filled
+      const fieldIds = new Set();
+      fields.forEach(f => {
+        if (f.id) fieldIds.add(f.id);
+      });
+      
+      submissionsWithBothFields = submissions.filter(s => {
+        const data = s.submission_data || {};
+        let filledCount = 0;
+        fieldIds.forEach(fieldId => {
+          const val = data[fieldId];
+          if (val !== undefined && val !== null && val !== '') {
+            filledCount++;
+          }
+        });
+        return filledCount >= 2;
+      }).length;
+    }
+
+    // Build summary message
+    let summaryMessage = '';
+    if (defaultComparisons.length === 0 && potentialComparisons.length > 0) {
+      const minMissing = Math.min(...potentialComparisons.map(p => p.missingCount));
+      summaryMessage = `You have ${potentialComparisons[0].currentCount} response${potentialComparisons[0].currentCount !== 1 ? 's' : ''} with both fields filled. Need ${minMissing} more to see insights.`;
+    } else if (defaultComparisons.length === 0 && potentialComparisons.length === 0) {
+      if (fields.length < 2) {
+        summaryMessage = 'Form needs at least 2 analyzable fields for cross-field analysis.';
+      } else if (totalSubmissions === 0) {
+        summaryMessage = 'No submissions yet. Once you have responses, we can analyze relationships between fields.';
+      } else {
+        summaryMessage = 'Not enough responses with both fields filled. Need at least 5 responses with both fields completed.';
+      }
+    }
+
     res.json({
       success: true,
       comparisons: comparisonsWithData,
+      potentialComparisons: potentialComparisons.map(p => ({
+        field1: {
+          id: p.field1.id,
+          label: p.field1.label
+        },
+        field2: {
+          id: p.field2.id,
+          label: p.field2.label
+        },
+        question: p.question,
+        currentCount: p.currentCount,
+        neededCount: p.neededCount,
+        missingCount: p.missingCount
+      })),
+      summary: {
+        totalSubmissions,
+        submissionsWithBothFields,
+        neededForInsights: 5,
+        message: summaryMessage
+      },
       dateRange: {
         start: startDate.toISOString(),
         end: endDate.toISOString()
