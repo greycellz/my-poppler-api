@@ -117,24 +117,45 @@ function detectObservedType(field, submissions) {
   
   if (values.length === 0) return null;
   
-  // Check if numeric (≥70% are numeric)
-  const numericCount = values.filter(v => {
-    const num = parseFloat(String(v));
-    return !isNaN(num) && isFinite(num) && String(v).trim() !== '';
-  }).length;
-  
-  if (numericCount / values.length >= 0.70) {
-    return 'number';
-  }
-  
-  // Check if date (≥70% are dates)
+  // Check if date FIRST (dates can parse as numbers, so check dates before numbers)
+  // Date patterns: YYYY-MM-DD, MM/DD/YYYY, etc.
   const dateCount = values.filter(v => {
-    const date = new Date(String(v));
-    return !isNaN(date.getTime());
+    const str = String(v).trim();
+    // Check if it looks like a date string (contains dashes or slashes, or is ISO format)
+    if (str.includes('-') || str.includes('/')) {
+      const date = new Date(str);
+      return !isNaN(date.getTime()) && date.getFullYear() > 1900 && date.getFullYear() < 2100;
+    }
+    // Also check if it's a valid date even without separators
+    const date = new Date(str);
+    if (!isNaN(date.getTime()) && date.getFullYear() > 1900 && date.getFullYear() < 2100) {
+      // Make sure it's not just a number that happens to parse as a date
+      const num = parseFloat(str);
+      if (!isNaN(num) && num < 10000) {
+        // If it's a small number, it's probably not a date
+        return false;
+      }
+      return true;
+    }
+    return false;
   }).length;
   
   if (dateCount / values.length >= 0.70) {
+    console.log(`🔍 Observed type for ${field.label}: date (${dateCount}/${values.length} are dates)`);
     return 'date';
+  }
+  
+  // Check if numeric (≥70% are numeric)
+  const numericCount = values.filter(v => {
+    const str = String(v).trim();
+    const num = parseFloat(str);
+    // Must be a valid number, not NaN, finite, and the string representation matches
+    return !isNaN(num) && isFinite(num) && str !== '' && (str === String(num) || str.replace(/[,\$]/g, '') === String(num));
+  }).length;
+  
+  if (numericCount / values.length >= 0.70) {
+    console.log(`🔍 Observed type for ${field.label}: number (${numericCount}/${values.length} are numeric)`);
+    return 'number';
   }
   
   return null; // Keep declared type
@@ -754,7 +775,7 @@ function detectDefaultComparisons(fields, submissions) {
 
   console.log(`🔍 detectDefaultComparisons: ${fields.length} total fields, ${analyzableFields.length} analyzable fields`);
   if (analyzableFields.length > 0) {
-    console.log(`🔍 Analyzable fields:`, analyzableFields.map(f => ({ id: f.id, label: f.label, type: f.type, detectedType: getFieldType(f) })));
+    console.log(`🔍 Analyzable fields:`, analyzableFields.map(f => ({ id: f.id, label: f.label, type: f.type, detectedType: getFieldType(f, submissions) })));
   }
 
   if (analyzableFields.length < 2) {
