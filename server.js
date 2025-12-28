@@ -902,7 +902,30 @@ const allowedOrigins = [
   return true;
 });
 
+// Vercel preview/staging URL pattern for non-production environments
+const vercelPattern = /^https:\/\/.*\.vercel\.app$/;
+
 console.log('🔐 CORS allowed origins:', allowedOrigins);
+if (!isProduction) {
+  console.log('🔐 CORS: Vercel staging URLs (*.vercel.app) will be allowed in non-production');
+}
+
+// Helper function to check if origin is allowed
+const isOriginAllowed = (origin) => {
+  if (!origin) return false;
+  
+  // Check explicit whitelist
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+  
+  // For non-production, allow Vercel preview/staging URLs
+  if (!isProduction && vercelPattern.test(origin)) {
+    return true;
+  }
+  
+  return false;
+};
 
 // CORS middleware
 app.use((req, res, next) => {
@@ -914,7 +937,7 @@ app.use((req, res, next) => {
   if (hasAuthHeader) {
     if (origin) {
       // For credentialed requests, check if origin is allowed (even in production, must be whitelisted)
-      if (allowedOrigins.includes(origin)) {
+      if (isOriginAllowed(origin)) {
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
         console.log(`✅ CORS: Credentialed request - using exact origin: ${origin}`);
@@ -934,7 +957,7 @@ app.use((req, res, next) => {
     // Check feature flag for strict CORS
     if (featureFlags.ENABLE_STRICT_CORS) {
       // Strict mode - only allow whitelisted origins
-      if (origin && allowedOrigins.includes(origin)) {
+      if (origin && isOriginAllowed(origin)) {
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
         console.log(`✅ CORS: Origin allowed (strict): ${origin}`);
@@ -944,7 +967,7 @@ app.use((req, res, next) => {
       }
     } else {
       // Permissive mode (for gradual rollout)
-      if (origin && allowedOrigins.includes(origin)) {
+      if (origin && isOriginAllowed(origin)) {
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
       } else {
