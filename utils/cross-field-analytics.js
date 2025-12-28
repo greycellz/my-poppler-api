@@ -708,6 +708,7 @@ function isFlat(pairs, type1, type2) {
 function shouldSurfaceComparison(field1, field2, submissions, pairs) {
   // Criterion 1: Minimum response count (≥5)
   if (pairs.length < 5) {
+    console.log(`⏭️ Skipping ${field1.label} vs ${field2.label}: Only ${pairs.length} pairs (need ≥5)`);
     return false;
   }
 
@@ -715,15 +716,18 @@ function shouldSurfaceComparison(field1, field2, submissions, pairs) {
   const type1 = getFieldType(field1, submissions);
   const type2 = getFieldType(field2, submissions);
   if (isFlat(pairs, type1, type2)) {
+    console.log(`⏭️ Skipping ${field1.label} vs ${field2.label}: Data is flat (no variation)`);
     return false;
   }
 
   // Criterion 3: Insight confidence threshold
   const analysis = calculateCrossFieldAnalysis(submissions, field1, field2);
   if (analysis.strength === 'no clear pattern') {
+    console.log(`⏭️ Skipping ${field1.label} vs ${field2.label}: No clear pattern detected`);
     return false;
   }
 
+  console.log(`✅ Surfacing comparison: ${field1.label} vs ${field2.label} (${pairs.length} pairs, strength: ${analysis.strength})`);
   return true;
 }
 
@@ -789,6 +793,8 @@ function detectDefaultComparisons(fields, submissions) {
       }
     }
     
+    console.log(`🔍 Number×Number pairs for ${numberFields[0].label} vs ${numberFields[1].label}: ${pairs.length} pairs`);
+    
     // Apply quality filter
     if (shouldSurfaceComparison(numberFields[0], numberFields[1], submissions, pairs)) {
       comparisons.push({
@@ -817,6 +823,8 @@ function detectDefaultComparisons(fields, submissions) {
           pairs.push({ x: val1, y: val2 });
         }
       }
+      
+      console.log(`🔍 Category×Number pairs for ${categoryField.label} vs ${numberFields[0].label}: ${pairs.length} pairs`);
       
       // Apply quality filter
       if (shouldSurfaceComparison(categoryField, numberFields[0], submissions, pairs)) {
