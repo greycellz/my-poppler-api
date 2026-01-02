@@ -225,6 +225,29 @@ Return ONLY a JSON array with this exact structure:
     console.log(`  Analysis time: ${analysisTime}ms`)
     console.log(`  Total time: ${totalTime}ms\n`)
 
+    // Verify reasoning mode is disabled (Phase 1 fix verification)
+    console.log('🔍 Reasoning Mode Verification:')
+    if (!analysisData.fields || analysisData.fields.length === 0) {
+      throw new Error('❌ CRITICAL: No fields extracted - possible reasoning mode issue (empty content)')
+    }
+    console.log(`  ✅ Fields successfully extracted: ${analysisData.fields.length} fields`)
+    console.log(`  ✅ Content field populated (fields extracted successfully)`)
+    
+    // Log Groq API metadata if available
+    if (analysisData.analytics?.groqApi) {
+      console.log(`\n📊 Groq API Metadata:`)
+      console.log(`  Time: ${analysisData.analytics.groqApi.time}ms`)
+      if (analysisData.analytics.groqApi.inputTokens) {
+        console.log(`  Input tokens: ${analysisData.analytics.groqApi.inputTokens.toLocaleString()}`)
+      }
+      if (analysisData.analytics.groqApi.outputTokens) {
+        console.log(`  Output tokens: ${analysisData.analytics.groqApi.outputTokens.toLocaleString()}`)
+      }
+      if (analysisData.analytics.groqApi.totalTokens) {
+        console.log(`  Total tokens: ${analysisData.analytics.groqApi.totalTokens.toLocaleString()}`)
+      }
+    }
+
     if (analysisData.fields && analysisData.fields.length > 0) {
       console.log(`📋 All extracted fields (${analysisData.fields.length} total):\n`)
       analysisData.fields.forEach((field, i) => {
@@ -362,4 +385,5 @@ if (require.main === module) {
 }
 
 module.exports = { testPdfAnalysis }
+
 

@@ -361,7 +361,8 @@ ${combinedText}
             }
           ],
           max_completion_tokens: 65536,
-          temperature: 0.1
+          temperature: 0.1,
+          reasoning_effort: "none"  // Disable reasoning mode to prevent token waste on internal thinking
         })
       })
 
@@ -394,6 +395,13 @@ ${combinedText}
       
       if (finishReason === 'length') {
         console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
+      }
+
+      // Check if reasoning mode is accidentally enabled (should be disabled)
+      if (choice.message?.reasoning) {
+        console.warn('⚠️ WARNING: Reasoning mode detected - this should be disabled!')
+        console.warn('⚠️ Reasoning field length:', choice.message.reasoning.length, 'characters')
+        console.warn('⚠️ This indicates reasoning_effort parameter may not be working correctly')
       }
 
       const responseText = choice.message?.content || ''

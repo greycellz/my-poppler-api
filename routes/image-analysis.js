@@ -690,7 +690,8 @@ ${combinedText}
           }
         ],
         max_completion_tokens: 65536,
-        temperature: 0.1
+        temperature: 0.1,
+        reasoning_effort: "none"  // Disable reasoning mode to prevent token waste on internal thinking
         // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
         // Prompt explicitly requests JSON array output
       })
@@ -704,7 +705,14 @@ ${combinedText}
     const groqData = await groqResponse.json()
     const groqTime = Date.now() - groqStartTime
 
+    // Extract Groq API usage metadata
+    const groqUsage = groqData.usage || groqData.usage_metadata || null
     console.log(`✅ Groq API completed in ${groqTime}ms`)
+    if (groqUsage) {
+      console.log('📊 [DEBUG][Groq] Actual token usage:', JSON.stringify(groqUsage, null, 2))
+    } else {
+      console.log('📊 [DEBUG][Groq] No usage field returned in response')
+    }
 
     // Parse Groq response
     const choice = groqData.choices?.[0]
@@ -726,6 +734,13 @@ ${combinedText}
     if (finishReason === 'length') {
       console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
       console.warn('⚠️ Consider reducing form complexity or increasing token limit')
+    }
+
+    // Check if reasoning mode is accidentally enabled (should be disabled)
+    if (choice.message?.reasoning) {
+      console.warn('⚠️ WARNING: Reasoning mode detected - this should be disabled!')
+      console.warn('⚠️ Reasoning field length:', choice.message.reasoning.length, 'characters')
+      console.warn('⚠️ This indicates reasoning_effort parameter may not be working correctly')
     }
 
     const responseText = choice.message?.content || ''
@@ -810,10 +825,32 @@ ${combinedText}
 
     console.log(`✅ Successfully extracted ${fields.length} fields (with ids)`)
 
+    // Build analytics object
+    const analytics = {
+      visionApi: {
+        totalTime: visionTotalTime,
+        totalCharacters: totalCharacters,
+        perImage: visionResults.map(r => ({
+          page: r.page,
+          time: r.processingTime,
+          characters: r.text.length
+        }))
+      },
+      groqApi: {
+        time: groqTime,
+        inputTokens: groqUsage?.prompt_tokens || groqUsage?.input_tokens || null,
+        outputTokens: groqUsage?.completion_tokens || groqUsage?.output_tokens || null,
+        totalTokens: groqUsage?.total_tokens || null,
+        finishReason: finishReason
+      },
+      totalTime: Date.now() - visionStartTime
+    }
+
     return res.json({
       success: true,
       fields: fields,
-      imagesAnalyzed: imageUrls.length
+      imagesAnalyzed: imageUrls.length,
+      analytics: analytics
     })
 
   } catch (error) {
