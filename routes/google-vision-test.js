@@ -210,7 +210,8 @@ router.post('/test-google-vision-full', async (req, res) => {
       time: 0,
       inputTokens: 0,
       outputTokens: 0,
-      totalTokens: 0
+      totalTokens: 0,
+      finishReason: null
     },
     fields: {
       count: 0,
@@ -442,11 +443,15 @@ Extract all form fields with their exact labels, types, and options as they appe
     const groqData = await groqResponse.json()
     analytics.groqApi.time = Date.now() - groqStartTime
     
-    if (groqData.usage) {
-      analytics.groqApi.inputTokens = groqData.usage.prompt_tokens || 0
-      analytics.groqApi.outputTokens = groqData.usage.completion_tokens || 0
-      analytics.groqApi.totalTokens = groqData.usage.total_tokens || 0
+    // Extract Groq API usage metadata (consistent with other files)
+    const groqUsage = groqData.usage || groqData.usage_metadata || null
+    if (groqUsage) {
+      analytics.groqApi.inputTokens = groqUsage.prompt_tokens || groqUsage.input_tokens || 0
+      analytics.groqApi.outputTokens = groqUsage.completion_tokens || groqUsage.output_tokens || 0
+      analytics.groqApi.totalTokens = groqUsage.total_tokens || 0
     }
+    
+    // Store finish_reason in analytics (will be set after choice parsing)
 
     console.log(`✅ Groq API completed in ${analytics.groqApi.time}ms`)
 
@@ -456,6 +461,17 @@ Extract all form fields with their exact labels, types, and options as they appe
       throw new Error('No response from Groq API')
     }
 
+    // Check if response was truncated due to token limit
+    const finishReason = choice.finish_reason
+    console.log(`🏁 Groq finish_reason: ${finishReason}`)
+    
+    // Store finish_reason in analytics
+    analytics.groqApi.finishReason = finishReason
+    
+    if (finishReason === 'length') {
+      console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
+    }
+
     // Check if reasoning mode is accidentally enabled (should be disabled)
     if (choice.message?.reasoning) {
       console.warn('⚠️ WARNING: Reasoning mode detected - this should be disabled!')
@@ -463,7 +479,17 @@ Extract all form fields with their exact labels, types, and options as they appe
         ? choice.message.reasoning.length 
         : JSON.stringify(choice.message.reasoning).length
       console.warn('⚠️ Reasoning field length:', reasoningLength, 'characters')
-      console.warn('⚠️ This indicates reasoning_effort parameter may not be working correctly')
+      console.warn('⚠️ Reasoning mode may be enabled by default for this model - consider using a different model or contact Groq support')
+    }
+
+    // Check for empty content
+    if (!choice.message?.content) {
+      console.error('❌ Groq response has no content!')
+      console.error('📋 Full choice object:', JSON.stringify(choice, null, 2))
+      if (finishReason === 'length') {
+        throw new Error('Groq response truncated - content empty and finish_reason is "length". Possible reasoning mode issue.')
+      }
+      throw new Error('Groq response has no content - possible reasoning mode issue')
     }
 
     const responseText = choice.message?.content || ''

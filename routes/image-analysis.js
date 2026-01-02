@@ -730,6 +730,14 @@ ${combinedText}
       console.error('❌ Groq response has no content!')
       console.error('📋 Full choice object:', JSON.stringify(choice, null, 2))
       console.error('📋 Full groqData:', JSON.stringify(groqData, null, 2))
+      
+      // If finish_reason is "length", this is likely a reasoning mode issue
+      if (finishReason === 'length') {
+        throw new Error('Groq response truncated - content empty and finish_reason is "length". This indicates reasoning mode may have consumed all tokens.')
+      }
+      
+      // Otherwise, throw generic error
+      throw new Error('Groq response has no content - unable to extract fields')
     }
     
     if (finishReason === 'length') {
@@ -744,7 +752,7 @@ ${combinedText}
         ? choice.message.reasoning.length 
         : JSON.stringify(choice.message.reasoning).length
       console.warn('⚠️ Reasoning field length:', reasoningLength, 'characters')
-      console.warn('⚠️ This indicates reasoning_effort parameter may not be working correctly')
+      console.warn('⚠️ Reasoning mode may be enabled by default for this model - consider using a different model or contact Groq support')
     }
 
     const responseText = choice.message?.content || ''

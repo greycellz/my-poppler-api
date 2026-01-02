@@ -12,6 +12,7 @@ const path = require('path')
 
 const RAILWAY_URL = process.env.RAILWAY_URL || 'https://my-poppler-api-dev.up.railway.app'
 const PDF_PATH = process.env.PDF_PATH || path.join(__dirname, '../../chatterforms/Heinz_Intake Questionnaire.pdf')
+const AUTH_TOKEN = process.env.AUTH_TOKEN || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJYV2lmNU1rZ0MySVcya21oRXBNNiIsImVtYWlsIjoiYWtqX3dvcmsrMTI0QHlhaG9vLmNvbSIsImlhdCI6MTc2NjgyMzQyOSwiZXhwIjoxNzY3NDI4MjI5fQ.GbqPQ4Jtcz6pWDvBdCCbqGiNjqrqg-9Sowr83AW-g2k'
 
 async function testPdfAnalysis() {
   console.log('🚀 Testing PDF Analysis via Railway Backend\n')
@@ -49,7 +50,10 @@ async function testPdfAnalysis() {
     
     // Parse URL for https request
     const url = new URL(`${RAILWAY_URL}/upload`)
-    const headers = formData.getHeaders()
+    const headers = {
+      ...formData.getHeaders(),
+      'Authorization': `Bearer ${AUTH_TOKEN}`
+    }
     
     // Use https.request with form-data stream
     const uploadResponse = await new Promise((resolve, reject) => {
@@ -123,7 +127,10 @@ async function testPdfAnalysis() {
     const analysisStartTime = Date.now()
     const analysisResponse = await fetch(`${RAILWAY_URL}/api/analyze-images`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AUTH_TOKEN}`
+      },
       body: JSON.stringify({
         imageUrls,
         systemMessage: `You are a form analysis expert. Analyze these PDF page images and extract ALL visible form fields.
