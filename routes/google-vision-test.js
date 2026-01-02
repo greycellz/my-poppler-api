@@ -428,7 +428,8 @@ Extract all form fields with their exact labels, types, and options as they appe
           }
         ],
         max_completion_tokens: 32768,
-        temperature: 0.1
+        temperature: 0.1,
+        reasoning_effort: "none"  // Disable reasoning mode to prevent token waste on internal thinking
       })
     })
 
@@ -452,6 +453,16 @@ Extract all form fields with their exact labels, types, and options as they appe
     const choice = groqData.choices?.[0]
     if (!choice) {
       throw new Error('No response from Groq API')
+    }
+
+    // Check if reasoning mode is accidentally enabled (should be disabled)
+    if (choice.message?.reasoning) {
+      console.warn('⚠️ WARNING: Reasoning mode detected - this should be disabled!')
+      const reasoningLength = typeof choice.message.reasoning === 'string' 
+        ? choice.message.reasoning.length 
+        : JSON.stringify(choice.message.reasoning).length
+      console.warn('⚠️ Reasoning field length:', reasoningLength, 'characters')
+      console.warn('⚠️ This indicates reasoning_effort parameter may not be working correctly')
     }
 
     const responseText = choice.message?.content || ''

@@ -739,7 +739,10 @@ ${combinedText}
     // Check if reasoning mode is accidentally enabled (should be disabled)
     if (choice.message?.reasoning) {
       console.warn('⚠️ WARNING: Reasoning mode detected - this should be disabled!')
-      console.warn('⚠️ Reasoning field length:', choice.message.reasoning.length, 'characters')
+      const reasoningLength = typeof choice.message.reasoning === 'string' 
+        ? choice.message.reasoning.length 
+        : JSON.stringify(choice.message.reasoning).length
+      console.warn('⚠️ Reasoning field length:', reasoningLength, 'characters')
       console.warn('⚠️ This indicates reasoning_effort parameter may not be working correctly')
     }
 
