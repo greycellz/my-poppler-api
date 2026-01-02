@@ -356,9 +356,15 @@ Return ONLY a JSON array with this exact structure:
     return {
       success: true,
       fieldsExtracted: analysisData.fields?.length || 0,
+      fields: analysisData.fields || [],
+      analytics: analysisData.analytics || {},
+      reasoningTokens: analysisData.analytics?.groqApi?.reasoningTokens || null,
+      finishReason: analysisData.analytics?.groqApi?.finishReason || null,
+      responseLength: JSON.stringify(analysisData).length,
       totalTime,
       analysisTime,
-      uploadTime
+      uploadTime,
+      timestamp: new Date().toISOString()
     }
 
   } catch (error) {
@@ -374,21 +380,99 @@ Return ONLY a JSON array with this exact structure:
 
 // Run the test
 if (require.main === module) {
-  testPdfAnalysis()
-    .then(result => {
-      if (result && result.success) {
-        console.log(`\n✅ Test Summary:`)
-        console.log(`   Fields extracted: ${result.fieldsExtracted}`)
-        console.log(`   Total time: ${(result.totalTime / 1000).toFixed(2)}s`)
-        console.log(`   Analysis time: ${(result.analysisTime / 1000).toFixed(2)}s`)
-        console.log(`   Upload time: ${(result.uploadTime / 1000).toFixed(2)}s`)
+  const NUM_RUNS = parseInt(process.env.NUM_RUNS || '1')
+  
+  if (NUM_RUNS === 1) {
+    // Single run - existing behavior
+    testPdfAnalysis()
+      .then(result => {
+        if (result && result.success) {
+          console.log(`\n✅ Test Summary:`)
+          console.log(`   Fields extracted: ${result.fieldsExtracted}`)
+          console.log(`   Total time: ${(result.totalTime / 1000).toFixed(2)}s`)
+          console.log(`   Analysis time: ${(result.analysisTime / 1000).toFixed(2)}s`)
+          console.log(`   Upload time: ${(result.uploadTime / 1000).toFixed(2)}s`)
+        }
+        process.exit(0)
+      })
+      .catch(error => {
+        console.error('Unhandled error:', error)
+        process.exit(1)
+      })
+  } else {
+    // Multiple runs
+    (async () => {
+      const results = []
+      const errors = []
+      
+      for (let i = 0; i < NUM_RUNS; i++) {
+        console.log(`\n${'='.repeat(60)}`)
+        console.log(`🔄 Run ${i + 1}/${NUM_RUNS}`)
+        console.log('='.repeat(60))
+        
+        try {
+          const result = await testPdfAnalysis()
+          results.push({
+            run: i + 1,
+            ...result
+          })
+          
+          // Wait between runs (except after last run)
+          if (i < NUM_RUNS - 1) {
+            console.log('\n⏳ Waiting 5 seconds before next run...\n')
+            await new Promise(resolve => setTimeout(resolve, 5000))
+          }
+        } catch (error) {
+          console.error(`\n❌ Run ${i + 1} failed:`, error.message)
+          errors.push({
+            run: i + 1,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          })
+          
+          // Continue with next run even if one fails
+          if (i < NUM_RUNS - 1) {
+            console.log('\n⏳ Waiting 5 seconds before next run...\n')
+            await new Promise(resolve => setTimeout(resolve, 5000))
+          }
+        }
       }
-      process.exit(0)
-    })
-    .catch(error => {
-      console.error('Unhandled error:', error)
-      process.exit(1)
-    })
+      
+      // Save results
+      const resultsFile = `test-results-${Date.now()}.json`
+      const output = {
+        testConfiguration: {
+          numRuns: NUM_RUNS,
+          successfulRuns: results.length,
+          failedRuns: errors.length,
+          pdfPath: PDF_PATH,
+          railwayUrl: RAILWAY_URL
+        },
+        results: results,
+        errors: errors,
+        summary: {
+          fieldCounts: results.map(r => r.fieldsExtracted),
+          avgFieldCount: results.length > 0 
+            ? Math.round(results.reduce((sum, r) => sum + r.fieldsExtracted, 0) / results.length)
+            : 0,
+          minFieldCount: results.length > 0 ? Math.min(...results.map(r => r.fieldsExtracted)) : 0,
+          maxFieldCount: results.length > 0 ? Math.max(...results.map(r => r.fieldsExtracted)) : 0
+        }
+      }
+      
+      fs.writeFileSync(resultsFile, JSON.stringify(output, null, 2))
+      console.log(`\n💾 Results saved to ${resultsFile}`)
+      console.log(`\n📊 Summary:`)
+      console.log(`   Successful runs: ${results.length}/${NUM_RUNS}`)
+      console.log(`   Failed runs: ${errors.length}/${NUM_RUNS}`)
+      if (results.length > 0) {
+        console.log(`   Field count range: ${output.summary.minFieldCount} - ${output.summary.maxFieldCount}`)
+        console.log(`   Average field count: ${output.summary.avgFieldCount}`)
+      }
+      
+      process.exit(errors.length > 0 ? 1 : 0)
+    })()
+  }
 }
 
 module.exports = { testPdfAnalysis }

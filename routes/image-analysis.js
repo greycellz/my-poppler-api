@@ -690,10 +690,9 @@ ${combinedText}
           }
         ],
         max_completion_tokens: 65536,
-        temperature: 0.1
+        temperature: 0.1,
+        reasoning_effort: "low"  // Minimize reasoning token consumption
         // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
-        // Note: Not including reasoning_effort parameter - Groq API only accepts "low", "medium", or "high"
-        //       Omitting it entirely should prevent reasoning mode from being enabled
         // Prompt explicitly requests JSON array output
       })
     })
@@ -853,7 +852,8 @@ ${combinedText}
         inputTokens: groqUsage?.prompt_tokens || groqUsage?.input_tokens || null,
         outputTokens: groqUsage?.completion_tokens || groqUsage?.output_tokens || null,
         totalTokens: groqUsage?.total_tokens || null,
-        finishReason: finishReason
+        finishReason: finishReason,
+        reasoningTokens: groqUsage?.completion_tokens_details?.reasoning_tokens || null
       },
       totalTime: Date.now() - visionStartTime
     }

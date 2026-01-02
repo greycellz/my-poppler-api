@@ -429,9 +429,8 @@ Extract all form fields with their exact labels, types, and options as they appe
           }
         ],
         max_completion_tokens: 32768,
-        temperature: 0.1
-        // Note: Not including reasoning_effort parameter - Groq API only accepts "low", "medium", or "high"
-        //       Omitting it entirely should prevent reasoning mode from being enabled
+        temperature: 0.1,
+        reasoning_effort: "low"  // Minimize reasoning token consumption
       })
     })
 
