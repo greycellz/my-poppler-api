@@ -692,6 +692,8 @@ ${combinedText}
         max_completion_tokens: 65536,
         temperature: 0.1
         // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
+        // Note: Not including reasoning_effort parameter - Groq API only accepts "low", "medium", or "high"
+        //       Omitting it entirely should prevent reasoning mode from being enabled
         // Prompt explicitly requests JSON array output
       })
     })
@@ -704,7 +706,14 @@ ${combinedText}
     const groqData = await groqResponse.json()
     const groqTime = Date.now() - groqStartTime
 
+    // Extract Groq API usage metadata
+    const groqUsage = groqData.usage || groqData.usage_metadata || null
     console.log(`✅ Groq API completed in ${groqTime}ms`)
+    if (groqUsage) {
+      console.log('📊 [DEBUG][Groq] Actual token usage:', JSON.stringify(groqUsage, null, 2))
+    } else {
+      console.log('📊 [DEBUG][Groq] No usage field returned in response')
+    }
 
     // Parse Groq response
     const choice = groqData.choices?.[0]
@@ -721,11 +730,29 @@ ${combinedText}
       console.error('❌ Groq response has no content!')
       console.error('📋 Full choice object:', JSON.stringify(choice, null, 2))
       console.error('📋 Full groqData:', JSON.stringify(groqData, null, 2))
+      
+      // If finish_reason is "length", this is likely a reasoning mode issue
+      if (finishReason === 'length') {
+        throw new Error('Groq response truncated - content empty and finish_reason is "length". This indicates reasoning mode may have consumed all tokens.')
+      }
+      
+      // Otherwise, throw generic error
+      throw new Error('Groq response has no content - unable to extract fields')
     }
     
     if (finishReason === 'length') {
       console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
       console.warn('⚠️ Consider reducing form complexity or increasing token limit')
+    }
+
+    // Check if reasoning mode is accidentally enabled (should be disabled)
+    if (choice.message?.reasoning) {
+      console.warn('⚠️ WARNING: Reasoning mode detected - this should be disabled!')
+      const reasoningLength = typeof choice.message.reasoning === 'string' 
+        ? choice.message.reasoning.length 
+        : JSON.stringify(choice.message.reasoning).length
+      console.warn('⚠️ Reasoning field length:', reasoningLength, 'characters')
+      console.warn('⚠️ Reasoning mode may be enabled by default for this model - consider using a different model or contact Groq support')
     }
 
     const responseText = choice.message?.content || ''
@@ -810,10 +837,32 @@ ${combinedText}
 
     console.log(`✅ Successfully extracted ${fields.length} fields (with ids)`)
 
+    // Build analytics object
+    const analytics = {
+      visionApi: {
+        totalTime: visionTotalTime,
+        totalCharacters: totalCharacters,
+        perImage: visionResults.map(r => ({
+          page: r.page,
+          time: r.processingTime,
+          characters: r.text.length
+        }))
+      },
+      groqApi: {
+        time: groqTime,
+        inputTokens: groqUsage?.prompt_tokens || groqUsage?.input_tokens || null,
+        outputTokens: groqUsage?.completion_tokens || groqUsage?.output_tokens || null,
+        totalTokens: groqUsage?.total_tokens || null,
+        finishReason: finishReason
+      },
+      totalTime: Date.now() - visionStartTime
+    }
+
     return res.json({
       success: true,
       fields: fields,
-      imagesAnalyzed: imageUrls.length
+      imagesAnalyzed: imageUrls.length,
+      analytics: analytics
     })
 
   } catch (error) {

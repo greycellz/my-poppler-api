@@ -362,6 +362,8 @@ ${combinedText}
           ],
           max_completion_tokens: 65536,
           temperature: 0.1
+          // Note: Not including reasoning_effort parameter - Groq API only accepts "low", "medium", or "high"
+          //       Omitting it entirely should prevent reasoning mode from being enabled
         })
       })
 
@@ -394,6 +396,26 @@ ${combinedText}
       
       if (finishReason === 'length') {
         console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
+      }
+
+      // Check if reasoning mode is accidentally enabled (should be disabled)
+      if (choice.message?.reasoning) {
+        console.warn('⚠️ WARNING: Reasoning mode detected - this should be disabled!')
+        const reasoningLength = typeof choice.message.reasoning === 'string' 
+          ? choice.message.reasoning.length 
+          : JSON.stringify(choice.message.reasoning).length
+        console.warn('⚠️ Reasoning field length:', reasoningLength, 'characters')
+        console.warn('⚠️ Reasoning mode may be enabled by default for this model - consider using a different model or contact Groq support')
+      }
+
+      // Check for empty content
+      if (!choice.message?.content) {
+        console.error('❌ Groq response has no content!')
+        console.error('📋 Full choice object:', JSON.stringify(choice, null, 2))
+        if (finishReason === 'length') {
+          throw new Error('Groq response truncated - content empty and finish_reason is "length". Possible reasoning mode issue.')
+        }
+        throw new Error('Groq response has no content - unable to extract fields')
       }
 
       const responseText = choice.message?.content || ''
