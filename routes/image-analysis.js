@@ -690,9 +690,10 @@ ${combinedText}
           }
         ],
         max_completion_tokens: 65536,
-        temperature: 0.1,
-        reasoning_effort: "none"  // Disable reasoning mode to prevent token waste on internal thinking
+        temperature: 0.1
         // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
+        // Note: Not including reasoning_effort parameter - Groq API only accepts "low", "medium", or "high"
+        //       Omitting it entirely should prevent reasoning mode from being enabled
         // Prompt explicitly requests JSON array output
       })
     })
