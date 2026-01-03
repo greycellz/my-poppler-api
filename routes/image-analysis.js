@@ -398,13 +398,14 @@ const repairJsonSyntax = (jsonString, options = {}) => {
   }
 
   // STEP 3: Fix Missing Colon/Value Pattern
-  // Only match property names at the start of property definitions (after { or ,)
-  // This avoids matching values like "label", in "type": "label",
+  // Only match property names immediately after object start {, NOT in arrays or after commas
+  // This avoids matching array values like "No", in ["Yes", "No", ...]
+  // Conservative approach: only fix obvious cases like { "propertyName",
   if (repairSteps.fixMissingColonValue) {
     const before = cleaned
-    // Match: "propertyName", only when preceded by { or , (start of property definition)
-    // This ensures we don't match values that come after a colon
-    cleaned = cleaned.replace(/([{,]\s*)"([a-zA-Z_][a-zA-Z0-9_]*)"\s*,(\s*)(?="|{|\[|\n|$)/g, '$1"$2": "",$3')
+    // Match: "propertyName", only when immediately preceded by { (object start)
+    // This is conservative but safe - avoids corrupting array values
+    cleaned = cleaned.replace(/\{\s*"([a-zA-Z_][a-zA-Z0-9_]*)"\s*,(\s*)(?="|{|\[|\n|$)/g, '{ "$1": "",$2')
     if (before !== cleaned) {
       appliedRepairs.push('fixMissingColonValue')
     }
