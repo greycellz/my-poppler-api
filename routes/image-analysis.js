@@ -974,6 +974,7 @@ router.post('/analyze-images', async (req, res) => {
       if (hasPartialResults) {
         console.warn(`⚠️ Partial results: ${batchErrors.length} batch(es) failed`)
       }
+      analytics.totalTime = Date.now() - visionStartTime
     } else {
       // SINGLE REQUEST MODE (existing logic)
       // Step 3: Combine OCR text from all pages
@@ -1473,6 +1474,11 @@ ${combinedText}
     }
     analytics.totalTime = Date.now() - visionStartTime
     } // Close else block for single-request mode
+
+    // Update totalTime if not already set (should be set in both branches, but just in case)
+    if (!analytics.totalTime) {
+      analytics.totalTime = Date.now() - visionStartTime
+    }
 
     return res.json({
       success: true,
