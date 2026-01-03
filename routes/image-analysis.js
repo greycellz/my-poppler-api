@@ -778,27 +778,27 @@ router.post('/analyze-images', async (req, res) => {
     const spatialBlocks = visionResults.flatMap((result, pageIndex) => {
       const pageNumber = result.page
       return (result.blocks || []).map((block, blockIndex) => {
-        const text = getBlockText(block).trim()
-        const box = block.boundingBox
+      const text = getBlockText(block).trim()
+      const box = block.boundingBox
+      
+      if (box && box.vertices && box.vertices.length >= 4) {
+        const topLeft = box.vertices[0]
+        const bottomRight = box.vertices[2]
+        const width = bottomRight.x - topLeft.x
+        const height = Math.abs(bottomRight.y - topLeft.y)  // Use abs() to handle negative heights
         
-        if (box && box.vertices && box.vertices.length >= 4) {
-          const topLeft = box.vertices[0]
-          const bottomRight = box.vertices[2]
-          const width = bottomRight.x - topLeft.x
-          const height = Math.abs(bottomRight.y - topLeft.y)  // Use abs() to handle negative heights
-          
-          return {
+        return {
             index: blockIndex + 1,
             pageNumber: pageNumber,  // CRITICAL: Add page number for batch filtering
-            text: text,
-            x: topLeft.x,
-            y: topLeft.y,
-            width: width,
-            height: height
-          }
+          text: text,
+          x: topLeft.x,
+          y: topLeft.y,
+          width: width,
+          height: height
         }
-        
-        return null
+      }
+      
+      return null
       })
     }).filter(b => b !== null && b.text.length > 0)  // Remove null entries and empty text
     
@@ -848,6 +848,13 @@ router.post('/analyze-images', async (req, res) => {
       } else {
         reasoningEffortLevel = process.env.USE_REASONING_EFFORT
       }
+    }
+    
+    // When batching is enabled, default to "low" reasoning effort if not explicitly set
+    // This minimizes reasoning token consumption which can cause token limit issues
+    if (shouldEnableBatching && reasoningEffortLevel === null) {
+      reasoningEffortLevel = "low"
+      console.log('🔧 Batching enabled: Setting reasoning_effort to "low" to minimize token usage')
     }
 
     // Step 3: Process with batching or single request
@@ -993,7 +1000,7 @@ router.post('/analyze-images', async (req, res) => {
       // Build spatial context for Groq using extracted function
       const spatialContextHint = buildSpatialContextHint(spatialBlocks)
 
-      // Use provided system message or default (text-focused prompt for OCR analysis)
+    // Use provided system message or default (text-focused prompt for OCR analysis)
       // Note: defaultSystemMessage is already defined above, and we add spatialContextHint
       // The single-request flow uses a longer system message with more detailed instructions
       // (defaultSystemMessage already contains the basic task and privacy context, so we just add the extended instructions)
@@ -1242,19 +1249,19 @@ ${combinedText}
     // Build request body
     // Note: reasoningEffortLevel is already defined above (shared with batching flow)
     const requestBody = {
-      model: GROQ_MODEL,
-      messages: [
-        {
-          role: 'system',
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: 'system',
           content: extendedSystemMessage
-        },
-        {
-          role: 'user',
-          content: groqUserMessage
-        }
-      ],
-      max_completion_tokens: 65536,
-      temperature: 0.1
+          },
+          {
+            role: 'user',
+            content: groqUserMessage
+          }
+        ],
+        max_completion_tokens: 65536,
+        temperature: 0.1
     }
     
     // Add reasoning_effort if specified
@@ -1265,8 +1272,8 @@ ${combinedText}
       console.log('🔧 NOT using reasoning_effort parameter (baseline test)')
     }
     
-    // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
-    // Prompt explicitly requests JSON array output
+        // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
+        // Prompt explicitly requests JSON array output
     
     const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -1444,8 +1451,8 @@ ${combinedText}
         console.log('✅ Fallback extraction succeeded with pattern')
         try {
           const cleaned = repairJsonSyntax(jsonMatch[0], { logRepairs: true })
-          const extracted = JSON.parse(cleaned)
-          fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
+        const extracted = JSON.parse(cleaned)
+        fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
         } catch (fallbackError) {
           console.error('❌ Fallback extraction also failed to parse JSON')
           console.error('❌ Fallback Error:', fallbackError.message)
