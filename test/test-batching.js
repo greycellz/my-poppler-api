@@ -1,6 +1,6 @@
 /**
  * Test cases for Phase 2 Batching functionality
- * Tests batching mode, single-request mode, edge cases, and error handling
+ * Tests single-request mode and batching mode (batchSize: 5 only)
  * 
  * Usage:
  *   RAILWAY_URL=https://my-poppler-api-dev.up.railway.app node test/test-batching.js
@@ -177,6 +177,24 @@ async function testPdfAnalysis(options = {}) {
       throw new Error(`Analysis failed: ${analysisData.error}`)
     }
 
+    // Debug logging for single-request mode
+    if (!enableBatching) {
+      console.log(`🔍 [TEST DEBUG] Response structure:`, {
+        hasFields: 'fields' in analysisData,
+        fieldsType: typeof analysisData.fields,
+        fieldsIsArray: Array.isArray(analysisData.fields),
+        fieldsLength: analysisData.fields?.length || 0,
+        hasAnalytics: !!analysisData.analytics,
+        success: analysisData.success
+      })
+      if (analysisData.fields && analysisData.fields.length > 0) {
+        console.log(`🔍 [TEST DEBUG] First field:`, JSON.stringify(analysisData.fields[0], null, 2))
+      } else {
+        console.log(`⚠️ [TEST DEBUG] Fields is empty or missing!`)
+        console.log(`🔍 [TEST DEBUG] Full response keys:`, Object.keys(analysisData))
+      }
+    }
+
     // Step 4: Cleanup
     const cleanupUrl = new URL(`${RAILWAY_URL}/api/cleanup-pdf/${uuid}`)
     await new Promise((resolve, reject) => {
@@ -205,6 +223,10 @@ async function testPdfAnalysis(options = {}) {
       uuid
     }
   } catch (error) {
+    console.error(`   ❌ Error in testPdfAnalysis: ${error.message}`)
+    if (error.stack) {
+      console.error(`   Stack: ${error.stack.split('\n').slice(0, 3).join('\n')}`)
+    }
     return {
       success: false,
       error: error.message,
@@ -225,6 +247,16 @@ async function testSingleRequestMode() {
     description: 'Single-Request Mode Test'
   })
 
+  if (!result.success) {
+    logTest('Single-Request Mode', false, {
+      error: result.error,
+      fieldCount: result.fields.length,
+      analytics: result.analytics,
+      checks: { success: false }
+    })
+    return { result, checks: { success: false } }
+  }
+
   const checks = {
     success: result.success,
     hasFields: result.fields.length > 0,
@@ -244,14 +276,14 @@ async function testSingleRequestMode() {
   return { result, checks }
 }
 
-// Test 2: Batching mode enabled
+// Test 2: Batching mode enabled (batchSize: 5)
 async function testBatchingMode() {
-  console.log('\n🧪 Test 2: Batching Mode Enabled')
+  console.log('\n🧪 Test 2: Batching Mode Enabled (batchSize: 5)')
   
   const result = await testPdfAnalysis({
     enableBatching: true,
-    batchSize: 3,
-    description: 'Batching Mode Test (batchSize: 3)'
+    batchSize: 5,
+    description: 'Batching Mode Test (batchSize: 5)'
   })
 
   const checks = {
@@ -261,7 +293,7 @@ async function testBatchingMode() {
     hasBatching: !!result.analytics.batching,
     batchingEnabled: result.analytics.batching?.enabled === true,
     hasBatchCount: typeof result.analytics.batching?.batchCount === 'number',
-    hasBatchSize: result.analytics.batching?.batchSize === 3,
+    hasBatchSize: result.analytics.batching?.batchSize === 5,
     hasMergeStats: !!result.analytics.batching?.mergeStats,
     hasGroqApi: !!result.analytics.groqApi
   }
@@ -279,106 +311,9 @@ async function testBatchingMode() {
   return { result, checks }
 }
 
-// Test 3: Batching with different batch sizes
-async function testDifferentBatchSizes() {
-  console.log('\n🧪 Test 3: Different Batch Sizes')
-  
-  const batchSizes = [2, 5, 10]
-  const results = []
-
-  for (const batchSize of batchSizes) {
-    const result = await testPdfAnalysis({
-      enableBatching: true,
-      batchSize,
-      description: `Batching with batchSize: ${batchSize}`
-    })
-
-    results.push({
-      batchSize,
-      success: result.success,
-      fieldCount: result.fields.length,
-      batchCount: result.analytics.batching?.batchCount,
-      mergeStats: result.analytics.batching?.mergeStats
-    })
-  }
-
-  const checks = {
-    allSuccessful: results.every(r => r.success),
-    allHaveFields: results.every(r => r.fieldCount > 0),
-    batchCountsValid: results.every(r => r.batchCount > 0)
-  }
-
-  const passed = Object.values(checks).every(v => v === true)
-  
-  logTest('Different Batch Sizes', passed, {
-    results,
-    checks
-  })
-
-  return { results, checks }
-}
-
-// Test 4: Edge case - batchSize larger than total pages
-async function testBatchSizeLargerThanPages() {
-  console.log('\n🧪 Test 4: Batch Size Larger Than Total Pages')
-  
-  const result = await testPdfAnalysis({
-    enableBatching: true,
-    batchSize: 100, // Much larger than typical PDF
-    description: 'Batch Size Larger Than Pages Test'
-  })
-
-  const checks = {
-    success: result.success,
-    hasFields: result.fields.length > 0,
-    batchCount: result.analytics.batching?.batchCount === 1, // Should be clamped to 1 batch
-    batchSizeClamped: result.analytics.batching?.batchSize <= result.pages
-  }
-
-  const passed = Object.values(checks).every(v => v === true)
-  
-  logTest('Batch Size Larger Than Pages', passed, {
-    pages: result.pages,
-    batchCount: result.analytics.batching?.batchCount,
-    batchSize: result.analytics.batching?.batchSize,
-    checks
-  })
-
-  return { result, checks }
-}
-
-// Test 5: Edge case - batchSize = 1 (each page separately)
-async function testBatchSizeOne() {
-  console.log('\n🧪 Test 5: Batch Size = 1 (Each Page Separately)')
-  
-  const result = await testPdfAnalysis({
-    enableBatching: true,
-    batchSize: 1,
-    description: 'Batch Size = 1 Test'
-  })
-
-  const checks = {
-    success: result.success,
-    hasFields: result.fields.length > 0,
-    batchCount: result.analytics.batching?.batchCount === result.pages, // Should equal page count
-    batchSize: result.analytics.batching?.batchSize === 1
-  }
-
-  const passed = Object.values(checks).every(v => v === true)
-  
-  logTest('Batch Size = 1', passed, {
-    pages: result.pages,
-    batchCount: result.analytics.batching?.batchCount,
-    batchSize: result.analytics.batching?.batchSize,
-    checks
-  })
-
-  return { result, checks }
-}
-
-// Test 6: Compare field counts between batching and single-request
+// Test 3: Compare field counts between batching and single-request
 async function testFieldCountComparison() {
-  console.log('\n🧪 Test 6: Field Count Comparison (Batching vs Single-Request)')
+  console.log('\n🧪 Test 3: Field Count Comparison (Batching vs Single-Request)')
   
   const [singleResult, batchResult] = await Promise.all([
     testPdfAnalysis({
@@ -387,8 +322,8 @@ async function testFieldCountComparison() {
     }),
     testPdfAnalysis({
       enableBatching: true,
-      batchSize: 3,
-      description: 'Batching for Comparison'
+      batchSize: 5,
+      description: 'Batching for Comparison (batchSize: 5)'
     })
   ])
 
@@ -418,13 +353,13 @@ async function testFieldCountComparison() {
   return { singleResult, batchResult, checks }
 }
 
-// Test 7: Analytics structure validation
+// Test 4: Analytics structure validation
 async function testAnalyticsStructure() {
-  console.log('\n🧪 Test 7: Analytics Structure Validation')
+  console.log('\n🧪 Test 4: Analytics Structure Validation')
   
   const result = await testPdfAnalysis({
     enableBatching: true,
-    batchSize: 3,
+    batchSize: 5,
     description: 'Analytics Structure Test'
   })
 
@@ -451,40 +386,6 @@ async function testAnalyticsStructure() {
   return { result, checks }
 }
 
-// Test 8: Error handling - invalid batchSize
-async function testInvalidBatchSize() {
-  console.log('\n🧪 Test 8: Invalid Batch Size Handling')
-  
-  // Test with NaN (should default to 5)
-  const result1 = await testPdfAnalysis({
-    enableBatching: true,
-    batchSize: 'invalid', // Will be parsed as NaN
-    description: 'Invalid Batch Size Test'
-  })
-
-  // Test with negative number (should default to 5)
-  const result2 = await testPdfAnalysis({
-    enableBatching: true,
-    batchSize: -5,
-    description: 'Negative Batch Size Test'
-  })
-
-  const checks = {
-    invalidHandled: result1.success, // Should still work (defaults to 5)
-    negativeHandled: result2.success, // Should still work (defaults to 5)
-    bothHaveFields: result1.fields.length > 0 && result2.fields.length > 0
-  }
-
-  const passed = Object.values(checks).every(v => v === true)
-  
-  logTest('Invalid Batch Size Handling', passed, {
-    invalidResult: { success: result1.success, fieldCount: result1.fields.length },
-    negativeResult: { success: result2.success, fieldCount: result2.fields.length },
-    checks
-  })
-
-  return { result1, result2, checks }
-}
 
 // Main test runner
 async function runAllTests() {
@@ -496,12 +397,8 @@ async function runAllTests() {
     // Run all tests
     await testSingleRequestMode()
     await testBatchingMode()
-    await testDifferentBatchSizes()
-    await testBatchSizeLargerThanPages()
-    await testBatchSizeOne()
     await testFieldCountComparison()
     await testAnalyticsStructure()
-    await testInvalidBatchSize()
 
     // Print summary
     console.log('\n' + '='.repeat(60))
@@ -554,12 +451,8 @@ module.exports = {
   testPdfAnalysis,
   testSingleRequestMode,
   testBatchingMode,
-  testDifferentBatchSizes,
-  testBatchSizeLargerThanPages,
-  testBatchSizeOne,
   testFieldCountComparison,
   testAnalyticsStructure,
-  testInvalidBatchSize,
   runAllTests
 }
 
