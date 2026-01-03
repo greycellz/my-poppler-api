@@ -137,6 +137,9 @@ async function testPdfAnalysis() {
     const imageUrls = uploadData.images.map(img => img.url)
     console.log(`   Processing ${imageUrls.length} page(s)...\n`)
 
+    // Check if we should use reasoning_effort (from environment or default to true)
+    const USE_REASONING_EFFORT = process.env.USE_REASONING_EFFORT !== 'false'
+    
     const analysisStartTime = Date.now()
     const analysisResponse = await fetch(`${RAILWAY_URL}/api/analyze-images`, {
       method: 'POST',
@@ -146,6 +149,7 @@ async function testPdfAnalysis() {
       },
       body: JSON.stringify({
         imageUrls,
+        useReasoningEffort: USE_REASONING_EFFORT,  // Pass to backend
         systemMessage: `You are a form analysis expert. Analyze these PDF page images and extract ALL visible form fields.
 
 CRITICAL INSTRUCTIONS - READ CAREFULLY:
@@ -422,12 +426,23 @@ if (require.main === module) {
       for (let i = 0; i < NUM_RUNS; i++) {
         console.log(`\n${'='.repeat(60)}`)
         console.log(`🔄 Run ${i + 1}/${NUM_RUNS}`)
+        
+        // First run without reasoning_effort (baseline), rest with
+        const useReasoningEffort = i > 0  // Run 1: false, Runs 2+: true
+        process.env.USE_REASONING_EFFORT = useReasoningEffort ? 'true' : 'false'
+        
+        if (i === 0) {
+          console.log('🔧 BASELINE TEST: NOT using reasoning_effort parameter')
+        } else {
+          console.log('🔧 Using reasoning_effort: "low"')
+        }
         console.log('='.repeat(60))
         
         try {
           const result = await testPdfAnalysis()
           results.push({
             run: i + 1,
+            useReasoningEffort: useReasoningEffort,  // Track which mode was used
             ...result
           })
           
@@ -460,7 +475,8 @@ if (require.main === module) {
           successfulRuns: results.length,
           failedRuns: errors.length,
           pdfPath: PDF_PATH,
-          railwayUrl: RAILWAY_URL
+          railwayUrl: RAILWAY_URL,
+          testStrategy: 'Run 1: baseline (no reasoning_effort), Runs 2+: with reasoning_effort="low"'
         },
         results: results,
         errors: errors,

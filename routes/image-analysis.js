@@ -201,7 +201,7 @@ function detectSectionHeaders(blocks) {
  */
 router.post('/analyze-images', async (req, res) => {
   try {
-    const { imageUrls, systemMessage, userMessage } = req.body
+    const { imageUrls, systemMessage, userMessage, useReasoningEffort } = req.body
 
     if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
       return res.status(400).json({
@@ -671,30 +671,46 @@ ${combinedText}
       groqUserMessage += `\n\nAdditional context: ${userMessage}`
     }
 
+    // Build request body - make reasoning_effort configurable
+    // Check request parameter first, then environment variable, default to true
+    const shouldUseReasoningEffort = useReasoningEffort !== undefined 
+      ? useReasoningEffort 
+      : (process.env.USE_REASONING_EFFORT !== 'false')
+    
+    const requestBody = {
+      model: GROQ_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: defaultSystemMessage
+        },
+        {
+          role: 'user',
+          content: groqUserMessage
+        }
+      ],
+      max_completion_tokens: 65536,
+      temperature: 0.1
+    }
+    
+    // Add reasoning_effort only if enabled
+    if (shouldUseReasoningEffort) {
+      requestBody.reasoning_effort = "low"  // Minimize reasoning token consumption
+      console.log('🔧 Using reasoning_effort: "low"')
+    } else {
+      console.log('🔧 NOT using reasoning_effort parameter (baseline test)')
+    }
+    
+    // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
+    // Prompt explicitly requests JSON array output
+    
     const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
-          {
-            role: 'system',
-            content: defaultSystemMessage
-          },
-          {
-            role: 'user',
-            content: groqUserMessage
-          }
-        ],
-        max_completion_tokens: 65536,
-        temperature: 0.1,
-        reasoning_effort: "low"  // Minimize reasoning token consumption
-        // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
-        // Prompt explicitly requests JSON array output
-      })
+      body: JSON.stringify(requestBody)
     })
 
     if (!groqResponse.ok) {
@@ -793,6 +809,68 @@ ${combinedText}
       fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
       console.log('✅ Direct JSON parse succeeded')
     } catch (parseError) {
+      // HEAVY ERROR LOGGING FOR JSON PARSING FAILURES
+      console.error('❌ ========== JSON PARSING ERROR DETAILS ==========')
+      console.error('❌ Parse Error Message:', parseError.message)
+      console.error('❌ Parse Error Stack:', parseError.stack)
+      
+      // Extract error position if available
+      const positionMatch = parseError.message.match(/position (\d+)/)
+      if (positionMatch) {
+        const errorPos = parseInt(positionMatch[1])
+        console.error('❌ Error Position:', errorPos)
+        console.error('❌ Response Length:', responseText.length)
+        console.error('❌ Characters before error:', errorPos)
+        console.error('❌ Characters after error:', responseText.length - errorPos)
+        
+        // Show context around error (200 chars before and after)
+        const contextStart = Math.max(0, errorPos - 200)
+        const contextEnd = Math.min(responseText.length, errorPos + 200)
+        const context = responseText.substring(contextStart, contextEnd)
+        const relativePos = errorPos - contextStart
+        
+        console.error('❌ Context around error position:')
+        console.error('   ' + context.substring(0, relativePos) + '>>>ERROR HERE<<<' + context.substring(relativePos))
+        console.error('❌ Character at error position:', JSON.stringify(responseText[errorPos]))
+        console.error('❌ Characters around error:', JSON.stringify(responseText.substring(Math.max(0, errorPos - 10), Math.min(responseText.length, errorPos + 10))))
+      }
+      
+      // Log response structure details
+      console.error('❌ Response Text Length:', responseText.length)
+      console.error('❌ Response starts with:', JSON.stringify(responseText.substring(0, 100)))
+      console.error('❌ Response ends with:', JSON.stringify(responseText.substring(Math.max(0, responseText.length - 100))))
+      
+      // Check for common JSON issues
+      const hasUnclosedBrackets = (responseText.match(/\[/g) || []).length !== (responseText.match(/\]/g) || []).length
+      const hasUnclosedBraces = (responseText.match(/\{/g) || []).length !== (responseText.match(/\}/g) || []).length
+      const hasUnclosedQuotes = (responseText.match(/"/g) || []).length % 2 !== 0
+      console.error('❌ JSON Structure Issues:')
+      console.error('   - Unclosed brackets:', hasUnclosedBrackets)
+      console.error('   - Unclosed braces:', hasUnclosedBraces)
+      console.error('   - Unclosed quotes:', hasUnclosedQuotes)
+      
+      // Log cleaned version for comparison
+      const cleaned = sanitizeJSON(responseText)
+      console.error('❌ Cleaned Response Length:', cleaned.length)
+      console.error('❌ Cleaned Response (first 500 chars):', cleaned.substring(0, 500))
+      if (positionMatch) {
+        const errorPos = parseInt(positionMatch[1])
+        const cleanedContextStart = Math.max(0, errorPos - 200)
+        const cleanedContextEnd = Math.min(cleaned.length, errorPos + 200)
+        const cleanedContext = cleaned.substring(cleanedContextStart, cleanedContextEnd)
+        const cleanedRelativePos = errorPos - cleanedContextStart
+        console.error('❌ Cleaned Context around error:', cleanedContext.substring(0, cleanedRelativePos) + '>>>ERROR HERE<<<' + cleanedContext.substring(cleanedRelativePos))
+      }
+      
+      // Log full groqData structure for debugging
+      console.error('❌ Full Groq Response Structure:')
+      console.error(JSON.stringify(groqData, null, 2))
+      console.error('❌ Choice Object:')
+      console.error(JSON.stringify(choice, null, 2))
+      console.error('❌ Choice Message:')
+      console.error(JSON.stringify(choice.message, null, 2))
+      console.error('❌ ================================================')
+      
       console.log('⚠️ Direct JSON parse failed, trying fallback extraction...')
       
       // Try multiple fallback patterns
@@ -818,12 +896,19 @@ ${combinedText}
       
       if (jsonMatch) {
         console.log('✅ Fallback extraction succeeded with pattern')
-        const cleaned = sanitizeJSON(jsonMatch[1])
-        const extracted = JSON.parse(cleaned)
-        fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
+        try {
+          const cleaned = sanitizeJSON(jsonMatch[1])
+          const extracted = JSON.parse(cleaned)
+          fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
+        } catch (fallbackError) {
+          console.error('❌ Fallback extraction also failed to parse JSON')
+          console.error('❌ Fallback Error:', fallbackError.message)
+          console.error('❌ Extracted Match (first 500 chars):', jsonMatch[1].substring(0, 500))
+          throw new Error(`Failed to parse Groq response as JSON - fallback extraction also failed: ${fallbackError.message}`)
+        }
       } else {
         console.error('❌ All parsing attempts failed')
-        console.error('❌ Response text:', responseText)
+        console.error('❌ Response text (full):', responseText)
         throw new Error('Failed to parse Groq response as JSON - no valid JSON found in response')
       }
     }
