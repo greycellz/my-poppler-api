@@ -523,11 +523,17 @@ For each field you identify, determine:
    - tel: for phone/telephone number fields
    - number: for numeric inputs (age, quantity, ID numbers)
    - textarea: for large text areas, comments, messages, or multi-line inputs
-   - select: ONLY when the OCR text shows multiple distinct options listed together (like "Yes", "No", "Maybe") indicating a dropdown or selection. Do NOT use "select" for fields that show only a single value
-   - radio-with-other: when the OCR text shows multiple radio button options AND includes "Other:" with a text input
+   - select: ONLY for dropdown menus with 3+ distinct options (like "Option A", "Option B", "Option C") or when the form clearly shows a dropdown UI element. Do NOT use "select" for Yes/No questions (2 options) or any 2-option questions - use radio-with-other instead. Do NOT use "select" for fields that show only a single value
+   - radio-with-other: for radio button questions, including Yes/No questions and any questions with exactly 2 options (like "Yes"/"No", "Male"/"Female", "True"/"False"). Use this for ALL radio button style questions, even if there's no "Other:" option. If the OCR text shows "Other:" with a text input, set allowOther: true
    - checkbox-with-other: when the OCR text shows multiple checkbox options AND includes "Other:" with a text input
    - date: for date picker fields (usually shown as mm/dd/yyyy or similar)
    - label: for display-only text (titles, section headers, instructions, legal disclaimers)
+   
+   **CRITICAL FOR 2-OPTION QUESTIONS**:
+   - Questions with exactly 2 options (Yes/No, Male/Female, True/False, etc.) MUST use type "radio-with-other"
+   - Do NOT use "select" for 2-option questions, even if the options are listed together
+   - The "radio-with-other" type is correct for 2-option questions regardless of whether there's an "Other:" option
+   - Only use "select" for dropdowns with 3+ options or clearly dropdown UI elements
    
    **Advanced types** (rarely in scanned forms, use only if explicitly shown):
    - rating: for star ratings or scale (1-5, 1-10)
@@ -544,6 +550,7 @@ For each field you identify, determine:
    - Default to false if no indicator found
 
 4. **Options Detection**: When the OCR text shows multiple choice options, identify ALL of them and group with the main question label:
+   - CRITICAL: Yes/No questions (2 options) should ALWAYS use type "radio-with-other", not "select"
    - CRITICAL: When you find Yes/No questions in the text, ALWAYS capture ALL options. If the text contains "Yes" and "No" or "Yes" and "No, please mail it to my home address", include ALL options in the array. Never drop the "No" option or its variations. Search the OCR text around the question - if you find "Yes", search for the corresponding "No" option even if it's on a different line or has additional text. If a question asks "is it OK to email statements to you?" and the text shows "Yes", you MUST also search for "No" or "No, please mail" - they are part of the same question's options.
    - CRITICAL: allowOther should ALWAYS be false by default
    - ONLY set allowOther: true if the OCR text clearly shows an "Other" option (with or without colon) AND a text input field or blank line for text entry
@@ -709,7 +716,8 @@ The correct output should be:
 Notice: "Other:" is NOT in the options array because it's handled by allowOther: true`
 
 // Update system message with batch context
-function updateSystemMessageForBatch(systemMessage, batchPages, totalPages, fieldTypeInstructions) {
+// Standardized order: defaultSystemMessage + spatialContextHint + FIELD_TYPE_INSTRUCTIONS + batchContext
+function updateSystemMessageForBatch(systemMessage, batchPages, totalPages, fieldTypeInstructions, spatialContextHint) {
   if (!Number.isInteger(totalPages) || totalPages < 1) {
     throw new Error('totalPages must be a positive integer')
   }
@@ -720,8 +728,8 @@ function updateSystemMessageForBatch(systemMessage, batchPages, totalPages, fiel
     ? `page ${batchPages[0]}` 
     : `pages ${batchPages[0]}-${batchPages[batchPages.length-1]}`
   const batchContext = `\n\n**BATCH CONTEXT**: You are analyzing ${pageRange} of ${totalPages} total pages. Extract fields only from these pages. Ensure all extracted fields have pageNumber set to one of: ${batchPages.join(', ')}.`
-  // Note: spatialContextHint is added separately in processBatch() (line 746), so we don't include it here
-  return systemMessage + batchContext + (fieldTypeInstructions || '')
+  // Standardized order to match single-request mode: systemMessage + spatialContextHint + fieldTypeInstructions + batchContext
+  return systemMessage + (spatialContextHint || '') + (fieldTypeInstructions || '') + batchContext
 }
 
 // JSON Repair Function - Extracted for reuse
@@ -980,8 +988,7 @@ async function processBatch(batch, spatialBlocksForBatch, systemMessage, reasoni
     .map((result) => `=== PAGE ${result.page} ===\n${result.text}`)
     .join('\n\n')
   
-  // Build spatial context hint for this batch
-  const spatialContextHint = buildSpatialContextHint(spatialBlocksForBatch)
+  // Note: spatialContextHint is now included in systemMessage (passed from updateSystemMessageForBatch)
   if (spatialBlocksForBatch.length === 0) {
     console.warn(`⚠️ Batch (pages ${batchPages.join(',')}) - No spatial blocks found for this batch`)
   }
@@ -1009,13 +1016,14 @@ ${combinedText}
   
   // Build request body
   // Note: reasoningEffortLevel is already parsed in main flow, just use it directly
+  // Note: systemMessage already includes spatialContextHint in standardized order
   
   const requestBody = {
     model: GROQ_MODEL,
     messages: [
       {
         role: 'system',
-        content: systemMessage + spatialContextHint
+        content: systemMessage
       },
       {
         role: 'user',
@@ -1267,7 +1275,9 @@ router.post('/analyze-images', async (req, res) => {
           console.log(`\n🔄 Processing batch ${i + 1}/${batches.length} (pages ${batchPages.join(', ')})...`)
           
           const spatialBlocksForBatch = filterSpatialBlocksForBatch(spatialBlocks, batchPages)
-          const batchSystemMessage = updateSystemMessageForBatch(defaultSystemMessage, batchPages, imageUrls.length, FIELD_TYPE_INSTRUCTIONS)
+          // Build spatial context hint for this batch (before creating system message)
+          const spatialContextHintForBatch = buildSpatialContextHint(spatialBlocksForBatch)
+          const batchSystemMessage = updateSystemMessageForBatch(defaultSystemMessage, batchPages, imageUrls.length, FIELD_TYPE_INSTRUCTIONS, spatialContextHintForBatch)
           
           // Process batch - returns { fields, analytics }
           const { fields: batchFields, analytics: batchAnalytics } = await processBatch(
