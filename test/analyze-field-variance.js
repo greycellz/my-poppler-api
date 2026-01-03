@@ -34,17 +34,25 @@ if (results.length === 0) {
 console.log(`\n📊 Analyzing ${results.length} successful runs out of ${numRuns} total runs\n`)
 
 // Create field signature for matching fields across runs
+function escapeSignature(str) {
+  // Escape pipe characters to prevent signature collisions
+  return (str || '').replace(/\|/g, '\\|')
+}
+
 function createFieldSignature(field) {
+  const type = field.type || 'unknown'
+  const pageNumber = field.pageNumber || 1
+  
   // For label fields (empty label), use type + pageNumber + first 50 chars of richTextContent
-  if (field.type === 'label' && (!field.label || field.label.trim() === '')) {
+  if (type === 'label' && (!field.label || field.label.trim() === '')) {
     const content = field.richTextContent || ''
     const contentPreview = content.substring(0, 50).replace(/\s+/g, ' ').trim()
-    return `${field.type}|${field.pageNumber || 1}|${contentPreview}`
+    return `${type}|${pageNumber}|${escapeSignature(contentPreview)}`
   }
   
   // For regular fields, use label + type + pageNumber
   const label = (field.label || '').trim()
-  return `${label}|${field.type}|${field.pageNumber || 1}`
+  return `${escapeSignature(label)}|${type}|${pageNumber}`
 }
 
 // Collect all fields with their signatures
