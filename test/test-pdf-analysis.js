@@ -14,6 +14,19 @@ const RAILWAY_URL = process.env.RAILWAY_URL || 'https://my-poppler-api-dev.up.ra
 const PDF_PATH = process.env.PDF_PATH || path.join(__dirname, '../../chatterforms/Heinz_Intake Questionnaire.pdf')
 const AUTH_TOKEN = process.env.AUTH_TOKEN || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJYV2lmNU1rZ0MySVcya21oRXBNNiIsImVtYWlsIjoiYWtqX3dvcmsrMTI0QHlhaG9vLmNvbSIsImlhdCI6MTc2NjgyMzQyOSwiZXhwIjoxNzY3NDI4MjI5fQ.GbqPQ4Jtcz6pWDvBdCCbqGiNjqrqg-9Sowr83AW-g2k'
 
+// Helper function to exit or throw based on run mode
+function handleError(error, message) {
+  const NUM_RUNS = parseInt(process.env.NUM_RUNS || '1')
+  if (NUM_RUNS > 1) {
+    // Multi-run mode: throw error to be caught by caller
+    throw new Error(message || error.message || 'Test failed')
+  } else {
+    // Single-run mode: exit process
+    console.error(message || error.message || 'Test failed')
+    process.exit(1)
+  }
+}
+
 async function testPdfAnalysis() {
   console.log('🚀 Testing PDF Analysis via Railway Backend\n')
   console.log(`Railway URL: ${RAILWAY_URL}`)
@@ -23,7 +36,7 @@ async function testPdfAnalysis() {
   if (!fs.existsSync(PDF_PATH)) {
     console.error(`❌ PDF file not found: ${PDF_PATH}`)
     console.error('Please provide PDF_PATH environment variable or place PDF in expected location')
-    process.exit(1)
+    handleError(null, `PDF file not found: ${PDF_PATH}`)
   }
 
   const pdfStats = fs.statSync(PDF_PATH)
@@ -116,7 +129,7 @@ async function testPdfAnalysis() {
 
     if (!uploadData.images || uploadData.images.length === 0) {
       console.error('❌ No images generated from PDF')
-      process.exit(1)
+      handleError(null, 'No images generated from PDF')
     }
 
     // Step 2: Analyze images with Vision API
@@ -213,13 +226,13 @@ Return ONLY a JSON array with this exact structure:
       console.error('❌ Image analysis failed:', analysisResponse.status)
       console.error('Error:', JSON.stringify(errorData, null, 2))
       
-      // Cleanup before exiting
+      // Cleanup before throwing
       try {
         await fetch(`${RAILWAY_URL}/cleanup/${uploadData.uuid}`, { method: 'DELETE' })
       } catch (e) {
         // Ignore cleanup errors
       }
-      process.exit(1)
+      handleError(null, `Image analysis failed: ${analysisResponse.status} - ${errorData.error || 'Unknown error'}`)
     }
 
     const analysisData = await analysisResponse.json()
@@ -372,12 +385,8 @@ Return ONLY a JSON array with this exact structure:
     if (error.stack) {
       console.error('Stack trace:', error.stack)
     }
-    // In multi-run mode, throw error to be caught by caller
-    // In single-run mode, exit process
-    if (process.env.NUM_RUNS && parseInt(process.env.NUM_RUNS) > 1) {
-      throw error
-    }
-    process.exit(1)
+    // Re-throw error to be caught by caller (multi-run mode) or exit (single-run mode)
+    handleError(error)
   }
 }
 
