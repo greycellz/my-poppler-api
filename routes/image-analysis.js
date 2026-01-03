@@ -1393,7 +1393,7 @@ ${combinedText}
     
     // Call Groq API with retry logic
     const result = await callGroqWithRetry(requestBody, '')
-    const { fields, groqUsage, groqTime, finishReason, groqData } = result
+    let { fields, groqUsage, groqTime, finishReason, groqData } = result
     
     console.log(`✅ Groq API completed in ${groqTime}ms`)
     if (groqUsage) {
