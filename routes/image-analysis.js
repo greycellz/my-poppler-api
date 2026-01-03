@@ -483,8 +483,233 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
       : ''
 }
 
+// Field type instructions - extracted for reuse in both single-request and batching modes
+const FIELD_TYPE_INSTRUCTIONS = `
+
+**NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
+- "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
+- Repeated "Yes/No" questions on different pages must each be separate fields
+- "Current Address" vs "Mailing Address" must be separate fields even if both collect the same type of data
+
+**ALWAYS KEEP CONDITIONAL QUESTIONS**: Treat every "If yes, ...", "If no, ...", "If applicable, ...", "If you have used..., do you feel...", and every table/row instruction as its OWN field, not just explanation. Even if the wording is short and appears to be a sub-clause, if it asks the user to provide information or choose an option, it must be a field.
+
+**GROUP OPTIONS WITH MAIN QUESTION**: For checkbox, radio, or dropdown options:
+- Identify the main question label (the line that describes what is being asked)
+- Attach ALL options for that question to a SINGLE field object in the "options" array
+- Do NOT create separate fields for each option; they must be grouped under the main question
+- CRITICAL: When the text contains Yes/No questions, ALWAYS include BOTH options. If the text shows "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array. Search carefully in the OCR text - if a question has "Yes" mentioned, search for the corresponding "No" option even if it's on a different line or has additional text like "No, please mail it to my home address"
+- If the text shows "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
+- CRITICAL: When the text shows patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if the same field label appears multiple times, it should only be identified once.
+
+**ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. product lists, item tables, experience charts):
+- If each row asks for user input (e.g. Item Name, Quantity, Date), treat each column that expects text as a separate field
+- Include the question number or context in the label (e.g. "5. Item Name (row 1)", "5. Item Name (row 2)")
+- Do NOT merge or deduplicate rows just because the column labels are the same
+
+**LABEL DISAMBIGUATION**: When two fields share the same base label but refer to different people or contexts, include that context in the label:
+- e.g. "Emergency Contact (Phone)" vs "Primary Contact (Phone)", "Secondary Contact (Phone)"
+- e.g. "Employment Start Date (Current Job)" vs "Employment Start Date (Previous Job)" if both exist
+- Prefer slightly longer, more specific labels over shorter generic ones to avoid collapsing distinct fields
+
+For each field you identify, determine:
+
+1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Item Name" not just "Item Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
+
+2. **Field Type**: Choose the most appropriate type based on what you find in the OCR text:
+   
+   **Common types from OCR:**
+   - text: for single-line text inputs (names, addresses, single values). CRITICAL: If the OCR text shows a field label with a blank line or filled value underneath, treat it as type "text" - do NOT infer radio/select types from filled sample data. If the text shows "3. Gender" followed by a value like "Male", use type "text", NOT "select" or "radio"
+   - email: for email address fields
+   - tel: for phone/telephone number fields
+   - number: for numeric inputs (age, quantity, ID numbers)
+   - textarea: for large text areas, comments, messages, or multi-line inputs
+   - select: ONLY when the OCR text shows multiple distinct options listed together (like "Yes", "No", "Maybe") indicating a dropdown or selection. Do NOT use "select" for fields that show only a single value
+   - radio-with-other: when the OCR text shows multiple radio button options AND includes "Other:" with a text input
+   - checkbox-with-other: when the OCR text shows multiple checkbox options AND includes "Other:" with a text input
+   - date: for date picker fields (usually shown as mm/dd/yyyy or similar)
+   - label: for display-only text (titles, section headers, instructions, legal disclaimers)
+   
+   **Advanced types** (rarely in scanned forms, use only if explicitly shown):
+   - rating: for star ratings or scale (1-5, 1-10)
+   - file: for file upload fields (rarely in scanned PDFs)
+   - signature: for signature fields (usually shown as "Signature: ___________")
+   - payment: for credit card, bank account, or payment information fields (e.g., "Card Number:", "Account Number:", "Routing Number:", "CVV:", "Expiration Date:")
+   
+   IMPORTANT: Do NOT infer field types from filled sample data in the OCR text. If a form field shows only a single value (even something like "Male"), use type "text", not "radio" or "select". Only use "select" or "radio" when the OCR text explicitly shows multiple choice options.
+
+3. **Required Status**: Find text indicators in the OCR:
+   - Asterisks (*) near field labels
+   - "(required)" text
+   - "(optional)" text (mark as not required)
+   - Default to false if no indicator found
+
+4. **Options Detection**: When the OCR text shows multiple choice options, identify ALL of them and group with the main question label:
+   - CRITICAL: When you find Yes/No questions in the text, ALWAYS capture ALL options. If the text contains "Yes" and "No" or "Yes" and "No, please mail it to my home address", include ALL options in the array. Never drop the "No" option or its variations. Search the OCR text around the question - if you find "Yes", search for the corresponding "No" option even if it's on a different line or has additional text. If a question asks "is it OK to email statements to you?" and the text shows "Yes", you MUST also search for "No" or "No, please mail" - they are part of the same question's options.
+   - CRITICAL: allowOther should ALWAYS be false by default
+   - ONLY set allowOther: true if the OCR text clearly shows an "Other" option (with or without colon) AND a text input field or blank line for text entry
+   - If the text shows "Other" (with or without colon) with an input field, set allowOther: true and use that as otherLabel
+   - Do NOT add "Other" options to fields that don't have them in the OCR text
+   - Most fields will have allowOther: false - only set to true when the text shows an actual "Other" with input capability
+   - IMPORTANT: If you set allowOther: true, do NOT include ANY "Other" option in the options array - it should only be in otherLabel
+   - Extract "Yes-Other" as a regular option, but ANY "Other" with text input should trigger allowOther: true
+   - CRITICAL: When the text shows conditional options like "(If yes) Full-time" and "(If yes) Part-time" together under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" and options ["Full-time", "Part-time"]. Do NOT create separate fields for each conditional option.
+
+5. **Page Number**: IMPORTANT - Include the page number where each field is found
+
+6. **Confidence**: Rate 0.0-1.0 how confident you are about this field
+
+Return ONLY a JSON array with this exact structure:
+
+**SUPPORTED FIELD TYPES**:
+- **Common types** (from OCR): text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other
+- **Display types**: label (for titles/headers/instructions - display-only form text)
+- **Advanced types** (rare): rating, file, signature, payment
+- **Manual types** (not from OCR): image, calendly, richtext (user-editable rich content)
+
+**FOR INPUT FIELDS** (text, email, phone, checkboxes, etc.):
+[
+  {
+    "label": "First Name",
+    "type": "text|email|tel|number|textarea|select|date|radio-with-other|checkbox-with-other|rating|file|signature|payment",
+    "required": true/false,
+    "placeholder": "Placeholder text if visible",
+    "options": ["Option 1", "Option 2"] (for select/radio/checkbox/rating),
+    "allowOther": true/false (ONLY true if the text shows "Other:" with text input),
+    "otherLabel": "Other:" (ONLY if allowOther is true),
+    "otherPlaceholder": "Please specify..." (ONLY if allowOther is true),
+    "confidence": 0.95,
+    "pageNumber": 1
+  }
+]
+
+**FOR LABEL FIELDS** (titles, headers, instructions - display-only form text):
+[
+  {
+    "label": "",
+    "type": "label",
+    "richTextContent": "<h1>APPLICATION FORM</h1>|<h2>Contact Information</h2>|<p>Please fill out this form completely...</p>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.95,
+    "pageNumber": 1
+  }
+]
+
+**CRITICAL FOR LABEL FIELDS**: 
+- The "label" field MUST be an EMPTY STRING ("") for label fields
+- The actual text content goes ONLY in "richTextContent" with proper HTML tags
+- Do NOT put the text in both label and richTextContent
+- Label fields are for display only - the content itself is what users see, not a label input
+
+**NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, label). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
+
+**🚨 CRITICAL: OUTPUT ORDER - SORT BY Y-COORDINATE 🚨**:
+
+You MUST return fields in STRICT VISUAL ORDER from top to bottom of the page. This means:
+
+1. **Sort ALL fields (label AND input) by their y-coordinate value** (vertical position on the page)
+2. **Lower y-value = higher on page = should appear FIRST in the array**
+3. **Process the form from top to bottom**, not by field type or by the OCR text sequence
+
+Example with y-coordinates:
+- Block at y:150 ("PATIENT INFORMATION" header) → comes FIRST
+- Block at y:192 ("LEGAL NAME:" label) → comes SECOND  
+- Block at y:210 ("Last" input under Legal Name) → comes THIRD
+- Block at y:212 ("First" input under Legal Name) → comes FOURTH
+- Block at y:214 ("Middle" input under Legal Name) → comes FIFTH
+- Block at y:247 ("ADDRESS:" label) → comes SIXTH
+- Block at y:265 ("Street" input under Address) → comes SEVENTH
+
+DO NOT group by section or field type. Return fields in the exact order they appear visually (top to bottom).
+
+IMPORTANT: For most fields, allowOther should be false. Only set to true when the text clearly shows "Other:" with a text input field.
+
+**COMPLETE EXAMPLE MIXING LABEL AND INPUT FIELDS**:
+Given spatial data showing:
+- Block 1: "REGISTRATION FORM" (y:225, h:30)
+- Block 2: "Instructions: ..." (y:302, h:89)
+- Block 3: "APPLICANT INFORMATION" (y:433, h:23)
+- Block 4: "First Name:" (y:505, h:21)
+- Block 5: "Last Name:" (y:506, h:19)
+
+Correct output (mixed, in visual order BY Y-COORDINATE):
+[
+  {
+    "label": "",
+    "type": "label",
+    "richTextContent": "<h1>REGISTRATION FORM</h1>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.98,
+    "pageNumber": 1
+  },
+  {
+    "label": "",
+    "type": "label",
+    "richTextContent": "<p>Instructions: Please complete all fields below</p>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.90,
+    "pageNumber": 1
+  },
+  {
+    "label": "",
+    "type": "label",
+    "richTextContent": "<h2>APPLICANT INFORMATION</h2>",
+    "richTextMaxHeight": 0,
+    "required": false,
+    "confidence": 0.95,
+    "pageNumber": 1
+  },
+  {
+    "label": "First Name",
+    "type": "text",
+    "required": false,
+    "placeholder": "",
+    "options": [],
+    "allowOther": false,
+    "otherLabel": "",
+    "otherPlaceholder": "",
+    "confidence": 0.97,
+    "pageNumber": 1
+  },
+  {
+    "label": "Last Name",
+    "type": "text",
+    "required": false,
+    "placeholder": "",
+    "options": [],
+    "allowOther": false,
+    "otherLabel": "",
+    "otherPlaceholder": "",
+    "confidence": 0.97,
+    "pageNumber": 1
+  }
+]
+
+**CRITICAL**: 
+- Label fields do NOT need: placeholder, options, allowOther, otherLabel, otherPlaceholder
+- Input fields MUST have ALL fields even if empty: placeholder, options, allowOther, otherLabel, otherPlaceholder
+
+**OPTIONS DETECTION EXAMPLE**: If the text contains options like:
+- "No"
+- "Yes-Option A" 
+- "Yes-Option B"
+- "Yes-Other"
+- "Other:" (with text input field)
+
+The correct output should be:
+{
+  "options": ["No", "Yes-Option A", "Yes-Option B", "Yes-Other"],
+  "allowOther": true,
+  "otherLabel": "Other:",
+  "otherPlaceholder": "Please specify..."
+}
+
+Notice: "Other:" is NOT in the options array because it's handled by allowOther: true`
+
 // Update system message with batch context
-function updateSystemMessageForBatch(systemMessage, batchPages, totalPages) {
+function updateSystemMessageForBatch(systemMessage, batchPages, totalPages, fieldTypeInstructions) {
   if (!Number.isInteger(totalPages) || totalPages < 1) {
     throw new Error('totalPages must be a positive integer')
   }
@@ -495,7 +720,8 @@ function updateSystemMessageForBatch(systemMessage, batchPages, totalPages) {
     ? `page ${batchPages[0]}` 
     : `pages ${batchPages[0]}-${batchPages[batchPages.length-1]}`
   const batchContext = `\n\n**BATCH CONTEXT**: You are analyzing ${pageRange} of ${totalPages} total pages. Extract fields only from these pages. Ensure all extracted fields have pageNumber set to one of: ${batchPages.join(', ')}.`
-  return systemMessage + batchContext
+  // Note: spatialContextHint is added separately in processBatch() (line 746), so we don't include it here
+  return systemMessage + batchContext + (fieldTypeInstructions || '')
 }
 
 // JSON Repair Function - Extracted for reuse
@@ -678,9 +904,16 @@ function mergeBatchResults(batchResults, totalPages) {
     return true
   })
   
+  // Normalize generic field types to specific types (safety net)
+  const normalizedFields = normalizeFieldTypes(validFields)
+  const normalizationCount = normalizedFields.filter((f, i) => f.type !== validFields[i].type).length
+  if (normalizationCount > 0) {
+    console.log(`🔧 Normalized ${normalizationCount} field types from generic to specific types`)
+  }
+  
   // Sort by pageNumber (ascending), preserve Groq's order within each page
   // Create a copy to avoid mutating the original array
-  const sortedFields = [...validFields].sort((a, b) => {
+  const sortedFields = [...normalizedFields].sort((a, b) => {
     if (a.pageNumber !== b.pageNumber) {
       return a.pageNumber - b.pageNumber
     }
@@ -695,6 +928,45 @@ function mergeBatchResults(batchResults, totalPages) {
   }
   
   return { fields: sortedFields, mergeStats }
+}
+
+// Normalize generic field types to specific types (safety net for batching mode)
+function normalizeFieldTypes(fields) {
+  const genericTypes = ['input', 'radio', 'checkbox']
+  
+  return fields.map(field => {
+    // Skip normalization if field already has correct type
+    if (!genericTypes.includes(field.type)) {
+      return field
+    }
+    
+    // Normalize based on current type
+    switch (field.type) {
+      case 'input': {
+        // Infer from label/content
+        const label = (field.label || '').toLowerCase()
+        if (label.includes('phone') || label.includes('tel')) return { ...field, type: 'tel' }
+        if (label.includes('email') || label.includes('e-mail')) return { ...field, type: 'email' }
+        if (label.includes('date') || label.includes('birth')) return { ...field, type: 'date' }
+        if (label.includes('age') || label.includes('number') || label.includes('quantity')) return { ...field, type: 'number' }
+        return { ...field, type: 'text' } // default
+      }
+      case 'radio': {
+        // Check if it has "other" option
+        if (field.allowOther || field.otherLabel) return { ...field, type: 'radio-with-other' }
+        // Radio buttons with options but no "other" → use select (dropdown)
+        if (field.options && field.options.length > 0) return { ...field, type: 'select' }
+        // Default: radio-with-other (most radio buttons in forms have "other" option)
+        return { ...field, type: 'radio-with-other' }
+      }
+      case 'checkbox': {
+        // Always use checkbox-with-other for multi-select (form generation expects this)
+        return { ...field, type: 'checkbox-with-other' }
+      }
+      default:
+        return field
+    }
+  })
 }
 
 // Process a single batch - returns { fields, analytics }
@@ -995,7 +1267,7 @@ router.post('/analyze-images', async (req, res) => {
           console.log(`\n🔄 Processing batch ${i + 1}/${batches.length} (pages ${batchPages.join(', ')})...`)
           
           const spatialBlocksForBatch = filterSpatialBlocksForBatch(spatialBlocks, batchPages)
-          const batchSystemMessage = updateSystemMessageForBatch(defaultSystemMessage, batchPages, imageUrls.length)
+          const batchSystemMessage = updateSystemMessageForBatch(defaultSystemMessage, batchPages, imageUrls.length, FIELD_TYPE_INSTRUCTIONS)
           
           // Process batch - returns { fields, analytics }
           const { fields: batchFields, analytics: batchAnalytics } = await processBatch(
@@ -1112,229 +1384,7 @@ router.post('/analyze-images', async (req, res) => {
       // Note: defaultSystemMessage is already defined above, and we add spatialContextHint
       // The single-request flow uses a longer system message with more detailed instructions
       // (defaultSystemMessage already contains the basic task and privacy context, so we just add the extended instructions)
-      const extendedSystemMessage = defaultSystemMessage + spatialContextHint + `
-
-**NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
-- "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
-- Repeated "Yes/No" questions on different pages must each be separate fields
-- "Current Address" vs "Mailing Address" must be separate fields even if both collect the same type of data
-
-**ALWAYS KEEP CONDITIONAL QUESTIONS**: Treat every "If yes, ...", "If no, ...", "If applicable, ...", "If you have used..., do you feel...", and every table/row instruction as its OWN field, not just explanation. Even if the wording is short and appears to be a sub-clause, if it asks the user to provide information or choose an option, it must be a field.
-
-**GROUP OPTIONS WITH MAIN QUESTION**: For checkbox, radio, or dropdown options:
-- Identify the main question label (the line that describes what is being asked)
-- Attach ALL options for that question to a SINGLE field object in the "options" array
-- Do NOT create separate fields for each option; they must be grouped under the main question
-- CRITICAL: When the text contains Yes/No questions, ALWAYS include BOTH options. If the text shows "Yes" and "No, please mail it to my home address" or similar variations, include ALL of them in the options array. Search carefully in the OCR text - if a question has "Yes" mentioned, search for the corresponding "No" option even if it's on a different line or has additional text like "No, please mail it to my home address"
-- If the text shows "Other: ______" below radio/checkboxes, set allowOther: true, otherLabel, and otherPlaceholder
-- CRITICAL: When the text shows patterns like "(If yes) Full-time" and "(If yes) Part-time" under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" (use forward slash, remove duplicate "If yes" prefix). Do NOT create separate fields for each option. Do NOT create duplicate fields - if the same field label appears multiple times, it should only be identified once.
-
-**ROW-BASED STRUCTURES**: In tables or repeated rows (e.g. product lists, item tables, experience charts):
-- If each row asks for user input (e.g. Item Name, Quantity, Date), treat each column that expects text as a separate field
-- Include the question number or context in the label (e.g. "5. Item Name (row 1)", "5. Item Name (row 2)")
-- Do NOT merge or deduplicate rows just because the column labels are the same
-
-**LABEL DISAMBIGUATION**: When two fields share the same base label but refer to different people or contexts, include that context in the label:
-- e.g. "Emergency Contact (Phone)" vs "Primary Contact (Phone)", "Secondary Contact (Phone)"
-- e.g. "Employment Start Date (Current Job)" vs "Employment Start Date (Previous Job)" if both exist
-- Prefer slightly longer, more specific labels over shorter generic ones to avoid collapsing distinct fields
-
-For each field you identify, determine:
-
-1. **Field Label**: The visible text label (exactly as shown). IMPORTANT: If a field is part of a numbered question (e.g., "2. Question text"), include the question number in the label (e.g., "2. Item Name" not just "Item Name"). Preserve the full context including question numbers when they appear before field labels. Remove trailing colons (":") from labels - they are formatting, not part of the label.
-
-2. **Field Type**: Choose the most appropriate type based on what you find in the OCR text:
-   
-   **Common types from OCR:**
-   - text: for single-line text inputs (names, addresses, single values). CRITICAL: If the OCR text shows a field label with a blank line or filled value underneath, treat it as type "text" - do NOT infer radio/select types from filled sample data. If the text shows "3. Gender" followed by a value like "Male", use type "text", NOT "select" or "radio"
-   - email: for email address fields
-   - tel: for phone/telephone number fields
-   - number: for numeric inputs (age, quantity, ID numbers)
-   - textarea: for large text areas, comments, messages, or multi-line inputs
-   - select: ONLY when the OCR text shows multiple distinct options listed together (like "Yes", "No", "Maybe") indicating a dropdown or selection. Do NOT use "select" for fields that show only a single value
-   - radio-with-other: when the OCR text shows multiple radio button options AND includes "Other:" with a text input
-   - checkbox-with-other: when the OCR text shows multiple checkbox options AND includes "Other:" with a text input
-   - date: for date picker fields (usually shown as mm/dd/yyyy or similar)
-   - label: for display-only text (titles, section headers, instructions, legal disclaimers)
-   
-   **Advanced types** (rarely in scanned forms, use only if explicitly shown):
-   - rating: for star ratings or scale (1-5, 1-10)
-   - file: for file upload fields (rarely in scanned PDFs)
-   - signature: for signature fields (usually shown as "Signature: ___________")
-   - payment: for credit card, bank account, or payment information fields (e.g., "Card Number:", "Account Number:", "Routing Number:", "CVV:", "Expiration Date:")
-   
-   IMPORTANT: Do NOT infer field types from filled sample data in the OCR text. If a form field shows only a single value (even something like "Male"), use type "text", not "radio" or "select". Only use "select" or "radio" when the OCR text explicitly shows multiple choice options.
-
-3. **Required Status**: Find text indicators in the OCR:
-   - Asterisks (*) near field labels
-   - "(required)" text
-   - "(optional)" text (mark as not required)
-   - Default to false if no indicator found
-
-4. **Options Detection**: When the OCR text shows multiple choice options, identify ALL of them and group with the main question label:
-   - CRITICAL: When you find Yes/No questions in the text, ALWAYS capture ALL options. If the text contains "Yes" and "No" or "Yes" and "No, please mail it to my home address", include ALL options in the array. Never drop the "No" option or its variations. Search the OCR text around the question - if you find "Yes", search for the corresponding "No" option even if it's on a different line or has additional text. If a question asks "is it OK to email statements to you?" and the text shows "Yes", you MUST also search for "No" or "No, please mail" - they are part of the same question's options.
-   - CRITICAL: allowOther should ALWAYS be false by default
-   - ONLY set allowOther: true if the OCR text clearly shows an "Other" option (with or without colon) AND a text input field or blank line for text entry
-   - If the text shows "Other" (with or without colon) with an input field, set allowOther: true and use that as otherLabel
-   - Do NOT add "Other" options to fields that don't have them in the OCR text
-   - Most fields will have allowOther: false - only set to true when the text shows an actual "Other" with input capability
-   - IMPORTANT: If you set allowOther: true, do NOT include ANY "Other" option in the options array - it should only be in otherLabel
-   - Extract "Yes-Other" as a regular option, but ANY "Other" with text input should trigger allowOther: true
-   - CRITICAL: When the text shows conditional options like "(If yes) Full-time" and "(If yes) Part-time" together under the same question, combine them into ONE field with label "If yes, Full-time/Part-time" and options ["Full-time", "Part-time"]. Do NOT create separate fields for each conditional option.
-
-5. **Page Number**: IMPORTANT - Include the page number where each field is found
-
-6. **Confidence**: Rate 0.0-1.0 how confident you are about this field
-
-Return ONLY a JSON array with this exact structure:
-
-**SUPPORTED FIELD TYPES**:
-- **Common types** (from OCR): text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other
-- **Display types**: label (for titles/headers/instructions - display-only form text)
-- **Advanced types** (rare): rating, file, signature, payment
-- **Manual types** (not from OCR): image, calendly, richtext (user-editable rich content)
-
-**FOR INPUT FIELDS** (text, email, phone, checkboxes, etc.):
-[
-  {
-    "label": "First Name",
-    "type": "text|email|tel|number|textarea|select|date|radio-with-other|checkbox-with-other|rating|file|signature|payment",
-    "required": true/false,
-    "placeholder": "Placeholder text if visible",
-    "options": ["Option 1", "Option 2"] (for select/radio/checkbox/rating),
-    "allowOther": true/false (ONLY true if the text shows "Other:" with text input),
-    "otherLabel": "Other:" (ONLY if allowOther is true),
-    "otherPlaceholder": "Please specify..." (ONLY if allowOther is true),
-    "confidence": 0.95,
-    "pageNumber": 1
-  }
-]
-
-**FOR LABEL FIELDS** (titles, headers, instructions - display-only form text):
-[
-  {
-    "label": "",
-    "type": "label",
-    "richTextContent": "<h1>APPLICATION FORM</h1>|<h2>Contact Information</h2>|<p>Please fill out this form completely...</p>",
-    "richTextMaxHeight": 0,
-    "required": false,
-    "confidence": 0.95,
-    "pageNumber": 1
-  }
-]
-
-**CRITICAL FOR LABEL FIELDS**: 
-- The "label" field MUST be an EMPTY STRING ("") for label fields
-- The actual text content goes ONLY in "richTextContent" with proper HTML tags
-- Do NOT put the text in both label and richTextContent
-- Label fields are for display only - the content itself is what users see, not a label input
-
-**NOTE**: Focus on common OCR-detectable types (text, email, tel, number, textarea, select, date, radio-with-other, checkbox-with-other, label). Advanced types (rating, file, signature, payment) are rare but supported if found in scanned forms.
-
-**🚨 CRITICAL: OUTPUT ORDER - SORT BY Y-COORDINATE 🚨**:
-
-You MUST return fields in STRICT VISUAL ORDER from top to bottom of the page. This means:
-
-1. **Sort ALL fields (label AND input) by their y-coordinate value** (vertical position on the page)
-2. **Lower y-value = higher on page = should appear FIRST in the array**
-3. **Process the form from top to bottom**, not by field type or by the OCR text sequence
-
-Example with y-coordinates:
-- Block at y:150 ("PATIENT INFORMATION" header) → comes FIRST
-- Block at y:192 ("LEGAL NAME:" label) → comes SECOND  
-- Block at y:210 ("Last" input under Legal Name) → comes THIRD
-- Block at y:212 ("First" input under Legal Name) → comes FOURTH
-- Block at y:214 ("Middle" input under Legal Name) → comes FIFTH
-- Block at y:247 ("ADDRESS:" label) → comes SIXTH
-- Block at y:265 ("Street" input under Address) → comes SEVENTH
-
-DO NOT group by section or field type. Return fields in the exact order they appear visually (top to bottom).
-
-IMPORTANT: For most fields, allowOther should be false. Only set to true when the text clearly shows "Other:" with a text input field.
-
-**COMPLETE EXAMPLE MIXING LABEL AND INPUT FIELDS**:
-Given spatial data showing:
-- Block 1: "REGISTRATION FORM" (y:225, h:30)
-- Block 2: "Instructions: ..." (y:302, h:89)
-- Block 3: "APPLICANT INFORMATION" (y:433, h:23)
-- Block 4: "First Name:" (y:505, h:21)
-- Block 5: "Last Name:" (y:506, h:19)
-
-Correct output (mixed, in visual order BY Y-COORDINATE):
-[
-  {
-    "label": "",
-    "type": "label",
-    "richTextContent": "<h1>REGISTRATION FORM</h1>",
-    "richTextMaxHeight": 0,
-    "required": false,
-    "confidence": 0.98,
-    "pageNumber": 1
-  },
-  {
-    "label": "",
-    "type": "label",
-    "richTextContent": "<p>Instructions: Please complete all fields below</p>",
-    "richTextMaxHeight": 0,
-    "required": false,
-    "confidence": 0.90,
-    "pageNumber": 1
-  },
-  {
-    "label": "",
-    "type": "label",
-    "richTextContent": "<h2>APPLICANT INFORMATION</h2>",
-    "richTextMaxHeight": 0,
-    "required": false,
-    "confidence": 0.95,
-    "pageNumber": 1
-  },
-  {
-    "label": "First Name",
-    "type": "text",
-    "required": false,
-    "placeholder": "",
-    "options": [],
-    "allowOther": false,
-    "otherLabel": "",
-    "otherPlaceholder": "",
-    "confidence": 0.97,
-    "pageNumber": 1
-  },
-  {
-    "label": "Last Name",
-    "type": "text",
-    "required": false,
-    "placeholder": "",
-    "options": [],
-    "allowOther": false,
-    "otherLabel": "",
-    "otherPlaceholder": "",
-    "confidence": 0.97,
-    "pageNumber": 1
-  }
-]
-
-**CRITICAL**: 
-- Label fields do NOT need: placeholder, options, allowOther, otherLabel, otherPlaceholder
-- Input fields MUST have ALL fields even if empty: placeholder, options, allowOther, otherLabel, otherPlaceholder
-
-**OPTIONS DETECTION EXAMPLE**: If the text contains options like:
-- "No"
-- "Yes-Option A" 
-- "Yes-Option B"
-- "Yes-Other"
-- "Other:" (with text input field)
-
-The correct output should be:
-{
-  "options": ["No", "Yes-Option A", "Yes-Option B", "Yes-Other"],
-  "allowOther": true,
-  "otherLabel": "Other:",
-  "otherPlaceholder": "Please specify..."
-}
-
-Notice: "Other:" is NOT in the options array because it's handled by allowOther: true`
+      const extendedSystemMessage = defaultSystemMessage + spatialContextHint + FIELD_TYPE_INSTRUCTIONS
 
     // Build user message with OCR text
     // IMPORTANT: Always include the OCR text, even if userMessage is provided
