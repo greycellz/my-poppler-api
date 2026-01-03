@@ -643,7 +643,6 @@ function mergeBatchResults(batchResults, totalPages) {
   const totalFieldsBeforeMerge = allFields.length
   
   // Track statistics
-  let duplicatesRemoved = 0
   let invalidFieldsFiltered = 0
   
   // Validate and filter fields
@@ -679,22 +678,9 @@ function mergeBatchResults(batchResults, totalPages) {
     return true
   })
   
-  // Deduplicate: same label, type, AND pageNumber
-  // Escape pipe characters in field values to prevent key collisions
-  const escapeKey = (str) => (str || '').replace(/\|/g, '\\|')
-  const seen = new Set()
-  const deduplicatedFields = validFields.filter(field => {
-    const key = `${escapeKey(field.label)}|${escapeKey(field.type)}|${field.pageNumber}`
-    if (seen.has(key)) {
-      duplicatesRemoved++
-      return false
-    }
-    seen.add(key)
-    return true
-  })
-  
   // Sort by pageNumber (ascending), preserve Groq's order within each page
-  deduplicatedFields.sort((a, b) => {
+  // Create a copy to avoid mutating the original array
+  const sortedFields = [...validFields].sort((a, b) => {
     if (a.pageNumber !== b.pageNumber) {
       return a.pageNumber - b.pageNumber
     }
@@ -703,13 +689,12 @@ function mergeBatchResults(batchResults, totalPages) {
   })
   
   const mergeStats = {
-    duplicatesRemoved,
     invalidFieldsFiltered,
     totalFieldsBeforeMerge,
-    totalFieldsAfterMerge: deduplicatedFields.length
+    totalFieldsAfterMerge: sortedFields.length
   }
   
-  return { fields: deduplicatedFields, mergeStats }
+  return { fields: sortedFields, mergeStats }
 }
 
 // Process a single batch - returns { fields, analytics }
@@ -1396,7 +1381,7 @@ ${combinedText}
     
     // Call Groq API with retry logic
     const result = await callGroqWithRetry(requestBody, '')
-    let { fields, groqUsage, groqTime, finishReason, groqData } = result
+    ({ fields, groqUsage, groqTime, finishReason, groqData } = result)
     
     console.log(`✅ Groq API completed in ${groqTime}ms`)
     console.log(`🔍 [DEBUG] Fields from callGroqWithRetry: ${fields?.length || 0} fields`)
