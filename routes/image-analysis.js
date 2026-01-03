@@ -195,135 +195,36 @@ function detectSectionHeaders(blocks) {
 */
 
 /**
- * POST /analyze-images
- * Analyze multiple images with Google Vision API (OCR) + Groq (field extraction)
- * Replaces GPT-4o Vision for better performance and cost
+ * Helper Functions for Batch Processing
  */
-router.post('/analyze-images', async (req, res) => {
-  try {
-    const { imageUrls, systemMessage, userMessage, useReasoningEffort } = req.body
 
-    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Image URLs are required'
-      })
-    }
+// Split vision results into batches
+function splitIntoBatches(visionResults, batchSize) {
+  const batches = []
+  for (let i = 0; i < visionResults.length; i += batchSize) {
+    batches.push(visionResults.slice(i, i + batchSize))
+  }
+  return batches
+}
 
-    if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({
-        success: false,
-        error: 'GROQ_API_KEY not configured in environment'
-      })
-    }
+// Filter spatial blocks for a specific batch
+function filterSpatialBlocksForBatch(spatialBlocks, batchPages) {
+  if (!Array.isArray(batchPages) || batchPages.length === 0) {
+    throw new Error('batchPages must be a non-empty array')
+  }
+  return spatialBlocks
+    .filter(block => batchPages.includes(block.pageNumber))
+    .map((block, idx) => ({
+      ...block,
+      index: idx + 1  // Re-index relative to batch
+    }))
+}
 
-    console.log(`🔍 Processing ${imageUrls.length} images with Google Vision + Groq (${GROQ_MODEL})...`)
-
-    // Initialize Vision client
-    const visionClient = initializeVisionClient()
-
-    // Step 1: Process all images with Google Vision API (in parallel)
-    console.log('📄 Step 1: Processing images with Google Vision OCR...')
-    const visionStartTime = Date.now()
-    
-    const visionResults = await Promise.all(
-      imageUrls.map(async (imageUrl, index) => {
-        const imageStartTime = Date.now()
-        try {
-          console.log(`📥 Fetching image ${index + 1}/${imageUrls.length}: ${imageUrl}`)
-          const response = await fetch(imageUrl)
-          if (!response.ok) {
-            throw new Error(`Failed to fetch image: ${response.status}`)
-          }
-          const arrayBuffer = await response.arrayBuffer()
-          const buffer = Buffer.from(arrayBuffer)
-          const base64Content = buffer.toString('base64')
-          
-          console.log(`🔍 Calling Vision API for image ${index + 1}...`)
-          const [result] = await visionClient.documentTextDetection({
-            image: { content: base64Content }
-          })
-
-          const imageTime = Date.now() - imageStartTime
-          const extractedText = result.fullTextAnnotation?.text || ''
-          
-          // Extract bounding box data for spatial analysis
-          const pages = result.fullTextAnnotation?.pages || []
-          const blocks = pages.flatMap(page => page.blocks || [])
-          
-          console.log(`✅ Image ${index + 1} processed in ${imageTime}ms (${extractedText.length} chars, ${blocks.length} blocks)`)
-          
-          return {
-            page: index + 1,
-            text: extractedText,
-            blocks: blocks,
-            processingTime: imageTime
-          }
-        } catch (error) {
-          console.error(`❌ Error processing image ${index + 1}:`, error)
-          throw error
-        }
-      })
-    )
-
-    const visionTotalTime = Date.now() - visionStartTime
-    const totalCharacters = visionResults.reduce((sum, r) => sum + r.text.length, 0)
-
-    console.log(`✅ All images processed in ${visionTotalTime}ms`)
-    console.log(`📝 Total OCR text: ${totalCharacters} characters`)
-
-    // Step 2: Format spatial layout data for LLM
-    console.log('🔍 Formatting spatial layout data for LLM...')
-    const allBlocks = visionResults.flatMap(r => r.blocks || [])
-    console.log(`📦 Total blocks from Vision API: ${allBlocks.length}`)
-    
-    // Format blocks with spatial information for LLM
-    const spatialBlocks = allBlocks.map((block, idx) => {
-      const text = getBlockText(block).trim()
-      const box = block.boundingBox
-      
-      if (box && box.vertices && box.vertices.length >= 4) {
-        const topLeft = box.vertices[0]
-        const bottomRight = box.vertices[2]
-        const width = bottomRight.x - topLeft.x
-        const height = Math.abs(bottomRight.y - topLeft.y)  // Use abs() to handle negative heights
-        
-        return {
-          index: idx + 1,
-          text: text,
-          x: topLeft.x,
-          y: topLeft.y,
-          width: width,
-          height: height
-        }
-      }
-      
-      return null
-    }).filter(b => b !== null && b.text.length > 0)  // Remove null entries and empty text
-    
-    console.log(`📊 Formatted ${spatialBlocks.length} blocks with spatial data for LLM`)
-    
-    // Log first 5 blocks as sample
-    console.log('📍 Sample spatial blocks:')
-    spatialBlocks.slice(0, 5).forEach(b => {
-      console.log(`  [${b.index}] "${b.text.substring(0, 40)}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`)
-    })
-
-    // Step 3: Combine OCR text from all pages
-    const combinedText = visionResults
-      .map((result, index) => `=== PAGE ${result.page} ===\n${result.text}`)
-      .join('\n\n')
-
-    // Step 4: Send to Groq API for field identification
-    console.log('🤖 Step 3: Sending OCR text to Groq API for field identification...')
-    const groqStartTime = Date.now()
-
-    // Build spatial context for Groq
-    // Only send first 50 blocks as representative examples (not exhaustive list)
-    const maxSampleBlocks = 50
-    const sampleBlocks = spatialBlocks.slice(0, maxSampleBlocks)
-    const spatialContextHint = sampleBlocks.length > 0 
-      ? `
+// Build spatial context hint for LLM
+function buildSpatialContextHint(spatialBlocks, maxSampleBlocks = 50) {
+  const sampleBlocks = spatialBlocks.slice(0, maxSampleBlocks)
+  return sampleBlocks.length > 0 
+    ? `
 
 **SPATIAL LAYOUT DATA** (Sample for Context Only):
 Below are ${maxSampleBlocks} representative text blocks from ${spatialBlocks.length} total blocks. These are provided as CONTEXT ONLY to help you understand text sizes and layout patterns. DO NOT create a field for every block listed here. Instead, use this spatial information to inform your classification when identifying form fields from the OCR TEXT below.
@@ -420,9 +321,492 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 - Mix label and input fields in the order they appear vertically on the page
 - DO NOT skip titles, headers, or instructions - they are essential for form structure
 `
-      : ''
+    : ''
+}
 
-    // Use provided system message or default (text-focused prompt for OCR analysis)
+// Update system message with batch context
+function updateSystemMessageForBatch(systemMessage, batchPages, totalPages) {
+  if (!Number.isInteger(totalPages) || totalPages < 1) {
+    throw new Error('totalPages must be a positive integer')
+  }
+  if (!Array.isArray(batchPages) || batchPages.length === 0) {
+    throw new Error('batchPages must be a non-empty array')
+  }
+  const pageRange = batchPages.length === 1 
+    ? `page ${batchPages[0]}` 
+    : `pages ${batchPages[0]}-${batchPages[batchPages.length-1]}`
+  const batchContext = `\n\n**BATCH CONTEXT**: You are analyzing ${pageRange} of ${totalPages} total pages. Extract fields only from these pages. Ensure all extracted fields have pageNumber set to one of: ${batchPages.join(', ')}.`
+  return systemMessage + batchContext
+}
+
+// JSON Repair Function - Extracted for reuse
+const ENABLE_JSON_REPAIR = true  // Set to false to disable JSON repair
+
+const repairJsonSyntax = (jsonString, options = {}) => {
+  const {
+    enableRepair = ENABLE_JSON_REPAIR,
+    logRepairs = true,
+    repairSteps = {
+      removeComments: true,
+      fixMissingQuotes: true,
+      fixMissingColonValue: true,
+      fixMissingCommas: true,
+      fixTrailingCommas: true,
+      fixSingleQuotes: true
+    }
+  } = options
+
+  // Early return if disabled
+  if (!enableRepair) {
+    if (logRepairs) {
+      console.log('🔧 JSON Repair: DISABLED (skipping repair)')
+    }
+    return jsonString
+  }
+
+  let cleaned = jsonString
+  const appliedRepairs = []
+
+  // STEP 1: Remove Comments
+  if (repairSteps.removeComments) {
+    const before = cleaned
+    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '')
+    cleaned = cleaned.replace(/([^:])\/\/[^\n]*/g, '$1')
+    if (before !== cleaned) {
+      appliedRepairs.push('removeComments')
+    }
+  }
+
+  // STEP 2: Fix Missing Quotes Before Property Names
+  if (repairSteps.fixMissingQuotes) {
+    const before = cleaned
+    cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\":/g, (match, prefix, propName, offset) => {
+      const beforePropName = cleaned.substring(0, offset + prefix.length)
+      const quoteCount = (beforePropName.match(/"/g) || []).length
+      const propNameStart = offset + prefix.length
+      const charBeforeProp = propNameStart > 0 ? cleaned[propNameStart - 1] : ''
+      const isAlreadyQuoted = charBeforeProp === '"'
+      
+      if (quoteCount % 2 === 0 && !isAlreadyQuoted) {
+        return `${prefix}"${propName}":`
+      }
+      return match
+    })
+    if (before !== cleaned) {
+      appliedRepairs.push('fixMissingQuotes')
+    }
+  }
+
+  // STEP 3: Fix Missing Colon/Value Pattern
+  if (repairSteps.fixMissingColonValue) {
+    const before = cleaned
+    cleaned = cleaned.replace(/"([a-zA-Z_][a-zA-Z0-9_]*)"\s*,(\s*)(?="|{|\[|\n|$)/g, '"$1": "",$2')
+    if (before !== cleaned) {
+      appliedRepairs.push('fixMissingColonValue')
+    }
+  }
+
+  // STEP 4: Fix Missing Commas
+  if (repairSteps.fixMissingCommas) {
+    const before = cleaned
+    cleaned = cleaned.replace(/(["\}\]\d])\s*("[\w_][\w\d_]*"\s*:)/g, '$1, $2')
+    if (before !== cleaned) {
+      appliedRepairs.push('fixMissingCommas')
+    }
+  }
+
+  // STEP 5: Fix Trailing Commas
+  if (repairSteps.fixTrailingCommas) {
+    const before = cleaned
+    cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1')
+    if (before !== cleaned) {
+      appliedRepairs.push('fixTrailingCommas')
+    }
+  }
+
+  // STEP 6: Fix Single Quotes to Double Quotes
+  if (repairSteps.fixSingleQuotes) {
+    const before = cleaned
+    cleaned = cleaned.replace(/'([^']*)':/g, '"$1":')
+    if (before !== cleaned) {
+      appliedRepairs.push('fixSingleQuotes')
+    }
+  }
+
+  // Log repairs if enabled
+  if (logRepairs && appliedRepairs.length > 0) {
+    console.log(`🔧 JSON Repair applied: ${appliedRepairs.join(', ')}`)
+  } else if (logRepairs && enableRepair) {
+    console.log('🔧 JSON Repair: No repairs needed (JSON was valid)')
+  }
+
+  // Validate repaired JSON (don't throw, just log warning)
+  try {
+    JSON.parse(cleaned)
+    return cleaned
+  } catch (validationError) {
+    if (logRepairs) {
+      console.warn(`⚠️ JSON Repair: Repaired JSON is still invalid after all steps: ${validationError.message}`)
+    }
+    return cleaned // Return anyway, fallback extraction will try to handle
+  }
+}
+
+// Merge batch results into single array with statistics
+function mergeBatchResults(batchResults, totalPages) {
+  if (!Array.isArray(batchResults)) {
+    throw new Error('batchResults must be an array')
+  }
+  if (!Number.isInteger(totalPages) || totalPages < 1) {
+    throw new Error('totalPages must be a positive integer')
+  }
+  // Flatten all batch results
+  const allFields = batchResults.flat()
+  const totalFieldsBeforeMerge = allFields.length
+  
+  // Track statistics
+  let duplicatesRemoved = 0
+  let invalidFieldsFiltered = 0
+  
+  // Validate and filter fields
+  const validFields = allFields.filter(field => {
+    // Check for required properties
+    if (!field || typeof field !== 'object' || Array.isArray(field)) {
+      invalidFieldsFiltered++
+      return false
+    }
+    
+    // Validate pageNumber
+    if (!field.pageNumber || field.pageNumber < 1 || field.pageNumber > totalPages) {
+      console.warn(`⚠️ Invalid pageNumber ${field.pageNumber} in field, filtering out`)
+      invalidFieldsFiltered++
+      return false
+    }
+    
+    // Validate required properties based on field type
+    if (field.type === 'label') {
+      if (!field.richTextContent) {
+        console.warn('⚠️ Label field missing richTextContent, filtering out')
+        invalidFieldsFiltered++
+        return false
+      }
+    } else {
+      if (!field.type) {
+        console.warn('⚠️ Input field missing type, filtering out')
+        invalidFieldsFiltered++
+        return false
+      }
+    }
+    
+    return true
+  })
+  
+  // Deduplicate: same label, type, AND pageNumber
+  // Escape pipe characters in field values to prevent key collisions
+  const escapeKey = (str) => (str || '').replace(/\|/g, '\\|')
+  const seen = new Set()
+  const deduplicatedFields = validFields.filter(field => {
+    const key = `${escapeKey(field.label)}|${escapeKey(field.type)}|${field.pageNumber}`
+    if (seen.has(key)) {
+      duplicatesRemoved++
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+  
+  // Sort by pageNumber (ascending), preserve Groq's order within each page
+  deduplicatedFields.sort((a, b) => {
+    if (a.pageNumber !== b.pageNumber) {
+      return a.pageNumber - b.pageNumber
+    }
+    // Same page - preserve original order (Groq already sorted by y-coordinate)
+    return 0
+  })
+  
+  const mergeStats = {
+    duplicatesRemoved,
+    invalidFieldsFiltered,
+    totalFieldsBeforeMerge,
+    totalFieldsAfterMerge: deduplicatedFields.length
+  }
+  
+  return { fields: deduplicatedFields, mergeStats }
+}
+
+// Process a single batch - returns { fields, analytics }
+// Note: reasoningEffortLevel is passed directly (already parsed in main flow)
+async function processBatch(batch, spatialBlocksForBatch, systemMessage, reasoningEffortLevel, userMessage, totalPages) {
+  const batchStartTime = Date.now()
+  const batchPages = batch.map(b => b.page)
+  
+  // Combine OCR text for batch pages only
+  const combinedText = batch
+    .map((result) => `=== PAGE ${result.page} ===\n${result.text}`)
+    .join('\n\n')
+  
+  // Build spatial context hint for this batch
+  const spatialContextHint = buildSpatialContextHint(spatialBlocksForBatch)
+  if (spatialBlocksForBatch.length === 0) {
+    console.warn(`⚠️ Batch (pages ${batchPages.join(',')}) - No spatial blocks found for this batch`)
+  }
+  
+  // Build user message with batch context
+  const pageRange = batchPages.length === 1 
+    ? `page ${batchPages[0]}` 
+    : `pages ${batchPages[0]}-${batchPages[batchPages.length-1]}`
+  
+  let groqUserMessage = `Analyze this OCR text from ${pageRange} of ${totalPages} total pages in a blank form template and identify BOTH:
+1. Label fields (titles, section headers, instructions, legal text - display-only form text)
+2. Input fields (text, email, phone, checkboxes, etc.)
+
+OCR TEXT:
+${combinedText}
+
+🚨 CRITICAL: Return fields in STRICT TOP-TO-BOTTOM ORDER based on y-coordinates from the spatial data above. Sort by y-coordinate (vertical position), NOT by field type or OCR text order. Lower y-value = higher on page = appears first in your output array.
+
+**OUTPUT FORMAT**: Return ONLY a valid JSON array. Do NOT include any explanation, reasoning, or text outside the JSON array. Start with [ and end with ].`
+  
+  // If user provided additional context, append it
+  if (userMessage) {
+    groqUserMessage += `\n\nAdditional context: ${userMessage}`
+  }
+  
+  // Build request body
+  // Note: reasoningEffortLevel is already parsed in main flow, just use it directly
+  
+  const requestBody = {
+    model: GROQ_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: systemMessage + spatialContextHint
+      },
+      {
+        role: 'user',
+        content: groqUserMessage
+      }
+    ],
+    max_completion_tokens: 65536,
+    temperature: 0.1
+  }
+  
+  if (reasoningEffortLevel) {
+    requestBody.reasoning_effort = reasoningEffortLevel
+  }
+  
+  // Call Groq API
+  const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(requestBody)
+  })
+  
+  if (!groqResponse.ok) {
+    const errorData = await groqResponse.json().catch(() => ({}))
+    throw new Error(`Groq API error: ${groqResponse.status} - ${errorData.error?.message || 'Unknown error'}`)
+  }
+  
+  const groqData = await groqResponse.json()
+  const groqTime = Date.now() - batchStartTime
+  
+  // Extract Groq API usage metadata
+  const groqUsage = groqData.usage || groqData.usage_metadata || null
+  const choice = groqData.choices?.[0]
+  if (!choice) {
+    throw new Error('No response from Groq API')
+  }
+  
+  const finishReason = choice.finish_reason
+  if (!choice.message?.content) {
+    if (finishReason === 'length') {
+      throw new Error('Groq response truncated - content empty and finish_reason is "length". This indicates reasoning mode may have consumed all tokens.')
+    }
+    throw new Error('Groq response has no content - unable to extract fields')
+  }
+  
+  const responseText = choice.message?.content || ''
+  let fields = []
+  
+  // Parse JSON with repair (using extracted repairJsonSyntax function)
+  try {
+    const cleaned = repairJsonSyntax(responseText, { logRepairs: true })
+    const parsed = JSON.parse(cleaned)
+    fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
+    console.log(`✅ Batch (pages ${batchPages.join(',')}) - Direct JSON parse succeeded, extracted ${fields.length} fields`)
+    if (fields.length === 0) {
+      console.warn(`⚠️ Batch (pages ${batchPages.join(',')}) - No fields extracted (may be valid for blank pages)`)
+    }
+  } catch (parseError) {
+    // Try fallback extraction
+    const jsonMatch = responseText.match(/\[[\s\S]*\]/)
+    if (jsonMatch) {
+      try {
+        const cleaned = repairJsonSyntax(jsonMatch[0], { logRepairs: true })
+        const extracted = JSON.parse(cleaned)
+        fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
+        console.log(`✅ Batch (pages ${batchPages.join(',')}) - Fallback JSON extraction succeeded, extracted ${fields.length} fields`)
+        if (fields.length === 0) {
+          console.warn(`⚠️ Batch (pages ${batchPages.join(',')}) - No fields extracted (may be valid for blank pages)`)
+        }
+      } catch (fallbackError) {
+        console.error(`❌ Batch (pages ${batchPages.join(',')}) - All parsing attempts failed`)
+        throw new Error(`Failed to parse Groq response as JSON - no valid JSON found in response`)
+      }
+    } else {
+      throw new Error(`Failed to parse Groq response as JSON - no valid JSON found in response`)
+    }
+  }
+  
+  const analytics = {
+    tokenUsage: groqUsage ? {
+      prompt_tokens: groqUsage.prompt_tokens || groqUsage.input_tokens || null,
+      completion_tokens: groqUsage.completion_tokens || groqUsage.output_tokens || null,
+      total_tokens: groqUsage.total_tokens || null,
+      reasoning_tokens: groqUsage.completion_tokens_details?.reasoning_tokens || null
+    } : null,
+    processingTime: groqTime,
+    finishReason: finishReason,
+    reasoningTokens: groqUsage?.completion_tokens_details?.reasoning_tokens || null
+  }
+  
+  return { fields, analytics }
+}
+
+/**
+ * POST /analyze-images
+ * Analyze multiple images with Google Vision API (OCR) + Groq (field extraction)
+ * Replaces GPT-4o Vision for better performance and cost
+ */
+router.post('/analyze-images', async (req, res) => {
+  try {
+    const { imageUrls, systemMessage, userMessage, useReasoningEffort, enableBatching, batchSize } = req.body
+
+    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Image URLs are required'
+      })
+    }
+
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: 'GROQ_API_KEY not configured in environment'
+      })
+    }
+
+    console.log(`🔍 Processing ${imageUrls.length} images with Google Vision + Groq (${GROQ_MODEL})...`)
+
+    // Parse and validate batching flags
+    const shouldEnableBatching = enableBatching === true || enableBatching === 'true' || process.env.ENABLE_BATCHING === 'true'
+    let batchSizeValue = batchSize || parseInt(process.env.BATCH_SIZE) || 5
+    // Validate batchSizeValue - handle NaN and invalid values
+    if (isNaN(batchSizeValue) || batchSizeValue < 1) batchSizeValue = 5  // Default to 5 if invalid
+    if (batchSizeValue > imageUrls.length) batchSizeValue = imageUrls.length  // Don't exceed total pages
+
+    if (shouldEnableBatching) {
+      console.log(`📦 Batching enabled: ${batchSizeValue} pages per batch`)
+    }
+
+    // Initialize Vision client
+    const visionClient = initializeVisionClient()
+
+    // Step 1: Process all images with Google Vision API (in parallel)
+    console.log('📄 Step 1: Processing images with Google Vision OCR...')
+    const visionStartTime = Date.now()
+    
+    const visionResults = await Promise.all(
+      imageUrls.map(async (imageUrl, index) => {
+        const imageStartTime = Date.now()
+        try {
+          console.log(`📥 Fetching image ${index + 1}/${imageUrls.length}: ${imageUrl}`)
+          const response = await fetch(imageUrl)
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image: ${response.status}`)
+          }
+          const arrayBuffer = await response.arrayBuffer()
+          const buffer = Buffer.from(arrayBuffer)
+          const base64Content = buffer.toString('base64')
+          
+          console.log(`🔍 Calling Vision API for image ${index + 1}...`)
+          const [result] = await visionClient.documentTextDetection({
+            image: { content: base64Content }
+          })
+
+          const imageTime = Date.now() - imageStartTime
+          const extractedText = result.fullTextAnnotation?.text || ''
+          
+          // Extract bounding box data for spatial analysis
+          const pages = result.fullTextAnnotation?.pages || []
+          const blocks = pages.flatMap(page => page.blocks || [])
+          
+          console.log(`✅ Image ${index + 1} processed in ${imageTime}ms (${extractedText.length} chars, ${blocks.length} blocks)`)
+          
+          return {
+            page: index + 1,
+            text: extractedText,
+            blocks: blocks,
+            processingTime: imageTime
+          }
+        } catch (error) {
+          console.error(`❌ Error processing image ${index + 1}:`, error)
+          throw error
+        }
+      })
+    )
+
+    const visionTotalTime = Date.now() - visionStartTime
+    const totalCharacters = visionResults.reduce((sum, r) => sum + r.text.length, 0)
+
+    console.log(`✅ All images processed in ${visionTotalTime}ms`)
+    console.log(`📝 Total OCR text: ${totalCharacters} characters`)
+
+    // Step 2: Format spatial layout data for LLM
+    console.log('🔍 Formatting spatial layout data for LLM...')
+    const allBlocks = visionResults.flatMap(r => r.blocks || [])
+    console.log(`📦 Total blocks from Vision API: ${allBlocks.length}`)
+    
+    // Format blocks with spatial information for LLM - CRITICAL: Include pageNumber for batching
+    const spatialBlocks = visionResults.flatMap((result, pageIndex) => {
+      const pageNumber = result.page
+      return (result.blocks || []).map((block, blockIndex) => {
+        const text = getBlockText(block).trim()
+        const box = block.boundingBox
+        
+        if (box && box.vertices && box.vertices.length >= 4) {
+          const topLeft = box.vertices[0]
+          const bottomRight = box.vertices[2]
+          const width = bottomRight.x - topLeft.x
+          const height = Math.abs(bottomRight.y - topLeft.y)  // Use abs() to handle negative heights
+          
+          return {
+            index: blockIndex + 1,
+            pageNumber: pageNumber,  // CRITICAL: Add page number for batch filtering
+            text: text,
+            x: topLeft.x,
+            y: topLeft.y,
+            width: width,
+            height: height
+          }
+        }
+        
+        return null
+      })
+    }).filter(b => b !== null && b.text.length > 0)  // Remove null entries and empty text
+    
+    console.log(`📊 Formatted ${spatialBlocks.length} blocks with spatial data for LLM`)
+    
+    // Log first 5 blocks as sample
+    console.log('📍 Sample spatial blocks:')
+    spatialBlocks.slice(0, 5).forEach(b => {
+      console.log(`  [${b.index}] "${b.text.substring(0, 40)}" at (x:${b.x}, y:${b.y}, w:${b.width}, h:${b.height})`)
+    })
+
+    // Build default system message (used by both batching and single-request flows)
     const defaultSystemMessage = (systemMessage || `You are a form structure analysis expert. You will receive OCR TEXT from blank PDF form templates (not filled forms) along with SPATIAL LAYOUT DATA.
 
 **YOUR TASK**: Analyze the text AND spatial data to identify the form's structure and create a digital version:
@@ -431,14 +815,184 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 
 **IMPORTANT CONTEXT - NO PRIVACY OR CLINICAL CONCERNS**:
 - You are analyzing BLANK FORM TEMPLATES to understand their structure, not extracting personal data
-- This is purely structural analysis - identifying where fields are located and what types they are
-- No personal information (PHI/PII) is being extracted or stored at this stage
-- Data collection only happens later when users fill out and submit the digital form
-- This is NOT clinical advice, medical diagnosis, or treatment recommendation
-- You are simply converting a paper form template into a digital form structure
-- Extract ALL fields regardless of their content - forms may contain health, financial, or personal information fields, but you are only identifying their structure, not processing the data
+- The OCR text contains placeholder/example data (like "John Doe", "123 Main St") that is part of the form template itself
+- This is NOT patient information, personal data, or clinical advice - it's structural analysis of blank forms
+- Your task is to identify form fields and structure, not to extract or analyze any personal information
+- There is no privacy concern, no HIPAA concern, and no clinical advice being requested
+- You are simply analyzing the layout and structure of a blank form template
 
-IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, not extracting data from a filled form. Do NOT skip titles, headers, or instructions. These must be included as label fields to preserve the form structure.`) + spatialContextHint + `
+**CRITICAL**: You must identify BOTH label fields (for display) AND input fields (for data entry). Do NOT skip titles, headers, or instructions - they are essential for form structure.
+
+**IMPORTANT**: You are analyzing a BLANK FORM TEMPLATE to understand its structure, not extracting data from a filled form. Do NOT skip titles, headers, or instructions. These must be included as label fields to preserve the form structure.`)
+
+    // Parse reasoningEffortLevel (used by both batching and single-request flows)
+    let reasoningEffortLevel = null
+    if (useReasoningEffort !== undefined) {
+      if (useReasoningEffort === false) {
+        reasoningEffortLevel = null  // Baseline - no parameter
+      } else if (typeof useReasoningEffort === 'string') {
+        // Direct level specified: "low", "medium", "high"
+        reasoningEffortLevel = useReasoningEffort
+      } else if (useReasoningEffort === true) {
+        // Default to "low" if true
+        reasoningEffortLevel = "low"
+      }
+    } else if (process.env.USE_REASONING_EFFORT) {
+      // Environment variable can be: "false", "low", "medium", "high"
+      if (process.env.USE_REASONING_EFFORT === 'false') {
+        reasoningEffortLevel = null
+      } else {
+        reasoningEffortLevel = process.env.USE_REASONING_EFFORT
+      }
+    }
+
+    // Step 3: Process with batching or single request
+    let fields = []
+    let analytics = {
+      visionApi: {
+        time: visionTotalTime,
+        totalCharacters: totalCharacters,
+        pages: visionResults.map(r => ({
+          page: r.page,
+          time: r.processingTime,
+          characters: r.text.length
+        }))
+      },
+      totalTime: Date.now() - visionStartTime
+    }
+
+    if (shouldEnableBatching) {
+      // BATCHING MODE
+      console.log(`📦 Processing ${imageUrls.length} pages in batches of ${batchSizeValue}...`)
+      const batches = splitIntoBatches(visionResults, batchSizeValue)
+      const batchResults = []
+      const batchErrors = []
+      
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i]
+        const batchPages = batch.map(b => b.page)
+        try {
+          console.log(`\n🔄 Processing batch ${i + 1}/${batches.length} (pages ${batchPages.join(', ')})...`)
+          
+          const spatialBlocksForBatch = filterSpatialBlocksForBatch(spatialBlocks, batchPages)
+          const batchSystemMessage = updateSystemMessageForBatch(defaultSystemMessage, batchPages, imageUrls.length)
+          
+          // Process batch - returns { fields, analytics }
+          const { fields: batchFields, analytics: batchAnalytics } = await processBatch(
+            batch, 
+            spatialBlocksForBatch, 
+            batchSystemMessage, 
+            reasoningEffortLevel,
+            userMessage,
+            imageUrls.length
+          )
+          
+          batchResults.push({ 
+            batchIndex: i, 
+            fields: batchFields, 
+            pages: batchPages,
+            tokenUsage: batchAnalytics.tokenUsage,
+            processingTime: batchAnalytics.processingTime,
+            finishReason: batchAnalytics.finishReason,
+            reasoningTokens: batchAnalytics.reasoningTokens
+          })
+          
+          console.log(`✅ Batch ${i + 1}/${batches.length} completed: ${batchFields.length} fields extracted`)
+        } catch (error) {
+          console.error(`❌ Batch ${i + 1}/${batches.length} (pages ${batchPages.join(',')}) failed:`, error.message)
+          console.error('❌ Full error:', error)
+          batchErrors.push({ 
+            batchIndex: i, 
+            pages: batchPages,
+            error: error.message,
+            stack: error.stack 
+          })
+          // Continue with next batch
+        }
+      }
+      
+      // Check if we have any successful batches
+      if (batchResults.length === 0) {
+        throw new Error('All batches failed to process')
+      }
+      
+      // Merge all batch results - returns { fields, mergeStats }
+      const { fields: mergedFields, mergeStats } = mergeBatchResults(
+        batchResults.map(r => r.fields), 
+        imageUrls.length
+      )
+      fields = mergedFields
+      
+      // If some batches failed, mark as partial results
+      const hasPartialResults = batchErrors.length > 0 && batchResults.length > 0
+      
+      // Update analytics with batch info
+      analytics.batching = {
+        enabled: true,
+        batchCount: batches.length,
+        batchSize: batchSizeValue,
+        successfulBatches: batchResults.length,
+        failedBatches: batchErrors.length,
+        partialResults: hasPartialResults,
+        batchResults: batchResults.map(r => ({
+          batchIndex: r.batchIndex,
+          pages: r.pages,
+          fieldCount: r.fields.length,
+          tokenUsage: r.tokenUsage,
+          processingTime: r.processingTime,
+          finishReason: r.finishReason,
+          reasoningTokens: r.reasoningTokens
+        })),
+        batchErrors: batchErrors.length > 0 ? batchErrors : undefined,
+        mergeStats: mergeStats
+      }
+      
+      // Aggregate token usage across all batches
+      const totalTokens = batchResults.reduce((sum, r) => {
+        return sum + (r.tokenUsage?.total_tokens || 0)
+      }, 0)
+      const totalPromptTokens = batchResults.reduce((sum, r) => {
+        return sum + (r.tokenUsage?.prompt_tokens || 0)
+      }, 0)
+      const totalCompletionTokens = batchResults.reduce((sum, r) => {
+        return sum + (r.tokenUsage?.completion_tokens || 0)
+      }, 0)
+      const totalReasoningTokens = batchResults.reduce((sum, r) => {
+        return sum + (r.reasoningTokens || 0)
+      }, 0)
+      
+      analytics.groqApi = {
+        time: batchResults.reduce((sum, r) => sum + r.processingTime, 0),
+        inputTokens: totalPromptTokens || null,
+        outputTokens: totalCompletionTokens || null,
+        totalTokens: totalTokens || null,
+        finishReason: batchResults.every(r => r.finishReason === 'stop') ? 'stop' : 'mixed',
+        reasoningTokens: totalReasoningTokens || null
+      }
+      
+      console.log(`\n✅ Batching complete: ${fields.length} total fields from ${batchResults.length}/${batches.length} successful batches`)
+      if (hasPartialResults) {
+        console.warn(`⚠️ Partial results: ${batchErrors.length} batch(es) failed`)
+      }
+    } else {
+      // SINGLE REQUEST MODE (existing logic)
+      // Step 3: Combine OCR text from all pages
+      const combinedText = visionResults
+        .map((result, index) => `=== PAGE ${result.page} ===\n${result.text}`)
+        .join('\n\n')
+
+      // Step 4: Send to Groq API for field identification
+      console.log('🤖 Step 3: Sending OCR text to Groq API for field identification...')
+      const groqStartTime = Date.now()
+
+      // Build spatial context for Groq using extracted function
+      const spatialContextHint = buildSpatialContextHint(spatialBlocks)
+
+      // Use provided system message or default (text-focused prompt for OCR analysis)
+      // Note: defaultSystemMessage is already defined above, and we add spatialContextHint
+      // The single-request flow uses a longer system message with more detailed instructions
+      // (defaultSystemMessage already contains the basic task and privacy context, so we just add the extended instructions)
+      const extendedSystemMessage = defaultSystemMessage + spatialContextHint + `
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
 - "Phone (Work)" and "Phone (Other, please specify)" must be separate fields, even if both are phone inputs
@@ -680,18 +1234,14 @@ ${combinedText}
       groqUserMessage += `\n\nAdditional context: ${userMessage}`
     }
 
-    // Build request body - make reasoning_effort configurable
-    // Check request parameter first, then environment variable, default to true
-    const shouldUseReasoningEffort = useReasoningEffort !== undefined 
-      ? useReasoningEffort 
-      : (process.env.USE_REASONING_EFFORT !== 'false')
-    
+    // Build request body
+    // Note: reasoningEffortLevel is already defined above (shared with batching flow)
     const requestBody = {
       model: GROQ_MODEL,
       messages: [
         {
           role: 'system',
-          content: defaultSystemMessage
+          content: extendedSystemMessage
         },
         {
           role: 'user',
@@ -702,10 +1252,10 @@ ${combinedText}
       temperature: 0.1
     }
     
-    // Add reasoning_effort only if enabled
-    if (shouldUseReasoningEffort) {
-      requestBody.reasoning_effort = "low"  // Minimize reasoning token consumption
-      console.log('🔧 Using reasoning_effort: "low"')
+    // Add reasoning_effort if specified
+    if (reasoningEffortLevel) {
+      requestBody.reasoning_effort = reasoningEffortLevel
+      console.log(`🔧 Using reasoning_effort: "${reasoningEffortLevel}"`)
     } else {
       console.log('🔧 NOT using reasoning_effort parameter (baseline test)')
     }
@@ -788,54 +1338,12 @@ ${combinedText}
     
     let fields = []
 
-    // Helper function to sanitize and repair LLM-generated JSON
-    // Conservative approach: only fix obvious issues without breaking valid JSON
-    const sanitizeJSON = (jsonString) => {
-      let cleaned = jsonString
-      
-      // 1. Remove /* ... */ style comments
-      cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '')
-      
-      // 2. Remove // ... style comments (but preserve URLs like https://)
-      cleaned = cleaned.replace(/([^:])\/\/[^\n]*/g, '$1')
-      
-      // 3. Remove trailing commas before closing brackets/braces
-      // This is very common in LLM-generated JSON
-      cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1')
-      
-      // 4. Replace single quotes with double quotes (if used for strings)
-      // Only replace single quotes that appear to be string delimiters
-      // This is a simple heuristic and may not catch all cases
-      cleaned = cleaned.replace(/'([^']*)':/g, '"$1":')  // Property names
-      
-      // 5. CONSERVATIVE JSON REPAIR: Fix missing quotes before property names
-      // Pattern to fix: {propertyName": or ,propertyName": (missing opening quote)
-      // Example: otherPlaceholder": → "otherPlaceholder":
-      // This is very conservative - we check we're not inside a string by counting quotes
-      cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\":/g, (match, prefix, propName, offset) => {
-        // Count quotes before the property name to check if we're inside a string
-        const beforePropName = cleaned.substring(0, offset + prefix.length)
-        const quoteCount = (beforePropName.match(/"/g) || []).length
-        
-        // Check if property name is already quoted by looking at character right before it
-        const propNameStart = offset + prefix.length
-        const charBeforeProp = propNameStart > 0 ? cleaned[propNameStart - 1] : ''
-        const isAlreadyQuoted = charBeforeProp === '"'
-        
-        // If even number of quotes and not already quoted, safe to fix
-        if (quoteCount % 2 === 0 && !isAlreadyQuoted) {
-          return `${prefix}"${propName}":`
-        }
-        // Don't fix - might be inside a string or already quoted
-        return match
-      })
-      
-      return cleaned
-    }
+    // JSON repair function is now defined at module level (above) for reuse in batching
+    // Using the extracted repairJsonSyntax function
 
     try {
-      // Try to parse as JSON (sanitize first)
-      const cleaned = sanitizeJSON(responseText)
+      // Try to parse as JSON (repair first if enabled)
+      const cleaned = repairJsonSyntax(responseText, { logRepairs: true })
       const parsed = JSON.parse(cleaned)
       // Handle both { fields: [...] } and direct array
       fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
@@ -881,15 +1389,16 @@ ${combinedText}
       console.error('   - Unclosed braces:', hasUnclosedBraces)
       console.error('   - Unclosed quotes:', hasUnclosedQuotes)
       
-      // Log cleaned version for comparison
-      const cleaned = sanitizeJSON(responseText)
-      console.error('❌ Cleaned Response Length:', cleaned.length)
-      console.error('❌ Cleaned Response (first 500 chars):', cleaned.substring(0, 500))
+      // Log cleaned version for comparison (use original for context, repaired for length)
+      const cleanedForLogging = repairJsonSyntax(responseText, { logRepairs: false })
+      console.error('❌ Original Response Length:', responseText.length)
+      console.error('❌ Cleaned Response Length:', cleanedForLogging.length)
+      console.error('❌ Cleaned Response (first 500 chars):', cleanedForLogging.substring(0, 500))
       if (positionMatch) {
         const errorPos = parseInt(positionMatch[1])
         const cleanedContextStart = Math.max(0, errorPos - 200)
-        const cleanedContextEnd = Math.min(cleaned.length, errorPos + 200)
-        const cleanedContext = cleaned.substring(cleanedContextStart, cleanedContextEnd)
+        const cleanedContextEnd = Math.min(cleanedForLogging.length, errorPos + 200)
+        const cleanedContext = cleanedForLogging.substring(cleanedContextStart, cleanedContextEnd)
         const cleanedRelativePos = errorPos - cleanedContextStart
         console.error('❌ Cleaned Context around error:', cleanedContext.substring(0, cleanedRelativePos) + '>>>ERROR HERE<<<' + cleanedContext.substring(cleanedRelativePos))
       }
@@ -929,7 +1438,7 @@ ${combinedText}
       if (jsonMatch) {
         console.log('✅ Fallback extraction succeeded with pattern')
         try {
-          const cleaned = sanitizeJSON(jsonMatch[1])
+          const cleaned = repairJsonSyntax(jsonMatch[0], { logRepairs: true })
           const extracted = JSON.parse(cleaned)
           fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
         } catch (fallbackError) {
@@ -953,27 +1462,16 @@ ${combinedText}
 
     console.log(`✅ Successfully extracted ${fields.length} fields (with ids)`)
 
-    // Build analytics object
-    const analytics = {
-      visionApi: {
-        totalTime: visionTotalTime,
-        totalCharacters: totalCharacters,
-        perImage: visionResults.map(r => ({
-          page: r.page,
-          time: r.processingTime,
-          characters: r.text.length
-        }))
-      },
-      groqApi: {
-        time: groqTime,
-        inputTokens: groqUsage?.prompt_tokens || groqUsage?.input_tokens || null,
-        outputTokens: groqUsage?.completion_tokens || groqUsage?.output_tokens || null,
-        totalTokens: groqUsage?.total_tokens || null,
-        finishReason: finishReason,
-        reasoningTokens: groqUsage?.completion_tokens_details?.reasoning_tokens || null
-      },
-      totalTime: Date.now() - visionStartTime
+    // Update analytics object with Groq API data
+    analytics.groqApi = {
+      time: groqTime,
+      inputTokens: groqUsage?.prompt_tokens || groqUsage?.input_tokens || null,
+      outputTokens: groqUsage?.completion_tokens || groqUsage?.output_tokens || null,
+      totalTokens: groqUsage?.total_tokens || null,
+      finishReason: finishReason,
+      reasoningTokens: groqUsage?.completion_tokens_details?.reasoning_tokens || null
     }
+    analytics.totalTime = Date.now() - visionStartTime
 
     return res.json({
       success: true,
