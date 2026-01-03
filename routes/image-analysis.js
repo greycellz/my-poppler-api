@@ -1444,7 +1444,7 @@ ${combinedText}
         } catch (fallbackError) {
           console.error('❌ Fallback extraction also failed to parse JSON')
           console.error('❌ Fallback Error:', fallbackError.message)
-          console.error('❌ Extracted Match (first 500 chars):', jsonMatch[1].substring(0, 500))
+          console.error('❌ Extracted Match (first 500 chars):', jsonMatch[0].substring(0, 500))
           throw new Error(`Failed to parse Groq response as JSON - fallback extraction also failed: ${fallbackError.message}`)
         }
       } else {
@@ -1472,6 +1472,7 @@ ${combinedText}
       reasoningTokens: groqUsage?.completion_tokens_details?.reasoning_tokens || null
     }
     analytics.totalTime = Date.now() - visionStartTime
+    } // Close else block for single-request mode
 
     return res.json({
       success: true,
