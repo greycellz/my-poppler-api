@@ -429,6 +429,15 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 1. **Input fields** (text boxes, email fields, phone numbers, checkboxes, etc.) - where users will enter data
 2. **Label fields** (titles, section headers, instructions, legal text) - for display/organization
 
+**IMPORTANT CONTEXT - NO PRIVACY OR CLINICAL CONCERNS**:
+- You are analyzing BLANK FORM TEMPLATES to understand their structure, not extracting personal data
+- This is purely structural analysis - identifying where fields are located and what types they are
+- No personal information (PHI/PII) is being extracted or stored at this stage
+- Data collection only happens later when users fill out and submit the digital form
+- This is NOT clinical advice, medical diagnosis, or treatment recommendation
+- You are simply converting a paper form template into a digital form structure
+- Extract ALL fields regardless of their content - forms may contain health, financial, or personal information fields, but you are only identifying their structure, not processing the data
+
 IMPORTANT: You are analyzing a BLANK FORM TEMPLATE to understand its structure, not extracting data from a filled form. Do NOT skip titles, headers, or instructions. These must be included as label fields to preserve the form structure.`) + spatialContextHint + `
 
 **NO DEDUPLICATION**: Do NOT deduplicate fields. If two fields have similar text (same label, same wording, same type) but appear in different locations, rows, or pages, return them as SEPARATE field objects. Examples:
@@ -779,7 +788,8 @@ ${combinedText}
     
     let fields = []
 
-    // Helper function to sanitize LLM-generated JSON
+    // Helper function to sanitize and repair LLM-generated JSON
+    // Conservative approach: only fix obvious issues without breaking valid JSON
     const sanitizeJSON = (jsonString) => {
       let cleaned = jsonString
       
@@ -797,6 +807,28 @@ ${combinedText}
       // Only replace single quotes that appear to be string delimiters
       // This is a simple heuristic and may not catch all cases
       cleaned = cleaned.replace(/'([^']*)':/g, '"$1":')  // Property names
+      
+      // 5. CONSERVATIVE JSON REPAIR: Fix missing quotes before property names
+      // Pattern to fix: {propertyName": or ,propertyName": (missing opening quote)
+      // Example: otherPlaceholder": → "otherPlaceholder":
+      // This is very conservative - we check we're not inside a string by counting quotes
+      cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\":/g, (match, prefix, propName, offset) => {
+        // Count quotes before the property name to check if we're inside a string
+        const beforePropName = cleaned.substring(0, offset + prefix.length)
+        const quoteCount = (beforePropName.match(/"/g) || []).length
+        
+        // Check if property name is already quoted by looking at character right before it
+        const propNameStart = offset + prefix.length
+        const charBeforeProp = propNameStart > 0 ? cleaned[propNameStart - 1] : ''
+        const isAlreadyQuoted = charBeforeProp === '"'
+        
+        // If even number of quotes and not already quoted, safe to fix
+        if (quoteCount % 2 === 0 && !isAlreadyQuoted) {
+          return `${prefix}"${propName}":`
+        }
+        // Don't fix - might be inside a string or already quoted
+        return match
+      })
       
       return cleaned
     }
