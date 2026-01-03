@@ -1112,7 +1112,6 @@ router.post('/analyze-images', async (req, res) => {
 
       // Step 4: Send to Groq API for field identification
       console.log('🤖 Step 3: Sending OCR text to Groq API for field identification...')
-      const groqStartTime = Date.now()
 
       // Build spatial context for Groq using extracted function
       const spatialContextHint = buildSpatialContextHint(spatialBlocks)
