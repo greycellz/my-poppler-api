@@ -266,7 +266,10 @@ async function callGroqWithRetry(requestBody, context = '') {
   
   try {
     const parsed = JSON.parse(responseText)
+    console.log(`🔍 [DEBUG] ${context}Parsed JSON type:`, Array.isArray(parsed) ? 'array' : typeof parsed)
+    console.log(`🔍 [DEBUG] ${context}Parsed JSON keys:`, Array.isArray(parsed) ? `array[${parsed.length}]` : Object.keys(parsed || {}))
     fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
+    console.log(`🔍 [DEBUG] ${context}Extracted fields count:`, fields?.length || 0)
     parseSuccess = true
     console.log(`✅ ${context}First attempt - Direct JSON parse succeeded (no repair needed)`)
   } catch (error) {
@@ -1396,6 +1399,13 @@ ${combinedText}
     let { fields, groqUsage, groqTime, finishReason, groqData } = result
     
     console.log(`✅ Groq API completed in ${groqTime}ms`)
+    console.log(`🔍 [DEBUG] Fields from callGroqWithRetry: ${fields?.length || 0} fields`)
+    if (fields && fields.length > 0) {
+      console.log(`🔍 [DEBUG] First field sample:`, JSON.stringify(fields[0], null, 2))
+    } else {
+      console.log(`⚠️ [DEBUG] Fields array is empty or undefined!`)
+      console.log(`🔍 [DEBUG] Fields type:`, typeof fields, Array.isArray(fields))
+    }
     if (groqUsage) {
       console.log('📊 [DEBUG][Groq] Actual token usage:', JSON.stringify(groqUsage, null, 2))
     } else {
