@@ -220,6 +220,162 @@ function filterSpatialBlocksForBatch(spatialBlocks, batchPages) {
     }))
 }
 
+// Call Groq API with retry logic: if JSON parsing fails, retry once, then repair
+async function callGroqWithRetry(requestBody, context = '') {
+  const groqStartTime = Date.now()
+  
+  // First attempt
+  let groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(requestBody)
+  })
+
+  if (!groqResponse.ok) {
+    const errorData = await groqResponse.json().catch(() => ({}))
+    throw new Error(`Groq API error: ${groqResponse.status} - ${errorData.error?.message || 'Unknown error'}`)
+  }
+
+  let groqData = await groqResponse.json()
+  const choice = groqData.choices?.[0]
+  if (!choice) {
+    throw new Error('No response from Groq API')
+  }
+
+  const finishReason = choice.finish_reason
+  if (finishReason === 'length') {
+    console.warn(`⚠️ ${context}First attempt - Response truncated (finish_reason: length)`)
+  }
+
+  let responseText = choice.message?.content || ''
+  
+  // Check for empty content
+  if (!responseText) {
+    if (finishReason === 'length') {
+      throw new Error('Groq response truncated - content empty and finish_reason is "length". This indicates reasoning mode may have consumed all tokens.')
+    }
+    throw new Error('Groq response has no content - unable to extract fields')
+  }
+  
+  // Try to parse JSON without repair first
+  let parseSuccess = false
+  let fields = []
+  
+  try {
+    const parsed = JSON.parse(responseText)
+    fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
+    parseSuccess = true
+    console.log(`✅ ${context}First attempt - Direct JSON parse succeeded (no repair needed)`)
+  } catch (error) {
+    console.log(`⚠️ ${context}First attempt - JSON parse failed: ${error.message}`)
+  }
+
+  // If parsing failed, retry the LLM call once
+  if (!parseSuccess) {
+    console.log(`🔄 ${context}Retrying LLM call...`)
+    
+    const retryStartTime = Date.now()
+    groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    })
+
+    if (!groqResponse.ok) {
+      const errorData = await groqResponse.json().catch(() => ({}))
+      throw new Error(`Groq API retry error: ${groqResponse.status} - ${errorData.error?.message || 'Unknown error'}`)
+    }
+
+    groqData = await groqResponse.json()
+    const retryChoice = groqData.choices?.[0]
+    if (!retryChoice) {
+      throw new Error('No response from Groq API on retry')
+    }
+
+    const retryFinishReason = retryChoice.finish_reason
+    if (retryFinishReason === 'length') {
+      console.warn(`⚠️ ${context}Retry - Response truncated (finish_reason: length)`)
+    }
+
+    responseText = retryChoice.message?.content || ''
+    
+    // Check for empty content on retry
+    if (!responseText) {
+      if (retryFinishReason === 'length') {
+        throw new Error('Groq retry response truncated - content empty and finish_reason is "length"')
+      }
+      throw new Error('Groq retry response has no content - unable to extract fields')
+    }
+    
+    const retryTime = Date.now() - retryStartTime
+    console.log(`✅ ${context}Retry completed in ${retryTime}ms`)
+
+    // Try to parse retry response without repair
+    try {
+      const parsed = JSON.parse(responseText)
+      fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
+      parseSuccess = true
+      console.log(`✅ ${context}Retry - Direct JSON parse succeeded (no repair needed)`)
+    } catch (retryError) {
+      console.log(`⚠️ ${context}Retry - JSON parse also failed: ${retryError.message}`)
+      console.log(`🔧 ${context}Applying JSON repair as last resort...`)
+      
+      // Last resort: try repair
+      try {
+        const cleaned = repairJsonSyntax(responseText, { logRepairs: true })
+        const parsed = JSON.parse(cleaned)
+        fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
+        parseSuccess = true
+        console.log(`✅ ${context}JSON repair succeeded`)
+      } catch (repairError) {
+        // Try fallback extraction with repair
+        let jsonMatch = responseText.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/)
+        if (!jsonMatch) {
+          jsonMatch = responseText.match(/(\[[\s\S]*\])/)
+        }
+        if (!jsonMatch) {
+          jsonMatch = responseText.match(/(\{[\s\S]*?"fields"[\s\S]*?\})/)
+        }
+        
+        if (jsonMatch) {
+          try {
+            const cleaned = repairJsonSyntax(jsonMatch[0], { logRepairs: true })
+            const extracted = JSON.parse(cleaned)
+            fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
+            parseSuccess = true
+            console.log(`✅ ${context}Fallback extraction with repair succeeded`)
+          } catch (fallbackError) {
+            throw new Error(`Failed to parse Groq response after retry and repair: ${fallbackError.message}`)
+          }
+        } else {
+          throw new Error(`Failed to parse Groq response - no valid JSON found after retry and repair`)
+        }
+      }
+    }
+  }
+
+  const groqTime = Date.now() - groqStartTime
+  // Use the final groqData (from retry if retry happened, otherwise from first attempt)
+  const finalChoice = groqData.choices?.[0]
+  const groqUsage = groqData.usage || groqData.usage_metadata || null
+  // Use finish_reason from final response (retry if retry happened, otherwise first attempt)
+  const finalFinishReason = finalChoice?.finish_reason || finishReason || null
+
+  return {
+    fields,
+    groqUsage,
+    groqTime,
+    finishReason: finalFinishReason,
+    groqData
+  }
+}
+
 // Build spatial context hint for LLM
 function buildSpatialContextHint(spatialBlocks, maxSampleBlocks = 50) {
   const sampleBlocks = spatialBlocks.slice(0, maxSampleBlocks)
@@ -398,14 +554,28 @@ const repairJsonSyntax = (jsonString, options = {}) => {
   }
 
   // STEP 3: Fix Missing Colon/Value Pattern
-  // Only match property names immediately after object start {, NOT in arrays or after commas
-  // This avoids matching array values like "No", in ["Yes", "No", ...]
-  // Conservative approach: only fix obvious cases like { "propertyName",
+  // Match property names in object contexts, NOT array values
+  // Fixes: { "propertyName", and { "prop1": "value", "prop2",
+  // Avoids: ["Yes", "No", (array values)
   if (repairSteps.fixMissingColonValue) {
     const before = cleaned
-    // Match: "propertyName", only when immediately preceded by { (object start)
-    // This is conservative but safe - avoids corrupting array values
+    // Strategy: Match "propertyName", in two contexts:
+    // 1. After { (object start): { "prop",
+    // 2. After , that follows an object property value (not array element)
+    //    We match after: "value", "prop", OR }, "prop", OR number/boolean/null, "prop",
+    //    But NOT ], "prop", (to avoid array values)
+    
+    // Pattern 1: { "propertyName",
     cleaned = cleaned.replace(/\{\s*"([a-zA-Z_][a-zA-Z0-9_]*)"\s*,(\s*)(?="|{|\[|\n|$)/g, '{ "$1": "",$2')
+    
+    // Pattern 2: , "propertyName", after a value that's an object property
+    // Match after: "string", "prop", OR }, "prop", OR number/boolean/null, "prop",
+    // Exclude: ], "prop", (array end) - we explicitly don't match after ]
+    // We match the value pattern before the comma to ensure context
+    // Note: ["}] matches ", }, but NOT ] (] closes the class, so it's not included)
+    // For numbers, we match digits (including decimals and negatives)
+    cleaned = cleaned.replace(/(["}]|-?\d+\.?\d*|true|false|null)\s*,\s*"([a-zA-Z_][a-zA-Z0-9_]*)"\s*,(\s*)(?="|{|\[|\n|$)/g, '$1, "$2": "",$3')
+    
     if (before !== cleaned) {
       appliedRepairs.push('fixMissingColonValue')
     }
@@ -600,70 +770,16 @@ ${combinedText}
     requestBody.reasoning_effort = reasoningEffortLevel
   }
   
-  // Call Groq API
-  const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(requestBody)
-  })
+  // Call Groq API with retry logic
+  const context = `Batch (pages ${batchPages.join(',')}) - `
+  const result = await callGroqWithRetry(requestBody, context)
   
-  if (!groqResponse.ok) {
-    const errorData = await groqResponse.json().catch(() => ({}))
-    throw new Error(`Groq API error: ${groqResponse.status} - ${errorData.error?.message || 'Unknown error'}`)
-  }
+  const { fields, groqUsage, groqTime, finishReason } = result
   
-  const groqData = await groqResponse.json()
-  const groqTime = Date.now() - batchStartTime
-  
-  // Extract Groq API usage metadata
-  const groqUsage = groqData.usage || groqData.usage_metadata || null
-  const choice = groqData.choices?.[0]
-  if (!choice) {
-    throw new Error('No response from Groq API')
-  }
-  
-  const finishReason = choice.finish_reason
-  if (!choice.message?.content) {
-    if (finishReason === 'length') {
-      throw new Error('Groq response truncated - content empty and finish_reason is "length". This indicates reasoning mode may have consumed all tokens.')
-    }
-    throw new Error('Groq response has no content - unable to extract fields')
-  }
-  
-  const responseText = choice.message?.content || ''
-  let fields = []
-  
-  // Parse JSON with repair (using extracted repairJsonSyntax function)
-  try {
-    const cleaned = repairJsonSyntax(responseText, { logRepairs: true })
-    const parsed = JSON.parse(cleaned)
-    fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
-    console.log(`✅ Batch (pages ${batchPages.join(',')}) - Direct JSON parse succeeded, extracted ${fields.length} fields`)
-    if (fields.length === 0) {
-      console.warn(`⚠️ Batch (pages ${batchPages.join(',')}) - No fields extracted (may be valid for blank pages)`)
-    }
-  } catch (parseError) {
-    // Try fallback extraction
-    const jsonMatch = responseText.match(/\[[\s\S]*\]/)
-    if (jsonMatch) {
-      try {
-        const cleaned = repairJsonSyntax(jsonMatch[0], { logRepairs: true })
-        const extracted = JSON.parse(cleaned)
-        fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
-        console.log(`✅ Batch (pages ${batchPages.join(',')}) - Fallback JSON extraction succeeded, extracted ${fields.length} fields`)
-        if (fields.length === 0) {
-          console.warn(`⚠️ Batch (pages ${batchPages.join(',')}) - No fields extracted (may be valid for blank pages)`)
-        }
-      } catch (fallbackError) {
-        console.error(`❌ Batch (pages ${batchPages.join(',')}) - All parsing attempts failed`)
-        throw new Error(`Failed to parse Groq response as JSON - no valid JSON found in response`)
-      }
-    } else {
-      throw new Error(`Failed to parse Groq response as JSON - no valid JSON found in response`)
-    }
+  if (fields.length === 0) {
+    console.warn(`⚠️ ${context}No fields extracted (may be valid for blank pages)`)
+  } else {
+    console.log(`✅ ${context}Extracted ${fields.length} fields`)
   }
   
   const analytics = {
@@ -1273,59 +1389,21 @@ ${combinedText}
       console.log('🔧 NOT using reasoning_effort parameter (baseline test)')
     }
     
-        // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
-        // Prompt explicitly requests JSON array output
+    // Note: Removed response_format - Groq doesn't support it and it was causing 400 errors
+    // Prompt explicitly requests JSON array output
     
-    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    })
-
-    if (!groqResponse.ok) {
-      const errorData = await groqResponse.json().catch(() => ({}))
-      throw new Error(`Groq API error: ${groqResponse.status} - ${errorData.error?.message || 'Unknown error'}`)
-    }
-
-    const groqData = await groqResponse.json()
-    const groqTime = Date.now() - groqStartTime
-
-    // Extract Groq API usage metadata
-    const groqUsage = groqData.usage || groqData.usage_metadata || null
+    // Call Groq API with retry logic
+    const result = await callGroqWithRetry(requestBody, '')
+    const { fields, groqUsage, groqTime, finishReason, groqData } = result
+    
     console.log(`✅ Groq API completed in ${groqTime}ms`)
     if (groqUsage) {
       console.log('📊 [DEBUG][Groq] Actual token usage:', JSON.stringify(groqUsage, null, 2))
     } else {
       console.log('📊 [DEBUG][Groq] No usage field returned in response')
     }
-
-    // Parse Groq response
-    const choice = groqData.choices?.[0]
-    if (!choice) {
-      throw new Error('No response from Groq API')
-    }
-
-    // Check if response was truncated due to token limit
-    const finishReason = choice.finish_reason
-    console.log(`🏁 Groq finish_reason: ${finishReason}`)
     
-    // Debug: Log the entire choice object if content is missing
-    if (!choice.message?.content) {
-      console.error('❌ Groq response has no content!')
-      console.error('📋 Full choice object:', JSON.stringify(choice, null, 2))
-      console.error('📋 Full groqData:', JSON.stringify(groqData, null, 2))
-      
-      // If finish_reason is "length", this is likely a reasoning mode issue
-      if (finishReason === 'length') {
-        throw new Error('Groq response truncated - content empty and finish_reason is "length". This indicates reasoning mode may have consumed all tokens.')
-      }
-      
-      // Otherwise, throw generic error
-      throw new Error('Groq response has no content - unable to extract fields')
-    }
+    console.log(`🏁 Groq finish_reason: ${finishReason}`)
     
     if (finishReason === 'length') {
       console.warn('⚠️ WARNING: Groq response was truncated due to max_completion_tokens limit!')
@@ -1333,138 +1411,14 @@ ${combinedText}
     }
 
     // Check if reasoning mode is accidentally enabled (should be disabled)
-    if (choice.message?.reasoning) {
+    const choice = groqData.choices?.[0]
+    if (choice?.message?.reasoning) {
       console.warn('⚠️ WARNING: Reasoning mode detected - this should be disabled!')
       const reasoningLength = typeof choice.message.reasoning === 'string' 
         ? choice.message.reasoning.length 
         : JSON.stringify(choice.message.reasoning).length
       console.warn('⚠️ Reasoning field length:', reasoningLength, 'characters')
       console.warn('⚠️ Reasoning mode may be enabled by default for this model - consider using a different model or contact Groq support')
-    }
-
-    const responseText = choice.message?.content || ''
-    
-    // Log response for debugging
-    console.log('🔍 Groq Response Length:', responseText.length)
-    console.log('🔍 Groq Response (first 500 chars):', responseText.substring(0, 500))
-    console.log('🔍 Groq Response (last 200 chars):', responseText.substring(Math.max(0, responseText.length - 200)))
-    
-    let fields = []
-
-    // JSON repair function is now defined at module level (above) for reuse in batching
-    // Using the extracted repairJsonSyntax function
-
-    try {
-      // Try to parse as JSON (repair first if enabled)
-      const cleaned = repairJsonSyntax(responseText, { logRepairs: true })
-      const parsed = JSON.parse(cleaned)
-      // Handle both { fields: [...] } and direct array
-      fields = Array.isArray(parsed) ? parsed : (parsed.fields || [])
-      console.log('✅ Direct JSON parse succeeded')
-    } catch (parseError) {
-      // HEAVY ERROR LOGGING FOR JSON PARSING FAILURES
-      console.error('❌ ========== JSON PARSING ERROR DETAILS ==========')
-      console.error('❌ Parse Error Message:', parseError.message)
-      console.error('❌ Parse Error Stack:', parseError.stack)
-      
-      // Extract error position if available
-      const positionMatch = parseError.message.match(/position (\d+)/)
-      if (positionMatch) {
-        const errorPos = parseInt(positionMatch[1])
-        console.error('❌ Error Position:', errorPos)
-        console.error('❌ Response Length:', responseText.length)
-        console.error('❌ Characters before error:', errorPos)
-        console.error('❌ Characters after error:', responseText.length - errorPos)
-        
-        // Show context around error (200 chars before and after)
-        const contextStart = Math.max(0, errorPos - 200)
-        const contextEnd = Math.min(responseText.length, errorPos + 200)
-        const context = responseText.substring(contextStart, contextEnd)
-        const relativePos = errorPos - contextStart
-        
-        console.error('❌ Context around error position:')
-        console.error('   ' + context.substring(0, relativePos) + '>>>ERROR HERE<<<' + context.substring(relativePos))
-        console.error('❌ Character at error position:', JSON.stringify(responseText[errorPos]))
-        console.error('❌ Characters around error:', JSON.stringify(responseText.substring(Math.max(0, errorPos - 10), Math.min(responseText.length, errorPos + 10))))
-      }
-      
-      // Log response structure details
-      console.error('❌ Response Text Length:', responseText.length)
-      console.error('❌ Response starts with:', JSON.stringify(responseText.substring(0, 100)))
-      console.error('❌ Response ends with:', JSON.stringify(responseText.substring(Math.max(0, responseText.length - 100))))
-      
-      // Check for common JSON issues
-      const hasUnclosedBrackets = (responseText.match(/\[/g) || []).length !== (responseText.match(/\]/g) || []).length
-      const hasUnclosedBraces = (responseText.match(/\{/g) || []).length !== (responseText.match(/\}/g) || []).length
-      const hasUnclosedQuotes = (responseText.match(/"/g) || []).length % 2 !== 0
-      console.error('❌ JSON Structure Issues:')
-      console.error('   - Unclosed brackets:', hasUnclosedBrackets)
-      console.error('   - Unclosed braces:', hasUnclosedBraces)
-      console.error('   - Unclosed quotes:', hasUnclosedQuotes)
-      
-      // Log cleaned version for comparison (use original for context, repaired for length)
-      const cleanedForLogging = repairJsonSyntax(responseText, { logRepairs: false })
-      console.error('❌ Original Response Length:', responseText.length)
-      console.error('❌ Cleaned Response Length:', cleanedForLogging.length)
-      console.error('❌ Cleaned Response (first 500 chars):', cleanedForLogging.substring(0, 500))
-      if (positionMatch) {
-        const errorPos = parseInt(positionMatch[1])
-        const cleanedContextStart = Math.max(0, errorPos - 200)
-        const cleanedContextEnd = Math.min(cleanedForLogging.length, errorPos + 200)
-        const cleanedContext = cleanedForLogging.substring(cleanedContextStart, cleanedContextEnd)
-        const cleanedRelativePos = errorPos - cleanedContextStart
-        console.error('❌ Cleaned Context around error:', cleanedContext.substring(0, cleanedRelativePos) + '>>>ERROR HERE<<<' + cleanedContext.substring(cleanedRelativePos))
-      }
-      
-      // Log full groqData structure for debugging
-      console.error('❌ Full Groq Response Structure:')
-      console.error(JSON.stringify(groqData, null, 2))
-      console.error('❌ Choice Object:')
-      console.error(JSON.stringify(choice, null, 2))
-      console.error('❌ Choice Message:')
-      console.error(JSON.stringify(choice.message, null, 2))
-      console.error('❌ ================================================')
-      
-      console.log('⚠️ Direct JSON parse failed, trying fallback extraction...')
-      
-      // Try multiple fallback patterns
-      let jsonMatch = null
-      
-      // Pattern 1: Markdown-wrapped array
-      jsonMatch = responseText.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/)
-      
-      // Pattern 2: Markdown-wrapped object with fields
-      if (!jsonMatch) {
-        jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?"fields"[\s\S]*?\})\s*```/)
-      }
-      
-      // Pattern 3: Plain array anywhere in text
-      if (!jsonMatch) {
-        jsonMatch = responseText.match(/(\[[\s\S]*\])/)
-      }
-      
-      // Pattern 4: Plain object with fields
-      if (!jsonMatch) {
-        jsonMatch = responseText.match(/(\{[\s\S]*?"fields"[\s\S]*?\})/)
-      }
-      
-      if (jsonMatch) {
-        console.log('✅ Fallback extraction succeeded with pattern')
-        try {
-          const cleaned = repairJsonSyntax(jsonMatch[0], { logRepairs: true })
-        const extracted = JSON.parse(cleaned)
-        fields = Array.isArray(extracted) ? extracted : (extracted.fields || [])
-        } catch (fallbackError) {
-          console.error('❌ Fallback extraction also failed to parse JSON')
-          console.error('❌ Fallback Error:', fallbackError.message)
-          console.error('❌ Extracted Match (first 500 chars):', jsonMatch[0].substring(0, 500))
-          throw new Error(`Failed to parse Groq response as JSON - fallback extraction also failed: ${fallbackError.message}`)
-        }
-      } else {
-        console.error('❌ All parsing attempts failed')
-        console.error('❌ Response text (full):', responseText)
-        throw new Error('Failed to parse Groq response as JSON - no valid JSON found in response')
-      }
     }
 
     // Add id field for frontend compatibility
