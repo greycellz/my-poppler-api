@@ -272,7 +272,7 @@ async function callGroqWithRetry(requestBody, context = '') {
     console.log(`🔍 [DEBUG] ${context}Extracted fields count:`, fields?.length || 0)
     parseSuccess = true
     console.log(`✅ ${context}First attempt - Direct JSON parse succeeded (no repair needed)`)
-  } catch (error) {
+        } catch (error) {
     console.log(`⚠️ ${context}First attempt - JSON parse failed: ${error.message}`)
   }
 
@@ -381,9 +381,9 @@ async function callGroqWithRetry(requestBody, context = '') {
 
 // Build spatial context hint for LLM
 function buildSpatialContextHint(spatialBlocks, maxSampleBlocks = 50) {
-  const sampleBlocks = spatialBlocks.slice(0, maxSampleBlocks)
+    const sampleBlocks = spatialBlocks.slice(0, maxSampleBlocks)
   return sampleBlocks.length > 0 
-    ? `
+      ? `
 
 **SPATIAL LAYOUT DATA** (Sample for Context Only):
 Below are ${maxSampleBlocks} representative text blocks from ${spatialBlocks.length} total blocks. These are provided as CONTEXT ONLY to help you understand text sizes and layout patterns. DO NOT create a field for every block listed here. Instead, use this spatial information to inform your classification when identifying form fields from the OCR TEXT below.
@@ -480,7 +480,7 @@ Example 3 - Instructions (Block 2: "Please complete all sections..." at y:302, h
 - Mix label and input fields in the order they appear vertically on the page
 - DO NOT skip titles, headers, or instructions - they are essential for form structure
 `
-    : ''
+      : ''
 }
 
 // Update system message with batch context
@@ -964,6 +964,10 @@ router.post('/analyze-images', async (req, res) => {
 
     // Step 3: Process with batching or single request
     let fields = []
+    let groqUsage = null
+    let groqTime = null
+    let finishReason = null
+    let groqData = null
     let analytics = {
       visionApi: {
         time: visionTotalTime,
@@ -1381,7 +1385,11 @@ ${combinedText}
     
     // Call Groq API with retry logic
     const result = await callGroqWithRetry(requestBody, '')
-    ({ fields, groqUsage, groqTime, finishReason, groqData } = result)
+    fields = result.fields
+    groqUsage = result.groqUsage
+    groqTime = result.groqTime
+    finishReason = result.finishReason
+    groqData = result.groqData
     
     console.log(`✅ Groq API completed in ${groqTime}ms`)
     console.log(`🔍 [DEBUG] Fields from callGroqWithRetry: ${fields?.length || 0} fields`)
