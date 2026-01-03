@@ -372,6 +372,11 @@ Return ONLY a JSON array with this exact structure:
     if (error.stack) {
       console.error('Stack trace:', error.stack)
     }
+    // In multi-run mode, throw error to be caught by caller
+    // In single-run mode, exit process
+    if (process.env.NUM_RUNS && parseInt(process.env.NUM_RUNS) > 1) {
+      throw error
+    }
     process.exit(1)
   }
 }
